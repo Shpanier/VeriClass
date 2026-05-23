@@ -1,0 +1,112 @@
+exercise_id: ex3-mcalc
+title_he: "mcalc — מחשבון אריתמטי מובנה"
+title_en: "mcalc — Built-in Arithmetic Calculator"
+default_mode: mentor
+
+brief_md: |
+  In this exercise you will build a built-in command called `mcalc`
+  inside your mini-shell. It takes a single string argument: an
+  arithmetic expression. It parses the expression, computes the
+  result, and prints the integer result to stdout.
+
+  Example:
+
+      mcalc "3 + 4 * 2"
+      11
+
+  Your `mcalc` must respect operator precedence (`*` and `/` before
+  `+` and `-`) and the specific parameters of your assigned variant
+  (operators allowed, parentheses allowed, maximum number). Errors
+  must use the exact format described under `required_error_strings`
+  — the grader checks bytes, not meaning.
+
+variants:
+  - id: V-A1
+    params:
+      max_number: 100
+      operators: ["+", "-", "*", "/"]
+      allow_parens: false
+    test_inputs:
+      - { input: "2 + 3", expected_output: "5" }
+      - { input: "50 * 3", expected_output: "Error: result out of range" }
+      - { input: "10 / 0", expected_output: "Error: division by zero" }
+
+  - id: V-A2
+    params:
+      max_number: 1000
+      operators: ["+", "-", "*", "/", "%"]
+      allow_parens: true
+    test_inputs:
+      - { input: "(3 + 4) * 2", expected_output: "14" }
+      - { input: "999 * 999", expected_output: "Error: result out of range" }
+      - { input: "17 % 5", expected_output: "2" }
+
+  - id: V-A3
+    params:
+      max_number: 500
+      operators: ["+", "-", "*", "/"]
+      allow_parens: true
+    test_inputs:
+      - { input: "(10 - 2) * 5", expected_output: "40" }
+      - { input: "501 + 0", expected_output: "Error: result out of range" }
+      - { input: "20 / 0", expected_output: "Error: division by zero" }
+
+  - id: V-A4
+    params:
+      max_number: 2000
+      operators: ["+", "-", "*"]
+      allow_parens: false
+    test_inputs:
+      - { input: "100 * 20", expected_output: "2000" }
+      - { input: "100 * 21", expected_output: "Error: result out of range" }
+      - { input: "7 / 1", expected_output: "Error: invalid expression" }
+
+  - id: V-A5
+    params:
+      max_number: 100
+      operators: ["+", "-", "*", "/", "%"]
+      allow_parens: false
+    test_inputs:
+      - { input: "97 % 13", expected_output: "6" }
+      - { input: "50 + 51", expected_output: "Error: result out of range" }
+      - { input: "9 / 0", expected_output: "Error: division by zero" }
+
+  - id: V-A6
+    params:
+      max_number: 10000
+      operators: ["+", "-", "*", "/"]
+      allow_parens: true
+    test_inputs:
+      - { input: "(2 + 3) * (4 + 1)", expected_output: "25" }
+      - { input: "100 * 101", expected_output: "Error: result out of range" }
+      - { input: "100 / 0", expected_output: "Error: division by zero" }
+
+  - id: V-A7
+    params:
+      max_number: 255
+      operators: ["+", "-", "*", "/", "%"]
+      allow_parens: true
+    test_inputs:
+      - { input: "(200 + 55)", expected_output: "255" }
+      - { input: "200 + 56", expected_output: "Error: result out of range" }
+      - { input: "255 % 7", expected_output: "3" }
+
+  - id: V-A8
+    params:
+      max_number: 100
+      operators: ["+", "-", "*"]
+      allow_parens: true
+    test_inputs:
+      - { input: "(2 + 3) * 4", expected_output: "20" }
+      - { input: "11 * 10", expected_output: "Error: result out of range" }
+      - { input: "5 / 1", expected_output: "Error: invalid expression" }
+
+welcome_suggestions:
+  - "Explain how to parse an arithmetic expression"
+  - "What's the difference between recursive descent and Shunting-yard?"
+  - "Give me a skeleton for the main function"
+
+required_error_strings:
+  - "Error: division by zero\n"
+  - "Error: result out of range\n"
+  - "Error: invalid expression\n"

@@ -1,0 +1,119 @@
+import { useEffect, useState } from "react";
+import { api } from "../api";
+import type { ProbeSuggestion, Student } from "../types";
+
+interface Props {
+  student: Student;
+  onClose: () => void;
+  onSent: () => void;
+}
+
+export function AskThemModal({ student, onClose, onSent }: Props) {
+  const [suggestions, setSuggestions] = useState<ProbeSuggestion[]>([]);
+  const [edited, setEdited] = useState<Record<number, string>>({});
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [own, setOwn] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const fetchSuggestions = () => {
+    setLoading(true);
+    api
+      .suggestProbes(student.session_id)
+      .then((s) => {
+        setSuggestions(s);
+        setLoading(false);
+      })
+      .catch((e) => {
+        console.error(e);
+        setLoading(false);
+      });
+  };
+
+  useEffect(fetchSuggestions, [student.session_id]);
+
+  const send = async () => {
+    const bodies: string[] = [];
+    picked.forEach((i) => bodies.push(edited[i] ?? suggestions[i].body));
+    if (own.trim()) bodies.push(own.trim());
+    if (bodies.length === 0) return;
+    await api.sendProbes(student.session_id, bodies, picked.size > 0 ? "suggested" : "manual");
+    onSent();
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "grid",
+        placeItems: "center",
+        zIndex: 100,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: "white", padding: 24, borderRadius: 8, width: 720, maxHeight: "80vh", overflow: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 style={{ marginTop: 0 }}>
+          Targeted question for {student.username} · {student.variant}
+        </h3>
+
+        {loading && <p>⏳ Generating suggestions from cloud LLM…</p>}
+
+        {suggestions.map((s, i) => (
+          <div key={i} style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, marginBottom: 8 }}>
+            <label style={{ display: "flex", alignItems: "start", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={picked.has(i)}
+                onChange={(e) => {
+                  const next = new Set(picked);
+                  if (e.target.checked) next.add(i);
+                  else next.delete(i);
+                  setPicked(next);
+                }}
+              />
+              <div style={{ flex: 1 }}>
+                <div>
+                  <strong>[{s.kind}]</strong>
+                </div>
+                <textarea
+                  value={edited[i] ?? s.body}
+                  onChange={(e) => setEdited({ ...edited, [i]: e.target.value })}
+                  style={{ width: "100%", minHeight: 60, marginTop: 4 }}
+                />
+                <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{s.rationale}</div>
+              </div>
+            </label>
+          </div>
+        ))}
+
+        <button onClick={fetchSuggestions} disabled={loading} style={{ marginRight: 8 }}>
+          Suggest more
+        </button>
+
+        <hr />
+        <label>
+          Write your own question:
+          <textarea
+            value={own}
+            onChange={(e) => setOwn(e.target.value)}
+            style={{ width: "100%", minHeight: 50, marginTop: 4 }}
+          />
+        </label>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+          <button onClick={onClose}>Cancel</button>
+          <button
+            onClick={send}
+            style={{ background: "#f97316", color: "white", border: "none", padding: "8px 16px", borderRadius: 6 }}
+          >
+            Send {picked.size + (own.trim() ? 1 : 0)} question(s)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
