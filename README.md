@@ -1,5 +1,7 @@
 # OS Lab — Instructor-Controlled LLM for CS Education
 
+> English version · [גרסה עברית](README.he.md)
+
 A locally-hosted LLM lab platform built for the *Intro to Operating Systems*
 course at JCE. Students chat with a small local language model while working on
 a programming exercise; the instructor watches every session in real time and
@@ -9,6 +11,11 @@ answer before it reaches the student.
 
 The repo ships with a working demo exercise (`ex3-mcalc`, 8 variants) so the
 whole stack is usable the moment it's installed — zero configuration.
+
+Students reach the tutor through either of two interchangeable clients against
+the same backend: a **Chainlit web app** (a browser tab) or a **CLion plugin**
+that embeds the same login → briefing → chat → probes flow in a tool window next
+to their code. See [Alternative student client: the CLion plugin](#alternative-student-client-the-clion-plugin).
 
 ---
 
@@ -115,7 +122,14 @@ in the variant-generation prompt (`backend/variants_gen.py`).
 | 2 | Cloud LLM        | Gemini 2.5 / OpenAI / Claude | —   |
 | 3 | Backend          | FastAPI + SQLite (WAL)     | 8000  |
 | 4 | Student app      | Chainlit                   | 8001  |
+| 4b| Student app (alt)| CLion plugin (Kotlin)      | in-IDE|
 | 5 | Instructor dash  | React + Vite + TypeScript  | 5173  |
+
+The student has **two interchangeable clients** for the same backend: the
+Chainlit web app (component 4) and a **CLion plugin** (4b) that puts the same
+login → briefing → chat → probes flow inside the IDE. See
+[*Alternative student client: the CLion plugin*](#alternative-student-client-the-clion-plugin)
+and [`clion_plugin/README.md`](clion_plugin/README.md).
 
 The local LLM is the only path that sees student messages. The cloud LLM is
 used **only** for instructor-side probe suggestion (`/api/probe/suggest`),
@@ -151,6 +165,8 @@ Demo students after seeding:
 | Ahmed Alyan  | STU3-XXXX   |
 
 Students go to `http://localhost:8001`, instructor to `http://localhost:5173`.
+Prefer the IDE? Skip the browser and use the CLion plugin client instead — see
+[Alternative student client: the CLion plugin](#alternative-student-client-the-clion-plugin).
 
 ---
 
@@ -254,6 +270,43 @@ Students cannot see other students' work, swap variants, or bypass probes.
 The chat is rate-limited via prompt-injection denylist phrases in
 `backend/routes/ask.py`.
 
+This experience is identical whether the student uses the Chainlit web app or
+the CLion plugin. In the plugin's `ide` mode (see below), steps 1–5 are the same,
+and the plugin additionally drops a starter `mcalc.c` into their project and
+shows their test inputs as a checklist.
+
+---
+
+## Alternative student client: the CLion plugin
+
+Students in this course already write their C in CLion. The
+[`clion_plugin/`](clion_plugin/) directory is a JetBrains plugin that embeds the
+*entire* student client in a CLion tool window, so they never leave the IDE to
+talk to the tutor. It uses the same six backend endpoints as Chainlit — the
+backend is unchanged except for one tiny read-only endpoint
+(`GET /api/client-config`) that exposes the behavior switch below.
+
+It ships **two behaviors in one plugin**, and the instructor picks which one via
+**a single `.env` variable on the backend** (so every student is controlled from
+one place — it is *not* a per-student plugin setting):
+
+| `.env`                       | Plugin behavior |
+|------------------------------|-----------------|
+| `STUDENT_CLIENT_MODE=chat`   | Faithful chat port — login, briefing, streaming chat, suggestion chips, probes. Same as Chainlit, in a tool window. |
+| `STUDENT_CLIENT_MODE=ide`    | Everything in `chat`, **plus** it scaffolds the student's assigned variant as a starter `mcalc.c` in their project and shows the variant's required test inputs as a checklist. |
+
+Build & run (full details in [`clion_plugin/README.md`](clion_plugin/README.md)):
+
+```bash
+cd clion_plugin
+gradle wrapper --gradle-version 8.10.2   # one-time, generates the wrapper jar
+./gradlew runIde                         # launches a sandbox CLion with the plugin
+```
+
+In the sandbox, set the backend URL under **Settings → Tools → OS Lab**, open the
+**OS Lab** tool window, and log in with a course code. Chainlit and the plugin can
+be used at the same time against the same backend.
+
 ---
 
 ## Designing new exercises
@@ -340,6 +393,15 @@ backend/                     # FastAPI app
 student_app/
   app.py                     # Chainlit student UI (login + chat + probes)
 
+clion_plugin/                # alternative student client: a CLion/JetBrains plugin
+  build.gradle.kts           # IntelliJ Platform Gradle build (targets CLion)
+  src/main/kotlin/edu/jce/oslab/
+    api/                     # DTOs + HTTP/streaming client over the 6 endpoints
+    ui/                      # tool window, login, briefing, chat, checklist
+    probe/                   # 2s probe poller + answer dialog
+    ide/                     # `ide` mode: scaffold mcalc.c into the project
+    settings/, util/
+
 dashboard/
   src/App.tsx                # student grid + modals + review queue
   src/components/            # StudentGrid, ChatViewModal, AskThemModal,
@@ -368,6 +430,8 @@ scripts/
 | `DB_PATH`             | `./oslab.db` by default.                                      |
 | `AUDIT_AES_KEY`       | 32-byte base64 key for encrypting raw cloud-LLM payloads.     |
 | `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only).   |
+| `STUDENT_CLIENT_MODE` | CLion plugin behavior: `chat` (default) or `ide`. Ignored by Chainlit. |
+| `SCAFFOLD_FILENAME`   | File the plugin's `ide` mode scaffolds into the project. Default `mcalc.c`. |
 
 `config/cloud_llm.yaml` picks the provider and model used for
 instructor-side suggestions. Keep this in sync with the API key you set.
