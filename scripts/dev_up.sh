@@ -55,4 +55,8 @@ cat <<MSG
     backend     http://127.0.0.1:8000
     student app http://127.0.0.1:8001
     dashboard   http://127.0.0.1:5173
+
+    Alternative student client: the CLion plugin (clion_plugin/).
+    Behavior is set by STUDENT_CLIENT_MODE in .env (chat | ide).
+    Run it with:  cd clion_plugin && ./gradlew runIde
 MSG

@@ -12,7 +12,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend import db, exercises
-from backend.routes import ask, exercises as ex_routes, login, mode, probes, review, sessions, students
+from backend.routes import (
+    ask,
+    client_config,
+    exercises as ex_routes,
+    login,
+    mode,
+    probes,
+    review,
+    sessions,
+    students,
+)
 
 # Silence the noisy per-request access log (polling hits /api/students and
 # /api/probes/pending every 2-3 seconds and floods the terminal). Warnings
@@ -54,6 +64,7 @@ app.include_router(probes.router, prefix="/api")
 app.include_router(students.router, prefix="/api")
 app.include_router(mode.router, prefix="/api")
 app.include_router(review.router, prefix="/api")
+app.include_router(client_config.router, prefix="/api")
 
 
 @app.get("/healthz")
