@@ -1,7 +1,8 @@
-"""Gemini backend for the student-facing chat. Opt-in via STUDENT_LLM=gemini.
+"""Gemini backend for the direct (non-review) student chat.
 
-Privacy note: when enabled, student messages leave the local network. Default
-remains Ollama. Used during dev for speed; flip off before the pilot.
+Streams token-by-token over httpx (CrewAI is not used here because it does not
+stream). The review drafts, probe suggestions and grading go through the CrewAI
+agent layer in backend/agents/. All of it is Gemini.
 """
 import asyncio
 import json
@@ -14,7 +15,7 @@ import httpx
 log = logging.getLogger(__name__)
 
 API_KEY_ENV = "GEMINI_API_KEY"
-MODEL = os.environ.get("STUDENT_LLM_MODEL", "gemini-2.5-flash-lite")
+MODEL = os.environ.get("STUDENT_CHAT_MODEL", "gemini-2.5-flash-lite")
 BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 # Google returns these when the model is momentarily overloaded; they are

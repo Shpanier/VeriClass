@@ -67,7 +67,7 @@
 4. המרצה בוחר אחת. הטקסט הזה נשלח אל הסטודנט בזרימה.
 5. הרמה הנבחרת מתועדת בעמודה `messages.answer_level` לצורך מתאם עתידי עם הציון של הסטודנט.
 
-מומלץ להפעיל מצב זה במעבדות עם משקל הערכה גבוה, בבחנים, או כאשר סטודנט מסוים זקוק לתמיכה ממוקדת. המודל **לעולם** לא מחזיר פתרון מלא בשום רמה — האילוץ הזה אכוף בפרומפט הייצור (`backend/variants_gen.py`).
+מומלץ להפעיל מצב זה במעבדות עם משקל הערכה גבוה, בבחנים, או כאשר סטודנט מסוים זקוק לתמיכה ממוקדת. המודל **לעולם** לא מחזיר פתרון מלא בשום רמה — האילוץ הזה אכוף בסוכן ה־tutor (`backend/agents/tutor.py`). הטיוטות מבוססות על השיחה האמיתית של הסטודנט (מוזרמת כזיכרון), כך שהן עונות ל*סטודנט הזה* ולא חוזרות על תשובות גנריות.
 
 ---
 
@@ -77,8 +77,8 @@
 
 | # | Component        | Stack                        | Port  |
 |---|------------------|------------------------------|-------|
-| 1 | Local LLM        | Ollama + `qwen2.5-coder:3b`  | 11434 |
-| 2 | Cloud LLM        | Gemini 2.5 / OpenAI / Claude | —     |
+| 1 | Agents           | CrewAI on Gemini (review drafts, probes, grading) | — |
+| 2 | Student chat     | Gemini (streaming)           | —     |
 | 3 | Backend          | FastAPI + SQLite (WAL)       | 8010  |
 | 4 | Student app      | Chainlit                     | 8011  |
 | 4b| Student app (alt)| CLion plugin (Kotlin)        | בתוך ה־IDE |
@@ -97,17 +97,14 @@
 <div dir="ltr">
 
 ```bash
-# 1. התקנת Ollama והורדת המודל (פעם אחת)
-ollama pull qwen2.5-coder:3b
-
-# 2. תלויות Python
+# 1. תלויות Python
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 3. הגדרות
+# 2. הגדרות
 cp .env.example .env
-# ערוך את .env — קבע GEMINI_API_KEY (או OPENAI_API_KEY / ANTHROPIC_API_KEY)
+# ערוך את .env — קבע GEMINI_API_KEY (המפתח היחיד שצריך)
 
 # 4. זריעת סטודנטים
 python scripts/add_students.py --names "Yossi Cohen,Shira Levi,Ahmed Alyan"
@@ -299,8 +296,8 @@ variants:
 
 זהו כלי הוראה המשמש סטודנטים (חלקם מתחת לגיל 18) במוסד ציבורי, ולכן עמדת ברירת המחדל בנושא פרטיות שמרנית:
 
-- **תעבורת הצ׳אט של הסטודנט לא יוצאת מהרשת המקומית.** ברירת המחדל `STUDENT_LLM=ollama` רצה כולה על המחשב של המרצה / שרת המעבדה. `STUDENT_LLM=gemini` זוהי **קיצור־דרך מפורש לדיבוג** שכן שולח הודעות סטודנטים ל־Google — להשתמש רק במכוון.
-- **לקריאה הענית יש תפקיד אחד בלבד:** ייצור הצעות שאלות הבנה למרצה. היא מקבלת גרסה *מנוקה* של התמליל (`backend/sanitize.py` מסיר שמות, קודים, נתיבי קבצים, IPs) ולא רואה מזהי סטודנט אמיתיים.
+- **Gemini הוא ספק ה־LLM היחיד.** צ׳אט הסטודנט וסוכני CrewAI (טיוטות תשובה, שאלות הבנה, ניקוד) רצים כולם על Gemini של Google — אין נתיב Ollama מקומי ואין מנגנון גיבוי רב־ספקי. הודעות הסטודנטים מעובדות אצל Google; התאימו את ההסכמה/ההודעה בהתאם.
+- **כל מה שנשלח לסוכנים מנוקה תחילה.** `backend/sanitize.py` מסיר שמות, מספרי ת״ז, אימיילים, מספרי טלפון ונתיבי בית מהתמליל לפני שהוא מוזרם לסוכן.
 - **יומן ביקורת.** כל קריאה ענית נכתבת ל־`api_audit_log` עם הספק, המודל, ספירת טוקנים, latency, הקלט המנוקה, ועותק מוצפן AES של הקלט הגולמי. הגדירו `AUDIT_AES_KEY` ב־`.env`.
 - **שום חשבון סטודנט לא יוצא מבסיס הנתונים.** קודי הכניסה נוצרים מקומית על־ידי `scripts/add_students.py`; אין SSO, אין איסוף אימיילים, אין אימות צד שלישי.
 
@@ -313,20 +310,24 @@ variants:
 ```
 config/
   exercises/ex3-mcalc.yaml   # the demo exercise + 8 variants
-  cloud_llm.yaml             # provider: gemini | openai | anthropic
+  cloud_llm.yaml             # Gemini model + timeout for the agent layer
   instructors.yaml.example   # copy to instructors.yaml and edit
 
 backend/                     # FastAPI app
   main.py                    # entrypoint, loads .env early
   db.py                      # SQLite schema + tiny migration runner
   auth.py                    # login codes, bearer tokens, rate-limit
-  student_llm.py             # dispatcher: ollama vs gemini at startup
-  ollama_client.py           # streaming chat + grader against local LLM
-  gemini_student.py          # same, against Gemini (dev-only)
-  cloud_llm.py               # instructor-side cloud call (probe suggest)
-  sanitize.py                # PII scrub before any cloud call
+  student_llm.py             # Gemini-only streaming for the direct student chat
+  gemini_student.py          # httpx streaming + grader against Gemini
+  agents/                    # CrewAI agent layer (Gemini only)
+    llm.py                   #   single Gemini LLM factory
+    memory.py                #   conversation memory (transcript + prior probes)
+    schemas.py               #   structured-output models
+    tutor.py                 #   review-mode answer drafts (replaces variants_gen)
+    probe.py                 #   "Ask Them" probe suggestions (replaces cloud_llm)
+    grader.py                #   probe answer grading
+  sanitize.py                # PII scrub before anything leaves for Gemini
   variants.py                # deterministic student → variant assignment
-  variants_gen.py            # 3-level answer generator for review mode
   prompts.py                 # system prompts per (exercise, mode)
   exercises.py               # YAML loader and accessor
   routes/
@@ -367,13 +368,9 @@ scripts/
 
 | Variable              | Purpose                                                       |
 |-----------------------|---------------------------------------------------------------|
-| `GEMINI_API_KEY`      | Cloud LLM key; used for probe suggestions and the dev-only `STUDENT_LLM=gemini` path. |
-| `OPENAI_API_KEY`      | Alternative cloud provider. Match with `config/cloud_llm.yaml`. |
-| `ANTHROPIC_API_KEY`   | Alternative cloud provider.                                   |
-| `STUDENT_LLM`         | `ollama` (default, private) or `gemini` (dev only).           |
-| `STUDENT_LLM_MODEL`   | Used when `STUDENT_LLM=gemini`. Default `gemini-2.5-flash-lite`. |
-| `OLLAMA_HOST`         | `http://127.0.0.1:11434` by default.                          |
-| `OLLAMA_MODEL`        | `qwen2.5-coder:3b` recommended for laptops; `:7b` for GPU.    |
+| `GEMINI_API_KEY`      | The only LLM key. Powers the CrewAI agents and the student chat. |
+| `AGENT_MODEL`         | Gemini model for the agents (review drafts, probes, grading). Default `gemini-2.5-pro`. |
+| `STUDENT_CHAT_MODEL`  | Gemini model for the direct student chat. Default `gemini-2.5-flash-lite`. |
 | `DB_PATH`             | `./oslab.db` by default.                                      |
 | `AUDIT_AES_KEY`       | 32-byte base64 key for encrypting raw cloud-LLM payloads.     |
 | `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only).   |
@@ -382,7 +379,7 @@ scripts/
 
 </div>
 
-`config/cloud_llm.yaml` בוחר את הספק והמודל לשימוש בהצעות צד־המרצה. שמרו על תאימות עם המפתח שהגדרתם.
+`config/cloud_llm.yaml` מגדיר את מודל ה־Gemini והזמן הקצוב לשכבת הסוכנים. הכול רץ על מפתח `GEMINI_API_KEY` היחיד.
 
 ---
 
@@ -401,7 +398,7 @@ scripts/
 
 ## רישיון וייחוס
 
-נבנה בסמינר *הנדסת תוכנה*, מכללת JCE לב.
+נבנה בסמינר *הנדסת תוכנה*, המכללה האקדמית להנדסה ירושלים ע״ש עזריאלי (JCE).
 שימוש למטרות חינוך ומחקר.
 
 </div>

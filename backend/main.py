@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Must run before any `from backend...` import — submodules read env vars at
-# import time (e.g. student_llm.BACKEND, gemini_student.MODEL), so .env has to
-# be in os.environ first or those constants freeze to their defaults.
+# import time (e.g. gemini_student.MODEL, agents.llm.DEFAULT_MODEL), so .env has
+# to be in os.environ first or those constants freeze to their defaults.
 from dotenv import load_dotenv
 load_dotenv()
 

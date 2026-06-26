@@ -73,6 +73,7 @@ def pending_reviews():
             """
             SELECT r.id, r.session_id, u.username, r.question,
                    r.variant_nudge, r.variant_normal, r.variant_more,
+                   r.variant_nudge_he, r.variant_normal_he, r.variant_more_he,
                    r.created_at
             FROM pending_reviews r
             JOIN sessions s ON s.id = r.session_id

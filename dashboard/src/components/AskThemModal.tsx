@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { ProbeSuggestion, Student } from "../types";
+import type { Lang, ProbeSuggestion, Student } from "../types";
 import { useLang } from "../i18n";
 
 interface Props {
@@ -10,7 +10,8 @@ interface Props {
 }
 
 export function AskThemModal({ student, onClose, onSent }: Props) {
-  const { t } = useLang();
+  const { t, lang: dashLang } = useLang();
+  const [lang, setLang] = useState<Lang>(dashLang);
   const [suggestions, setSuggestions] = useState<ProbeSuggestion[]>([]);
   const [edited, setEdited] = useState<Record<number, string>>({});
   const [picked, setPicked] = useState<Set<number>>(new Set());
@@ -20,7 +21,7 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
   const fetchSuggestions = () => {
     setLoading(true);
     api
-      .suggestProbes(student.session_id)
+      .suggestProbes(student.session_id, lang)
       .then((s) => {
         setSuggestions(s);
         setLoading(false);
@@ -31,7 +32,8 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
       });
   };
 
-  useEffect(fetchSuggestions, [student.session_id]);
+  // Re-fetch when the session or the chosen language changes.
+  useEffect(fetchSuggestions, [student.session_id, lang]);
 
   const send = async () => {
     const bodies: string[] = [];
@@ -58,9 +60,30 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
         style={{ background: "white", padding: 24, borderRadius: 8, width: 720, maxHeight: "80vh", overflow: "auto" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 style={{ marginTop: 0 }}>
-          {t("askTitle", { name: student.username, variant: student.variant })}
-        </h3>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <h3 style={{ marginTop: 0 }}>
+            {t("askTitle", { name: student.username, variant: student.variant })}
+          </h3>
+          {/* Language the probe questions are generated in. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            <span style={{ color: "#6b7280", fontSize: 12 }}>{t("answersIn")}:</span>
+            {(["en", "he"] as Lang[]).map((opt) => (
+              <button
+                key={opt}
+                onClick={() => setLang(opt)}
+                style={{
+                  padding: "3px 8px", borderRadius: 4, fontSize: 12, cursor: "pointer",
+                  border: "1px solid " + (lang === opt ? "#111827" : "#d1d5db"),
+                  background: lang === opt ? "#111827" : "white",
+                  color: lang === opt ? "white" : "#374151",
+                  fontWeight: 600,
+                }}
+              >
+                {opt === "en" ? "EN" : "עב"}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {loading && <p>{t("genSuggestions")}</p>}
 
@@ -83,6 +106,7 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
                 </div>
                 <textarea
                   value={edited[i] ?? s.body}
+                  dir="auto"
                   onChange={(e) => setEdited({ ...edited, [i]: e.target.value })}
                   style={{ width: "100%", minHeight: 60, marginTop: 4 }}
                 />
@@ -101,6 +125,7 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
           {t("writeOwn")}
           <textarea
             value={own}
+            dir="auto"
             onChange={(e) => setOwn(e.target.value)}
             style={{ width: "100%", minHeight: 50, marginTop: 4 }}
           />

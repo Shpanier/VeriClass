@@ -30,10 +30,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId, mode }),
     }),
-  suggestProbes: (sessionId: string) =>
+  suggestProbes: (sessionId: string, lang: Lang = "en") =>
     j<ProbeSuggestion[]>("/api/probe/suggest", {
       method: "POST",
-      body: JSON.stringify({ session_id: sessionId }),
+      body: JSON.stringify({ session_id: sessionId, lang }),
     }),
   sendProbes: (sessionId: string, bodies: string[], source: string) =>
     j<{ probe_ids: number[] }>("/api/probe/send", {

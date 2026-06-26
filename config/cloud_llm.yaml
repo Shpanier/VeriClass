@@ -1,10 +1,9 @@
-provider: gemini          # gemini | openai | anthropic
+# CrewAI agent LLM config — Gemini only.
+# All agent reasoning (probe suggestions + review answer drafts + grading) runs
+# on Gemini tokens via CrewAI/LiteLLM. There is no provider failover anymore.
+provider: gemini
 model: gemini-2.5-pro
 api_key_env: GEMINI_API_KEY
-timeout_sec: 8
-
-fallback_provider: anthropic
-fallback_model: claude-sonnet-4-5
-fallback_api_key_env: ANTHROPIC_API_KEY
+timeout_sec: 30
 
 max_suggestions: 3

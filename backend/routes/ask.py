@@ -7,7 +7,8 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend import auth, db, exercises, student_llm, variants_gen
+from backend import auth, db, exercises, student_llm
+from backend.agents import tutor
 from backend.prompts import student_system_prompt
 from backend.routes import review as review_mod
 
@@ -80,14 +81,12 @@ async def ask(req: AskRequest, authorization: str = Header(None)):
                 detail = e.response.json().get("error", "")
             except Exception:
                 detail = e.response.text[:200] if e.response is not None else ""
-            log.warning("Student LLM (%s) HTTP %s: %s", student_llm.BACKEND,
+            log.warning("Student LLM (gemini) HTTP %s: %s",
                         e.response.status_code if e.response else "?", detail)
-            yield f"\n\n_⚠️ Student LLM ({student_llm.BACKEND}) error: {detail or e}_\n"
+            yield f"\n\n_⚠️ Student LLM (gemini) error: {detail or e}_\n"
         except httpx.RequestError as e:
-            log.warning("Student LLM (%s) unreachable: %s", student_llm.BACKEND, e)
-            hint = ("Is `ollama serve` running?" if student_llm.BACKEND == "ollama"
-                    else "Check network / GEMINI_API_KEY.")
-            yield f"\n\n_⚠️ Student LLM ({student_llm.BACKEND}) unreachable. {hint}_\n"
+            log.warning("Student LLM (gemini) unreachable: %s", e)
+            yield "\n\n_⚠️ Student LLM (gemini) unreachable. Check network / GEMINI_API_KEY._\n"
         finally:
             with db.conn() as c:
                 c.execute(
@@ -108,7 +107,7 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict]):
     yield "🧑‍🏫 _Your teacher is reviewing your question — one moment…_\n\n"
 
     try:
-        variants = await variants_gen.generate(sys_prompt, msgs[:-1], req.message)
+        variants = await tutor.generate_variants(sys_prompt, req.session_id, req.message)
     except Exception as e:
         log.exception("variant generation failed")
         yield f"_⚠️ Could not generate review options: {e}_\n"
@@ -141,13 +140,17 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict]):
 
         with db.conn() as c:
             row = c.execute(
-                "SELECT chosen_level, final_text, variant_nudge, variant_normal, "
-                "variant_more FROM pending_reviews WHERE id = ?", (review_id,),
+                "SELECT chosen_level, chosen_lang, final_text, "
+                "variant_nudge, variant_normal, variant_more, "
+                "variant_nudge_he, variant_normal_he, variant_more_he "
+                "FROM pending_reviews WHERE id = ?", (review_id,),
             ).fetchone()
         chosen = row["chosen_level"]
-        # Prefer the exact text the teacher sent (it may be edited and/or Hebrew);
-        # fall back to the English variant column for safety.
-        text = row["final_text"] or row[f"variant_{chosen}"]
+        # Prefer the exact text the teacher sent (it may be edited and/or Hebrew).
+        # Fall back to the stored variant in the chosen language for safety.
+        suffix = "_he" if row["chosen_lang"] == "he" else ""
+        fallback = row[f"variant_{chosen}{suffix}"] or row[f"variant_{chosen}"]
+        text = row["final_text"] or fallback
 
         # Stream it back in small chunks so the UI animates rather than thudding.
         for word in text.split(" "):

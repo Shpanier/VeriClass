@@ -110,7 +110,9 @@ Global toggle in the dashboard header. When on:
 Use this in high-stakes labs, during summative assessment, or when a
 particular student needs heavily-scaffolded support. The model **never**
 returns a full working solution at any level — that constraint is enforced
-in the variant-generation prompt (`backend/variants_gen.py`).
+in the tutor agent (`backend/agents/tutor.py`). The drafts are grounded in the
+student's actual conversation (threaded in as memory), so they answer *this*
+student rather than repeating boilerplate.
 
 ---
 
@@ -118,8 +120,8 @@ in the variant-generation prompt (`backend/variants_gen.py`).
 
 | # | Component        | Stack                      | Port  |
 |---|------------------|----------------------------|-------|
-| 1 | Local LLM        | Ollama + `qwen2.5-coder:3b`| 11434 |
-| 2 | Cloud LLM        | Gemini 2.5 / OpenAI / Claude | —   |
+| 1 | Agents           | CrewAI on Gemini (review drafts, probes, grading) | — |
+| 2 | Student chat     | Gemini (streaming)         | —     |
 | 3 | Backend          | FastAPI + SQLite (WAL)     | 8010  |
 | 4 | Student app      | Chainlit                   | 8011  |
 | 4b| Student app (alt)| CLion plugin (Kotlin)      | in-IDE|
@@ -131,26 +133,23 @@ login → briefing → chat → probes flow inside the IDE. See
 [*Alternative student client: the CLion plugin*](#alternative-student-client-the-clion-plugin)
 and [`clion_plugin/README.md`](clion_plugin/README.md).
 
-The local LLM is the only path that sees student messages. The cloud LLM is
-used **only** for instructor-side probe suggestion (`/api/probe/suggest`),
-and only after `backend/sanitize.py` strips names, codes, and other PII.
+All LLM calls — the student chat and the CrewAI agents (review drafts, probe
+suggestions, grading) — run on Gemini. Anything sent to the agents is first
+passed through `backend/sanitize.py`, which strips names, codes, and other PII.
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Install Ollama and pull the model (one time)
-ollama pull qwen2.5-coder:3b
-
-# 2. Python deps
+# 1. Python deps
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 3. Configure
+# 2. Configure
 cp .env.example .env
-# edit .env — set GEMINI_API_KEY (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
+# edit .env — set GEMINI_API_KEY (the only LLM key needed)
 
 # 4. Seed students
 python scripts/add_students.py --names "Yossi Cohen,Shira Levi,Ahmed Alyan"
@@ -347,16 +346,15 @@ Design goals for a good variant set:
 ## Privacy & data sovereignty
 
 This is a teaching tool used with under-18 and adult students at a public
-institution, so the privacy posture is conservative by default:
+institution, so the privacy posture stays conservative:
 
-- **Student chat traffic never leaves the local network.** The default
-  `STUDENT_LLM=ollama` runs entirely on the instructor's laptop / lab
-  server. `STUDENT_LLM=gemini` is an **opt-in dev/debug shortcut** that
-  *does* route student messages to Google — use only when you mean it.
-- **The cloud LLM call has one job only:** generating probe suggestions
-  for the instructor. It receives a *sanitized* version of the
-  transcript (`backend/sanitize.py` strips names, codes, file paths,
-  IPs) and never sees student identifiers.
+- **Gemini is the single LLM provider.** Student chat and the CrewAI agents
+  all run on Google's Gemini — there is no local Ollama path and no
+  multi-provider fallback. Student messages are processed by Google; size
+  your consent/notice accordingly.
+- **Everything sent to the agents is sanitized first.** `backend/sanitize.py`
+  strips names, ID numbers, emails, phone numbers, and home paths from the
+  transcript before it is threaded into a probe/answer agent.
 - **Audit log.** Every cloud call is written to `api_audit_log` with
   provider, model, token counts, latency, the sanitized input, and an
   AES-encrypted copy of the raw payload. Set `AUDIT_AES_KEY` in `.env`.
@@ -371,20 +369,24 @@ institution, so the privacy posture is conservative by default:
 ```
 config/
   exercises/ex3-mcalc.yaml   # the demo exercise + 8 variants
-  cloud_llm.yaml             # provider: gemini | openai | anthropic
+  cloud_llm.yaml             # Gemini model + timeout for the agent layer
   instructors.yaml.example   # copy to instructors.yaml and edit
 
 backend/                     # FastAPI app
   main.py                    # entrypoint, loads .env early
   db.py                      # SQLite schema + tiny migration runner
   auth.py                    # login codes, bearer tokens, rate-limit
-  student_llm.py             # dispatcher: ollama vs gemini at startup
-  ollama_client.py           # streaming chat + grader against local LLM
-  gemini_student.py          # same, against Gemini (dev-only)
-  cloud_llm.py               # instructor-side cloud call (probe suggest)
-  sanitize.py                # PII scrub before any cloud call
+  student_llm.py             # Gemini-only streaming for the direct student chat
+  gemini_student.py          # httpx streaming + grader against Gemini
+  agents/                    # CrewAI agent layer (Gemini only)
+    llm.py                   #   single Gemini LLM factory
+    memory.py                #   conversation memory (transcript + prior probes)
+    schemas.py               #   structured-output models
+    tutor.py                 #   review-mode answer drafts (replaces variants_gen)
+    probe.py                 #   "Ask Them" probe suggestions (replaces cloud_llm)
+    grader.py                #   probe answer grading
+  sanitize.py                # PII scrub before anything leaves for Gemini
   variants.py                # deterministic student → variant assignment
-  variants_gen.py            # 3-level answer generator for review mode
   prompts.py                 # system prompts per (exercise, mode)
   exercises.py               # YAML loader and accessor
   routes/
@@ -421,21 +423,17 @@ scripts/
 
 | Variable              | Purpose                                                       |
 |-----------------------|---------------------------------------------------------------|
-| `GEMINI_API_KEY`      | Cloud LLM key; used for probe suggestions and the dev-only `STUDENT_LLM=gemini` path. |
-| `OPENAI_API_KEY`      | Alternative cloud provider. Match with `config/cloud_llm.yaml`. |
-| `ANTHROPIC_API_KEY`   | Alternative cloud provider.                                   |
-| `STUDENT_LLM`         | `ollama` (default, private) or `gemini` (dev only).           |
-| `STUDENT_LLM_MODEL`   | Used when `STUDENT_LLM=gemini`. Default `gemini-2.5-flash-lite`. |
-| `OLLAMA_HOST`         | `http://127.0.0.1:11434` by default.                          |
-| `OLLAMA_MODEL`        | `qwen2.5-coder:3b` recommended for laptops; `:7b` for GPU.    |
+| `GEMINI_API_KEY`      | The only LLM key. Powers the CrewAI agents and the student chat. |
+| `AGENT_MODEL`         | Gemini model for the agents (review drafts, probes, grading). Default `gemini-2.5-pro`. |
+| `STUDENT_CHAT_MODEL`  | Gemini model for the direct student chat. Default `gemini-2.5-flash-lite`. |
 | `DB_PATH`             | `./oslab.db` by default.                                      |
 | `AUDIT_AES_KEY`       | 32-byte base64 key for encrypting raw cloud-LLM payloads.     |
 | `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only).   |
 | `STUDENT_CLIENT_MODE` | CLion plugin behavior: `chat` (default) or `ide`. Ignored by Chainlit. |
 | `SCAFFOLD_FILENAME`   | File the plugin's `ide` mode scaffolds into the project. Default `mcalc.c`. |
 
-`config/cloud_llm.yaml` picks the provider and model used for
-instructor-side suggestions. Keep this in sync with the API key you set.
+`config/cloud_llm.yaml` sets the Gemini model and timeout the agent layer
+uses. Everything runs on the single `GEMINI_API_KEY`.
 
 ---
 
@@ -459,5 +457,5 @@ Contributions and bug reports welcome — file an issue or PR.
 
 ## License & attribution
 
-Built at the *Software Engineering Seminar*, JCE Lev Academic Center.
-Educational and research use.
+Built at the *Software Engineering Seminar*, Azrieli College of Engineering
+Jerusalem (JCE). Educational and research use.

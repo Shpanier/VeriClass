@@ -54,7 +54,7 @@ student CLion plugin ──https──► your-domain.ngrok-free.app ──► y
    STUDENT_CLIENT_MODE=ide
    EXAM_MODE=true
    FULLSCREEN=true
-   STUDENT_LLM=ollama          # free, local, private
+   GEMINI_API_KEY=...          # the only LLM key needed
    ```
 2. Run the control macro — it starts the backend (if needed), opens the tunnel,
    and keeps the laptop awake:
