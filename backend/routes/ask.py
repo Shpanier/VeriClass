@@ -116,10 +116,13 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict]):
 
     with db.conn() as c:
         cur = c.execute(
-            "INSERT INTO pending_reviews(session_id, question, variant_nudge, "
-            "variant_normal, variant_more) VALUES(?, ?, ?, ?, ?)",
-            (req.session_id, req.message, variants["nudge"],
-             variants["normal"], variants["more"]),
+            "INSERT INTO pending_reviews(session_id, question, "
+            "variant_nudge, variant_normal, variant_more, "
+            "variant_nudge_he, variant_normal_he, variant_more_he) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            (req.session_id, req.message,
+             variants["nudge"]["en"], variants["normal"]["en"], variants["more"]["en"],
+             variants["nudge"]["he"], variants["normal"]["he"], variants["more"]["he"]),
         )
         review_id = cur.lastrowid
 
@@ -138,11 +141,13 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict]):
 
         with db.conn() as c:
             row = c.execute(
-                "SELECT chosen_level, variant_nudge, variant_normal, variant_more "
-                "FROM pending_reviews WHERE id = ?", (review_id,),
+                "SELECT chosen_level, final_text, variant_nudge, variant_normal, "
+                "variant_more FROM pending_reviews WHERE id = ?", (review_id,),
             ).fetchone()
         chosen = row["chosen_level"]
-        text = row[f"variant_{chosen}"]
+        # Prefer the exact text the teacher sent (it may be edited and/or Hebrew);
+        # fall back to the English variant column for safety.
+        text = row["final_text"] or row[f"variant_{chosen}"]
 
         # Stream it back in small chunks so the UI animates rather than thudding.
         for word in text.split(" "):

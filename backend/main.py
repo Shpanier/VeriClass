@@ -19,6 +19,7 @@ from backend.routes import (
     login,
     mode,
     probes,
+    proctor,
     review,
     sessions,
     students,
@@ -51,7 +52,7 @@ app = FastAPI(title="OS Lab Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:8001"],
+    allow_origins=["http://localhost:5173", "http://localhost:8011"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -65,6 +66,7 @@ app.include_router(students.router, prefix="/api")
 app.include_router(mode.router, prefix="/api")
 app.include_router(review.router, prefix="/api")
 app.include_router(client_config.router, prefix="/api")
+app.include_router(proctor.router, prefix="/api")
 
 
 @app.get("/healthz")

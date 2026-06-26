@@ -3,7 +3,8 @@ package edu.jce.oslab.ui
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.JBSplitter
+import com.intellij.ui.JBSplitter
+import com.intellij.openapi.util.Disposer
 import com.intellij.ui.JBColor
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.components.JBLabel
@@ -14,6 +15,8 @@ import edu.jce.oslab.api.LoginResponse
 import edu.jce.oslab.api.OsLabApiClient
 import edu.jce.oslab.api.OsLabApiException
 import edu.jce.oslab.api.SessionResponse
+import edu.jce.oslab.exam.ExamBanner
+import edu.jce.oslab.exam.ExamGuard
 import edu.jce.oslab.ide.ExerciseScaffolder
 import edu.jce.oslab.probe.ProbePoller
 import edu.jce.oslab.settings.OsLabSettings
@@ -39,6 +42,7 @@ class OsLabPanel(
 
     private val api = OsLabApiClient()
     private val loginPanel = LoginPanel(::doLogin)
+    private var examGuard: ExamGuard? = null
 
     init {
         add(loginPanel, BorderLayout.CENTER)
@@ -83,7 +87,14 @@ class OsLabPanel(
     ) {
         removeAll()
 
-        add(header(login, session, config), BorderLayout.NORTH)
+        // North stack: an (initially hidden) exam warning banner above the header.
+        // BorderLayout stretches both to the full tool-window width.
+        val banner = ExamBanner()
+        val north = JPanel(BorderLayout()).apply {
+            add(banner, BorderLayout.NORTH)
+            add(header(login, session, config), BorderLayout.CENTER)
+        }
+        add(north, BorderLayout.NORTH)
 
         val chat = ChatPanel(api, login.token, session.session_id, parent)
 
@@ -116,6 +127,20 @@ class OsLabPanel(
         }
 
         ProbePoller(api, session.session_id, config.poll_interval_ms.toLong(), parent)
+
+        // Exam mode: arm the proctor (full screen + leave-the-IDE detection).
+        // Dispose any prior guard first so a re-login can't double-attach
+        // window listeners or run two full-screen watchdogs.
+        examGuard?.let { Disposer.dispose(it) }
+        examGuard = if (config.isExamMode) {
+            ExamGuard(
+                project, api, session.session_id, config,
+                onViolation = { count, reason -> banner.show(count, reason) },
+                parent = parent,
+            )
+        } else {
+            null
+        }
 
         revalidate()
         repaint()

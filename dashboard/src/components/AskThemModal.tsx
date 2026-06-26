@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { ProbeSuggestion, Student } from "../types";
+import { useLang } from "../i18n";
 
 interface Props {
   student: Student;
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function AskThemModal({ student, onClose, onSent }: Props) {
+  const { t } = useLang();
   const [suggestions, setSuggestions] = useState<ProbeSuggestion[]>([]);
   const [edited, setEdited] = useState<Record<number, string>>({});
   const [picked, setPicked] = useState<Set<number>>(new Set());
@@ -57,10 +59,10 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <h3 style={{ marginTop: 0 }}>
-          Targeted question for {student.username} · {student.variant}
+          {t("askTitle", { name: student.username, variant: student.variant })}
         </h3>
 
-        {loading && <p>⏳ Generating suggestions from cloud LLM…</p>}
+        {loading && <p>{t("genSuggestions")}</p>}
 
         {suggestions.map((s, i) => (
           <div key={i} style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, marginBottom: 8 }}>
@@ -91,12 +93,12 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
         ))}
 
         <button onClick={fetchSuggestions} disabled={loading} style={{ marginRight: 8 }}>
-          Suggest more
+          {t("suggestMore")}
         </button>
 
         <hr />
         <label>
-          Write your own question:
+          {t("writeOwn")}
           <textarea
             value={own}
             onChange={(e) => setOwn(e.target.value)}
@@ -105,12 +107,12 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
         </label>
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-          <button onClick={onClose}>Cancel</button>
+          <button onClick={onClose}>{t("cancel")}</button>
           <button
             onClick={send}
             style={{ background: "#f97316", color: "white", border: "none", padding: "8px 16px", borderRadius: 6 }}
           >
-            Send {picked.size + (own.trim() ? 1 : 0)} question(s)
+            {t("sendQuestions", { n: picked.size + (own.trim() ? 1 : 0) })}
           </button>
         </div>
       </div>

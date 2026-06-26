@@ -1,4 +1,5 @@
 import type { ActiveExercise } from "../types";
+import { useLang } from "../i18n";
 
 export function ExerciseHeader({
   exercise,
@@ -7,16 +8,18 @@ export function ExerciseHeader({
   exercise: ActiveExercise;
   studentCount: number;
 }) {
+  const { t, lang } = useLang();
+  const title = lang === "he" ? exercise.title_he ?? exercise.title_en : exercise.title_en;
   return (
     <header style={{ marginBottom: 24 }}>
       <h1 style={{ margin: 0 }}>
-        📘 Active exercise: <code>{exercise.exercise_id}</code>
+        📘 {t("activeExercise")}: <code>{exercise.exercise_id}</code>
       </h1>
       <p style={{ color: "#555", marginTop: 4 }}>
-        {exercise.title_en} · {exercise.variants.length} variants ·{" "}
+        {title} · {t("variantsCount", { n: exercise.variants.length })} ·{" "}
         {studentCount === 0
-          ? "No active students yet. Share http://lab.local:8001 with students to begin."
-          : `${studentCount} student${studentCount === 1 ? "" : "s"} connected`}
+          ? t("noStudents", { url: "http://lab.local:8011" })
+          : t("studentsConnected", { n: studentCount })}
       </p>
     </header>
   );

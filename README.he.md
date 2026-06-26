@@ -79,8 +79,8 @@
 |---|------------------|------------------------------|-------|
 | 1 | Local LLM        | Ollama + `qwen2.5-coder:3b`  | 11434 |
 | 2 | Cloud LLM        | Gemini 2.5 / OpenAI / Claude | —     |
-| 3 | Backend          | FastAPI + SQLite (WAL)       | 8000  |
-| 4 | Student app      | Chainlit                     | 8001  |
+| 3 | Backend          | FastAPI + SQLite (WAL)       | 8010  |
+| 4 | Student app      | Chainlit                     | 8011  |
 | 4b| Student app (alt)| CLion plugin (Kotlin)        | בתוך ה־IDE |
 | 5 | Instructor dash  | React + Vite + TypeScript    | 5173  |
 
@@ -127,7 +127,7 @@ python scripts/add_students.py --names "Yossi Cohen,Shira Levi,Ahmed Alyan"
 
 </div>
 
-הסטודנטים פותחים את `http://localhost:8001`, המרצה את `http://localhost:5173`.
+הסטודנטים פותחים את `http://localhost:8011`, המרצה את `http://localhost:5173`.
 מעדיפים את ה־IDE? דלגו על הדפדפן והשתמשו בקליינט תוסף ה־CLion במקום — ראו [קליינט סטודנט חלופי: תוסף ה־CLion](#קליינט-סטודנט-חלופי-תוסף-ה־clion).
 
 ---
@@ -146,10 +146,10 @@ python scripts/add_students.py --names "Yossi Cohen,Shira Levi,Ahmed Alyan"
 
 מה הוא עושה:
 
-1. **הורג** כל מה שמאזין על הפורטים `8000`, `8001`, `5173`, וגם תהליכי `uvicorn backend.main` / `chainlit run student_app` שנשארו לבד. שימושי אחרי קריסה שבה התהליך הקודם עדיין מחזיק את הפורט.
+1. **הורג** כל מה שמאזין על הפורטים `8010`, `8011`, `5173` (וגם הישנים `8000`/`8001`), וגם תהליכי `uvicorn backend.main` / `chainlit run student_app` שנשארו לבד. שימושי אחרי קריסה שבה התהליך הקודם עדיין מחזיק את הפורט.
 2. **פותח חלון Terminal חדש עם שלוש לשוניות:**
-   - לשונית 1: `uvicorn backend.main:app --reload --port 8000`
-   - לשונית 2: `chainlit run student_app/app.py --port 8001`
+   - לשונית 1: `uvicorn backend.main:app --reload --port 8010`
+   - לשונית 2: `chainlit run student_app/app.py --port 8011`
    - לשונית 3: `cd dashboard && npm run dev`
 3. שתי הלשוניות של פייתון מבצעות `source .venv/bin/activate` אוטומטית לפני ההפעלה.
 

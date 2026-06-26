@@ -31,7 +31,10 @@ intellijPlatform {
     pluginConfiguration {
         ideaVersion {
             sinceBuild = providers.gradleProperty("pluginSinceBuild")
-            untilBuild = providers.gradleProperty("pluginUntilBuild")
+            // Open-ended upper bound: a CLion upgrade (build 261, 271, …) must not
+            // reject the plugin. Fine for a self-distributed course plugin;
+            // JetBrains Marketplace would require a bounded range instead.
+            untilBuild = provider { null }
         }
     }
 }

@@ -58,6 +58,13 @@ data class ClientConfig(
     val mode: String = "chat",
     val scaffold_filename: String = "mcalc.c",
     val poll_interval_ms: Int = 2000,
+    /** Exam mode: report to the backend whenever the student leaves the IDE. */
+    val exam_mode: Boolean = false,
+    /** Put CLion in full screen at exam start and re-assert it on return. */
+    val force_fullscreen: Boolean = false,
+    /** How often to ping the backend so a quiet exam student stays on the grid. */
+    val heartbeat_ms: Int = 30000,
 ) {
     val isIdeMode: Boolean get() = mode.equals("ide", ignoreCase = true)
+    val isExamMode: Boolean get() = exam_mode
 }

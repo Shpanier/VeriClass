@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { Message, Probe, SessionDetail, Student } from "../types";
+import { useLang } from "../i18n";
 
 export function ChatViewModal({ student, onClose }: { student: Student; onClose: () => void }) {
+  const { t } = useLang();
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -56,9 +58,9 @@ export function ChatViewModal({ student, onClose }: { student: Student; onClose:
                 checked={autoScroll}
                 onChange={(e) => setAutoScroll(e.target.checked)}
               />{" "}
-              auto-scroll
+              {t("autoScroll")}
             </label>
-            <button onClick={onClose}>Close</button>
+            <button onClick={onClose}>{t("close")}</button>
           </div>
         </header>
 
@@ -74,7 +76,7 @@ export function ChatViewModal({ student, onClose }: { student: Student; onClose:
           }}
         >
           {items.length === 0 && (
-            <p style={{ color: "#888" }}>No messages yet. The student hasn't sent anything.</p>
+            <p style={{ color: "#888" }}>{t("noMessages")}</p>
           )}
           {items.map((item) =>
             item.kind === "message" ? (
@@ -88,8 +90,8 @@ export function ChatViewModal({ student, onClose }: { student: Student; onClose:
 
         <footer style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
           {detail
-            ? `${detail.messages.length} chat message(s) · ${detail.probes.length} probe(s) · refreshing every 2s`
-            : "Loading…"}
+            ? t("chatFooter", { m: detail.messages.length, p: detail.probes.length })
+            : t("loading")}
         </footer>
       </div>
     </div>
@@ -122,19 +124,20 @@ function MessageBubble({ m }: { m: Message }) {
 }
 
 function ProbeBubble({ p }: { p: Probe }) {
+  const { t } = useLang();
   const grade = p.override_grade ?? p.auto_grade;
   return (
     <div style={{ margin: "10px 0", padding: 10, background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 8 }}>
       <div style={{ fontSize: 11, color: "#9a3412", marginBottom: 4 }}>
-        🔎 instructor probe · {p.status} · sent {p.sent_at}
+        🔎 {t("instructorProbe")} · {p.status} · {p.sent_at}
         {p.source !== "manual" ? ` · ${p.source}` : ""}
       </div>
       <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{p.body}</div>
       {p.answer && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #fdba74" }}>
           <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>
-            answer · grade {grade ?? "?"}/2
-            {p.override_grade != null ? " (overridden)" : ""}
+            {t("answerGrade", { g: grade ?? "?" })}
+            {p.override_grade != null ? ` ${t("overridden")}` : ""}
           </div>
           <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{p.answer}</div>
         </div>

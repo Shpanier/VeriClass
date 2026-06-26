@@ -1,6 +1,7 @@
 package edu.jce.oslab.api
 
 import com.google.gson.Gson
+import com.intellij.openapi.diagnostic.thisLogger
 import edu.jce.oslab.settings.OsLabSettings
 import java.io.InputStreamReader
 import java.net.URI
@@ -24,6 +25,12 @@ class OsLabApiClient {
 
     private val gson = Gson()
     private val http: HttpClient = HttpClient.newBuilder()
+        // Pin HTTP/1.1. The default (HTTP/2) attempts an h2c upgrade on cleartext
+        // http:// and drops the POST body against an HTTP/1.1 server (uvicorn),
+        // so every POST arrives empty and the backend returns 422 "Field
+        // required". uvicorn speaks HTTP/1.1 anyway, and 1.1 chunked transfer is
+        // exactly what the streamed /api/ask reader expects.
+        .version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofSeconds(10))
         .build()
 
@@ -136,6 +143,38 @@ class OsLabApiClient {
         )
         requireOk(resp, "Could not submit your answer")
         return gson.fromJson(resp.body(), ProbeAnswerResponse::class.java)
+    }
+
+    // --- exam / proctor ---------------------------------------------------
+
+    /**
+     * Fire-and-forget report that the student left (or returned to) the IDE.
+     * Deliberately swallows every error: exam telemetry must never break the
+     * student's session or surface a dialog. Call off the EDT.
+     */
+    fun reportProctorEvent(
+        sessionId: String,
+        kind: String,
+        detail: String? = null,
+        awayMs: Long? = null,
+    ) {
+        try {
+            val body = mutableMapOf<String, Any>("session_id" to sessionId, "kind" to kind)
+            if (!detail.isNullOrBlank()) body["detail"] = detail
+            if (awayMs != null) body["away_ms"] = awayMs
+            sendJson("POST", "/api/proctor/event", body = body, token = null)
+        } catch (e: Exception) {
+            thisLogger().debug("proctor event report failed", e)
+        }
+    }
+
+    /** Cheap keep-alive so a quiet exam student stays on the live grid. */
+    fun proctorHeartbeat(sessionId: String) {
+        try {
+            sendJson("POST", "/api/proctor/heartbeat", body = mapOf("session_id" to sessionId), token = null)
+        } catch (e: Exception) {
+            thisLogger().debug("proctor heartbeat failed", e)
+        }
     }
 
     // --- helpers ----------------------------------------------------------

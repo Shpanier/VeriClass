@@ -120,8 +120,8 @@ in the variant-generation prompt (`backend/variants_gen.py`).
 |---|------------------|----------------------------|-------|
 | 1 | Local LLM        | Ollama + `qwen2.5-coder:3b`| 11434 |
 | 2 | Cloud LLM        | Gemini 2.5 / OpenAI / Claude | —   |
-| 3 | Backend          | FastAPI + SQLite (WAL)     | 8000  |
-| 4 | Student app      | Chainlit                   | 8001  |
+| 3 | Backend          | FastAPI + SQLite (WAL)     | 8010  |
+| 4 | Student app      | Chainlit                   | 8011  |
 | 4b| Student app (alt)| CLion plugin (Kotlin)      | in-IDE|
 | 5 | Instructor dash  | React + Vite + TypeScript  | 5173  |
 
@@ -164,7 +164,7 @@ Demo students after seeding:
 | Shira Levi   | STU2-XXXX   |
 | Ahmed Alyan  | STU3-XXXX   |
 
-Students go to `http://localhost:8001`, instructor to `http://localhost:5173`.
+Students go to `http://localhost:8011`, instructor to `http://localhost:5173`.
 Prefer the IDE? Skip the browser and use the CLion plugin client instead — see
 [Alternative student client: the CLion plugin](#alternative-student-client-the-clion-plugin).
 
@@ -181,12 +181,13 @@ launcher does it in one command:
 
 What it does:
 
-1. **Kills** anything bound to ports `8000`, `8001`, `5173`, plus any stray
-   `uvicorn backend.main` / `chainlit run student_app` processes. Useful
-   after a crash where the old process is still holding the port.
+1. **Kills** anything bound to ports `8010`, `8011`, `5173` (and the legacy
+   `8000`/`8001`), plus any stray `uvicorn backend.main` / `chainlit run
+   student_app` processes. Useful after a crash where the old process is still
+   holding the port.
 2. **Opens a new Terminal.app window with three tabs:**
-   - tab 1: `uvicorn backend.main:app --reload --port 8000`
-   - tab 2: `chainlit run student_app/app.py --port 8001`
+   - tab 1: `uvicorn backend.main:app --reload --port 8010`
+   - tab 2: `chainlit run student_app/app.py --port 8011`
    - tab 3: `cd dashboard && npm run dev`
 3. The two Python tabs auto-`source .venv/bin/activate` before starting.
 

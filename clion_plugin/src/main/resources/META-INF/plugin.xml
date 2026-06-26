@@ -15,6 +15,9 @@
             <li><b>ide</b> — also scaffolds your assigned variant's starter C file into the open
                 project and shows the test inputs you must pass as a checklist.</li>
         </ul>
+        With <code>EXAM_MODE</code> on, the plugin also runs a proctored exam: CLion opens in full
+        screen and any time you leave it (minimize, switch app, exit full screen) your instructor is
+        notified and you are warned to return.
     ]]></description>
 
     <!-- CLion is built on the IntelliJ Platform; the plugin uses only platform + VFS APIs. -->
@@ -32,5 +35,12 @@
                                  id="edu.jce.oslab.settings"
                                  displayName="OS Lab"
                                  instance="edu.jce.oslab.settings.OsLabSettingsConfigurable"/>
+
+        <!-- Exam mode: when the backend reports exam_mode, open the tutor tool
+             window and go full screen on project start. No-op otherwise. -->
+        <postStartupActivity implementation="edu.jce.oslab.exam.ExamStartupActivity"/>
+
+        <!-- Sticky balloon shown to the student each time they leave the exam. -->
+        <notificationGroup id="OS Lab Exam" displayType="STICKY_BALLOON"/>
     </extensions>
 </idea-plugin>

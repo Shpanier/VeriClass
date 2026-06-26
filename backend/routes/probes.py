@@ -1,9 +1,12 @@
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend import cloud_llm, db, exercises, student_llm
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 class ProbeSuggestRequest(BaseModel):
@@ -46,7 +49,14 @@ async def answer(req: ProbeAnswerRequest):
             "SELECT exercise, variant FROM sessions WHERE id = ?", (p["session_id"],)
         ).fetchone()
     variant = exercises.variant(s["exercise"], s["variant"])
-    score, why = await student_llm.grade_answer(p["body"], req.answer, variant["params"])
+    # Auto-grading is best-effort: a transient LLM outage must never lose the
+    # student's answer or 500 the request. On failure, save with no grade so the
+    # teacher can grade it manually (via /probe/override) later.
+    try:
+        score, why = await student_llm.grade_answer(p["body"], req.answer, variant["params"])
+    except Exception:
+        log.exception("auto-grading failed for probe %s; saving ungraded", req.probe_id)
+        score, why = None, "Auto-grading is temporarily unavailable — your answer was saved."
     with db.conn() as c:
         c.execute(
             "UPDATE probes SET answer = ?, auto_grade = ?, status = 'answered', "

@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BACKEND = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000")
+BACKEND = os.environ.get("BACKEND_URL", "http://127.0.0.1:8010")
 
 # Quiet the chatty libraries chainlit pulls in. Errors/warnings still print.
 for noisy in ("httpx", "httpcore", "socketio", "engineio", "asyncio", "watchfiles", "uvicorn.access"):
