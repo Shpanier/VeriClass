@@ -78,7 +78,8 @@ async def _send_briefing(exercise: dict, variant_id: str, mode: str):
         f"**Mode:** `{mode}`"
     )
     actions = [
-        cl.Action(name="suggest", value=s, label=s, description="")
+        # chainlit 2.x: Action carries a `payload` dict instead of `value`.
+        cl.Action(name="suggest", payload={"value": s}, label=s)
         for s in exercise.get("welcome_suggestions", [])
     ]
     await cl.Message(content=body, actions=actions).send()
@@ -86,7 +87,7 @@ async def _send_briefing(exercise: dict, variant_id: str, mode: str):
 
 @cl.action_callback("suggest")
 async def on_suggest(action: cl.Action):
-    await _ask(action.value)
+    await _ask(action.payload["value"])
 
 
 @cl.on_message

@@ -1,12 +1,17 @@
-fastapi==0.112.4
-uvicorn[standard]==0.25.0
+# fastapi/uvicorn raised to the versions chainlit 2.x pulls in (backend verified on them).
+fastapi==0.138.1
+uvicorn[standard]==0.49.0
 # pydantic/httpx floors raised for CrewAI's litellm (needs pydantic>=2.10, httpx>=0.28).
 pydantic>=2.10.0,<3
 python-dotenv==1.0.1
 PyYAML==6.0.2
 bcrypt==4.2.0
 httpx>=0.28.0,<1
-chainlit==1.3.0
+# chainlit 2.x — 1.3.x crashes on pydantic>=2.10, which crewai/litellm require.
+chainlit==2.11.1
 crewai==0.86.0
+# crewai 0.86's telemetry imports pkg_resources, which setuptools 81+ dropped.
+# Python 3.12 venvs ship no setuptools by default, so pin one that still has it.
+setuptools<81
 ruff==0.7.0
 pytest==8.3.3
