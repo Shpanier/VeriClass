@@ -20,6 +20,11 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
 
   const fetchSuggestions = () => {
     setLoading(true);
+    // Reset index-keyed selection/edits: after a refetch the list contents
+    // change, so a stale checkbox #2 or edit would attach to a different (or
+    // missing) question. Clear them so indices always match the new list.
+    setPicked(new Set());
+    setEdited({});
     api
       .suggestProbes(student.session_id, lang)
       .then((s) => {
@@ -37,7 +42,11 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
 
   const send = async () => {
     const bodies: string[] = [];
-    picked.forEach((i) => bodies.push(edited[i] ?? suggestions[i].body));
+    // Guard suggestions[i] — a refetch may have shortened the list.
+    picked.forEach((i) => {
+      const body = edited[i] ?? suggestions[i]?.body;
+      if (body) bodies.push(body);
+    });
     if (own.trim()) bodies.push(own.trim());
     if (bodies.length === 0) return;
     await api.sendProbes(student.session_id, bodies, picked.size > 0 ? "suggested" : "manual");

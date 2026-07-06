@@ -15,6 +15,7 @@ const STRINGS = {
     // chrome
     appTitle: "OS Lab — Teacher Dashboard",
     language: "עברית", // label shows the OTHER language you can switch to
+    signOut: "Sign out",
     on: "On",
     off: "Off",
     close: "Close",
@@ -82,6 +83,7 @@ const STRINGS = {
     // chrome
     appTitle: "מעבדת OS — לוח בקרה למורה",
     language: "English",
+    signOut: "התנתקות",
     on: "פעיל",
     off: "כבוי",
     close: "סגור",

@@ -15,9 +15,3 @@ async def stream_chat(
 ) -> AsyncIterator[str]:
     async for tok in gemini_student.stream_chat(system_prompt, messages, timeout):
         yield tok
-
-
-async def grade_answer(
-    question: str, answer: str, variant_params: dict
-) -> tuple[int, str]:
-    return await gemini_student.grade_answer(question, answer, variant_params)

@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
-from backend import db
+from backend import db, deps
 from backend.routes.proctor import ALERT_KINDS
 
 router = APIRouter()
@@ -10,7 +10,7 @@ _ALERT_PLACEHOLDERS = ", ".join("?" for _ in ALERT_KINDS)
 
 
 @router.get("/students")
-def list_students():
+def list_students(teacher: dict = Depends(deps.require_teacher)):
     """Returns one row per active session (last_active_at within 30 min),
     enriched with the exam/proctor signals the dashboard flags on:
 
@@ -53,7 +53,7 @@ def list_students():
 
 
 @router.get("/students/{session_id}/messages")
-def session_messages(session_id: str):
+def session_messages(session_id: str, teacher: dict = Depends(deps.require_teacher)):
     """Full chat transcript + probes for one student session."""
     with db.conn() as c:
         sess = c.execute(

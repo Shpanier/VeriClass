@@ -57,12 +57,14 @@ class OsLabApiClient {
         return gson.fromJson(resp.body(), SessionResponse::class.java)
     }
 
-    fun activeExercise(variant: String): Exercise {
+    fun activeExercise(variant: String, token: String): Exercise {
+        // Authenticated now: the backend only hands a student their own variant,
+        // never the full set (which would leak every variant's expected outputs).
         val resp = sendJson(
             "GET",
             "/api/exercises/active?variant=" + encode(variant),
             body = null,
-            token = null,
+            token = token,
         )
         requireOk(resp, "Could not load the exercise")
         return gson.fromJson(resp.body(), Exercise::class.java)
@@ -126,20 +128,20 @@ class OsLabApiClient {
 
     // --- probes -----------------------------------------------------------
 
-    fun pendingProbes(sessionId: String): List<Probe> {
+    fun pendingProbes(sessionId: String, token: String): List<Probe> {
         val resp = sendJson(
-            "GET", "/api/probes/pending/" + encode(sessionId), body = null, token = null,
+            "GET", "/api/probes/pending/" + encode(sessionId), body = null, token = token,
         )
         if (resp.statusCode() != 200) return emptyList()
         val arr = gson.fromJson(resp.body(), Array<Probe>::class.java) ?: return emptyList()
         return arr.toList()
     }
 
-    fun answerProbe(probeId: Int, answer: String): ProbeAnswerResponse {
+    fun answerProbe(probeId: Int, answer: String, token: String): ProbeAnswerResponse {
         val resp = sendJson(
             "POST", "/api/probes/answer",
             body = mapOf("probe_id" to probeId, "answer" to answer),
-            token = null,
+            token = token,
         )
         requireOk(resp, "Could not submit your answer")
         return gson.fromJson(resp.body(), ProbeAnswerResponse::class.java)
@@ -155,6 +157,7 @@ class OsLabApiClient {
     fun reportProctorEvent(
         sessionId: String,
         kind: String,
+        token: String,
         detail: String? = null,
         awayMs: Long? = null,
     ) {
@@ -162,16 +165,16 @@ class OsLabApiClient {
             val body = mutableMapOf<String, Any>("session_id" to sessionId, "kind" to kind)
             if (!detail.isNullOrBlank()) body["detail"] = detail
             if (awayMs != null) body["away_ms"] = awayMs
-            sendJson("POST", "/api/proctor/event", body = body, token = null)
+            sendJson("POST", "/api/proctor/event", body = body, token = token)
         } catch (e: Exception) {
             thisLogger().debug("proctor event report failed", e)
         }
     }
 
     /** Cheap keep-alive so a quiet exam student stays on the live grid. */
-    fun proctorHeartbeat(sessionId: String) {
+    fun proctorHeartbeat(sessionId: String, token: String) {
         try {
-            sendJson("POST", "/api/proctor/heartbeat", body = mapOf("session_id" to sessionId), token = null)
+            sendJson("POST", "/api/proctor/heartbeat", body = mapOf("session_id" to sessionId), token = token)
         } catch (e: Exception) {
             thisLogger().debug("proctor heartbeat failed", e)
         }

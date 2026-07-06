@@ -1,9 +1,9 @@
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend import db
+from backend import db, deps
 
 router = APIRouter()
 
@@ -43,8 +43,13 @@ def _touch_session(c, session_id: str) -> bool:
 
 
 @router.post("/proctor/event")
-def record_event(req: ProctorEventRequest):
-    """The exam client reports a focus/minimize/fullscreen change here."""
+def record_event(req: ProctorEventRequest, user: dict = Depends(deps.current_user)):
+    """The exam client reports a focus/minimize/fullscreen change here.
+
+    Bound to the caller's own session so a student can't forge focus_regained
+    to mask a leave, nor inject focus_lost into a classmate's session.
+    """
+    deps.require_owns_session(req.session_id, user)
     kind = req.kind.strip().lower()
     if kind not in _VALID_KINDS:
         raise HTTPException(422, f"Unknown proctor event kind: {req.kind!r}")
@@ -63,9 +68,11 @@ def record_event(req: ProctorEventRequest):
 
 
 @router.post("/proctor/heartbeat")
-def heartbeat(req: HeartbeatRequest):
+def heartbeat(req: HeartbeatRequest, user: dict = Depends(deps.current_user)):
     """Cheap keep-alive: keeps a quiet exam student on the live grid without
-    writing an event row."""
+    writing an event row. Bound to the caller's own session so presence can't
+    be spoofed from a script while the real client is closed."""
+    deps.require_owns_session(req.session_id, user)
     with db.conn() as c:
         if not _touch_session(c, req.session_id):
             raise HTTPException(404, "Unknown session")
@@ -73,7 +80,11 @@ def heartbeat(req: HeartbeatRequest):
 
 
 @router.get("/proctor/events")
-def list_events(session_id: Optional[str] = None, limit: int = 200):
+def list_events(
+    session_id: Optional[str] = None,
+    limit: int = 200,
+    teacher: dict = Depends(deps.require_teacher),
+):
     """Recent proctor events (newest first). Scope to one student with
     ?session_id=…; the dashboard uses it to render a per-student log."""
     limit = max(1, min(limit, 1000))

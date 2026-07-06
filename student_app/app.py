@@ -14,6 +14,8 @@ BACKEND = os.environ.get("BACKEND_URL", "http://127.0.0.1:8010")
 for noisy in ("httpx", "httpcore", "socketio", "engineio", "asyncio", "watchfiles", "uvicorn.access"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 
+log = logging.getLogger("oslab.student")
+
 
 @cl.on_chat_start
 async def on_chat_start():
@@ -32,36 +34,58 @@ async def on_chat_start():
             await cl.Message(content="No code received. Refresh the page to try again.").send()
             return
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        login = await client.post(f"{BACKEND}/api/login", json={"code": code})
-    if login.status_code != 200:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            login = await client.post(f"{BACKEND}/api/login", json={"code": code})
+    except httpx.HTTPError as e:
+        log.warning("login request failed: %s", e)
+        await cl.Message(content="⚠️ Can't reach the lab server. Ask the instructor.").send()
+        return
+    if login.status_code == 401:
         await cl.Message(content="❌ Code not found. Ask the instructor for your code.").send()
         return
+    if login.status_code != 200:
+        await cl.Message(content="⚠️ Login failed. Please try again in a moment.").send()
+        return
     token = login.json()["token"]
+    auth = {"Authorization": f"Bearer {token}"}
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        s = await client.post(
-            f"{BACKEND}/api/sessions",
-            json={},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-    s.raise_for_status()
-    sess = s.json()
-
-    async with httpx.AsyncClient(timeout=10) as client:
-        ex = await client.get(
-            f"{BACKEND}/api/exercises/active",
-            params={"variant": sess["variant"]},
-        )
-    ex.raise_for_status()
-    exercise = ex.json()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            s = await client.post(f"{BACKEND}/api/sessions", json={}, headers=auth)
+            s.raise_for_status()
+            sess = s.json()
+            # /exercises/active now requires the token (students only ever get
+            # their own assigned variant).
+            ex = await client.get(
+                f"{BACKEND}/api/exercises/active",
+                params={"variant": sess["variant"]},
+                headers=auth,
+            )
+            ex.raise_for_status()
+            exercise = ex.json()
+    except httpx.HTTPError as e:
+        log.warning("session/exercise setup failed: %s", e)
+        await cl.Message(content="⚠️ Couldn't start your session. Refresh to try again.").send()
+        return
 
     cl.user_session.set("token", token)
     cl.user_session.set("session_id", sess["session_id"])
     cl.user_session.set("mode", sess["mode"])
 
     await _send_briefing(exercise, sess["variant"], sess["mode"])
-    asyncio.create_task(_poll_probes(sess["session_id"]))
+    # Track the poll task so we can cancel it when the chat session ends —
+    # otherwise a page refresh leaks a second forever-running poller that
+    # double-prompts the same probe.
+    task = asyncio.create_task(_poll_probes(sess["session_id"], token))
+    cl.user_session.set("probe_task", task)
+
+
+@cl.on_chat_end
+async def on_chat_end():
+    task = cl.user_session.get("probe_task")
+    if task:
+        task.cancel()
 
 
 async def _send_briefing(exercise: dict, variant_id: str, mode: str):
@@ -106,33 +130,58 @@ async def _ask(text: str):
     await out.send()
     # 10 min — large enough to cover teacher-review mode (server holds the
     # response until the teacher picks a variant).
-    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
-        async with client.stream(
-            "POST",
-            f"{BACKEND}/api/ask",
-            json={"session_id": session_id, "message": text},
-            headers={"Authorization": f"Bearer {token}"},
-        ) as resp:
-            async for chunk in resp.aiter_text():
-                if chunk:
-                    await out.stream_token(chunk)
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
+            async with client.stream(
+                "POST",
+                f"{BACKEND}/api/ask",
+                json={"session_id": session_id, "message": text},
+                headers={"Authorization": f"Bearer {token}"},
+            ) as resp:
+                if resp.status_code != 200:
+                    # Read the error body instead of streaming it in as if it
+                    # were the tutor's answer.
+                    await resp.aread()
+                    out.content = _ask_error_message(resp.status_code)
+                    await out.update()
+                    return
+                async for chunk in resp.aiter_text():
+                    if chunk:
+                        await out.stream_token(chunk)
+    except httpx.HTTPError as e:
+        log.warning("ask stream failed: %s", e)
+        out.content = "⚠️ Lost connection to the tutor. Please try again."
+        await out.update()
+        return
     await out.update()
 
 
-async def _poll_probes(session_id: str):
-    while True:
-        try:
-            async with httpx.AsyncClient(timeout=5) as client:
-                r = await client.get(f"{BACKEND}/api/probes/pending/{session_id}")
-            if r.status_code == 200 and r.json():
-                for probe in r.json():
-                    await _handle_probe(probe)
-        except Exception as e:
-            print(f"[poll_probes] {e}")
-        await asyncio.sleep(2)
+def _ask_error_message(status: int) -> str:
+    if status in (401, 403):
+        return "⚠️ Your session expired. Refresh the page and log in again."
+    return "⚠️ The tutor is unavailable right now. Please try again in a moment."
 
 
-async def _handle_probe(probe: dict):
+async def _poll_probes(session_id: str, token: str):
+    auth = {"Authorization": f"Bearer {token}"}
+    try:
+        while True:
+            try:
+                async with httpx.AsyncClient(timeout=5) as client:
+                    r = await client.get(
+                        f"{BACKEND}/api/probes/pending/{session_id}", headers=auth
+                    )
+                if r.status_code == 200 and r.json():
+                    for probe in r.json():
+                        await _handle_probe(probe, token)
+            except Exception as e:
+                log.warning("[poll_probes] %s", e)
+            await asyncio.sleep(2)
+    except asyncio.CancelledError:
+        pass  # chat ended; stop polling cleanly
+
+
+async def _handle_probe(probe: dict, token: str):
     res = await cl.AskUserMessage(
         content=f"🎓 **Your instructor is asking you:**\n\n> {probe['body']}\n\nType your answer:",
         timeout=600,
@@ -140,13 +189,21 @@ async def _handle_probe(probe: dict):
     answer = (res or {}).get("output", "").strip()
     if not answer:
         return
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            f"{BACKEND}/api/probes/answer",
-            json={"probe_id": probe["id"], "answer": answer},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                f"{BACKEND}/api/probes/answer",
+                json={"probe_id": probe["id"], "answer": answer},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+    except httpx.HTTPError as e:
+        log.warning("probe answer failed: %s", e)
+        await cl.Message(content="⚠️ Couldn't submit your answer — please try again.").send()
+        return
     if r.status_code == 200:
         data = r.json()
         await cl.Message(
             content=f"✅ Answer submitted. Auto-grade: **{data['auto_grade']}/2** — {data['why']}"
         ).send()
+    else:
+        await cl.Message(content="⚠️ Couldn't submit your answer — please try again.").send()

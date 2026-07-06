@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "./api";
+import { api, auth, setUnauthorizedHandler } from "./api";
 import type { ActiveExercise, Student } from "./types";
 import { ExerciseHeader } from "./components/ExerciseHeader";
 import { StudentGrid } from "./components/StudentGrid";
@@ -8,27 +8,36 @@ import { ChatViewModal } from "./components/ChatViewModal";
 import { ProctorBanner } from "./components/ProctorBanner";
 import { ProctorLogModal } from "./components/ProctorLogModal";
 import { ReviewQueue } from "./components/ReviewQueue";
+import { LoginGate } from "./components/LoginGate";
 import { alertBeep, primeAudio } from "./proctor";
 import { LanguageToggle, useLang } from "./i18n";
 
 export function App() {
   const { t } = useLang();
+  const [authed, setAuthed] = useState<boolean>(() => !!auth.get());
   const [exercise, setExercise] = useState<ActiveExercise | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [askingSessionId, setAskingSessionId] = useState<string | null>(null);
   const [viewingSessionId, setViewingSessionId] = useState<string | null>(null);
   const [proctorSessionId, setProctorSessionId] = useState<string | null>(null);
 
+  // Any 401/403 from the API bounces us back to the login screen.
   useEffect(() => {
-    api.activeExercise().then(setExercise).catch(console.error);
+    setUnauthorizedHandler(() => setAuthed(false));
   }, []);
 
   useEffect(() => {
+    if (!authed) return;
+    api.activeExercise().then(setExercise).catch(console.error);
+  }, [authed]);
+
+  useEffect(() => {
+    if (!authed) return;
     const tick = () => api.students().then(setStudents).catch(console.error);
     tick();
     const id = setInterval(tick, 3000);
     return () => clearInterval(id);
-  }, []);
+  }, [authed]);
 
   // Browsers block audio until a user gesture; unlock the alert tone on the
   // teacher's first interaction with the page.
@@ -63,6 +72,13 @@ export function App() {
   const viewingTarget = students.find((s) => s.session_id === viewingSessionId) ?? null;
   const proctorTarget = students.find((s) => s.session_id === proctorSessionId) ?? null;
 
+  if (!authed) return <LoginGate onLoggedIn={() => setAuthed(true)} />;
+
+  const signOut = () => {
+    auth.clear();
+    setAuthed(false);
+  };
+
   return (
     <div style={{ fontFamily: "system-ui", padding: 24, maxWidth: 1200, margin: "0 auto" }}>
       <div style={{
@@ -70,7 +86,16 @@ export function App() {
         marginBottom: 16,
       }}>
         <strong style={{ fontSize: 18 }}>{t("appTitle")}</strong>
-        <LanguageToggle />
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <LanguageToggle />
+          <button
+            onClick={signOut}
+            style={{ padding: "4px 10px", borderRadius: 4, border: "1px solid #d1d5db",
+                     background: "white", cursor: "pointer", fontSize: 12 }}
+          >
+            {t("signOut")}
+          </button>
+        </div>
       </div>
       {exercise && <ExerciseHeader exercise={exercise} studentCount={students.length} />}
       <ProctorBanner students={students} onInspect={setProctorSessionId} />

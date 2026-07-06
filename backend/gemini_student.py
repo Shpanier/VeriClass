@@ -25,11 +25,26 @@ _MAX_ATTEMPTS = 3
 
 
 def _to_gemini(messages: list[dict]) -> list[dict]:
-    """Map [{role:user|assistant, content:...}] → Gemini [{role:user|model, parts:[{text:...}]}]"""
-    out = []
+    """Map [{role:user|assistant, content:...}] → Gemini [{role:user|model, parts:[{text:...}]}].
+
+    Gemini rejects empty parts and mishandles a non-alternating history, so we
+    defensively (1) drop empty turns, (2) merge consecutive same-role turns, and
+    (3) drop any leading model turn — leaving a clean user/model alternation
+    that starts with a user turn. Without this, a single empty/failed turn in the
+    stored transcript makes the model answer as if it lost the conversation.
+    """
+    out: list[dict] = []
     for m in messages:
+        text = (m.get("content") or "").strip()
+        if not text:
+            continue
         role = "model" if m["role"] == "assistant" else "user"
-        out.append({"role": role, "parts": [{"text": m["content"]}]})
+        if out and out[-1]["role"] == role:
+            out[-1]["parts"][0]["text"] += "\n\n" + text
+        else:
+            out.append({"role": role, "parts": [{"text": text}]})
+    while out and out[0]["role"] == "model":
+        out.pop(0)
     return out
 
 
@@ -44,14 +59,17 @@ async def stream_chat(
     system_prompt: str, messages: list[dict], timeout: float = 60.0
 ) -> AsyncIterator[str]:
     key = os.environ[API_KEY_ENV]
-    url = f"{BASE}/{MODEL}:streamGenerateContent?alt=sse&key={key}"
+    # Pass the key in a header, not the query string — a URL key lands in proxy
+    # and access logs; a header does not.
+    url = f"{BASE}/{MODEL}:streamGenerateContent?alt=sse"
+    headers = {"x-goog-api-key": key}
     payload = _payload(system_prompt, messages)
 
     for attempt in range(_MAX_ATTEMPTS):
         emitted = False  # once we've yielded text we can't safely retry (would duplicate)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream("POST", url, json=payload) as resp:
+                async with client.stream("POST", url, json=payload, headers=headers) as resp:
                     # Transient overload → drain, back off, and retry (if attempts left).
                     if resp.status_code in _RETRYABLE_STATUS and attempt < _MAX_ATTEMPTS - 1:
                         await resp.aread()
@@ -88,28 +106,3 @@ async def stream_chat(
             log.warning("gemini network error (%s); retry %d/%d in %.1fs",
                         type(e).__name__, attempt + 1, _MAX_ATTEMPTS - 1, delay)
             await asyncio.sleep(delay)
-
-
-async def grade_answer(question: str, answer: str, variant_params: dict) -> tuple[int, str]:
-    prompt = (
-        "You grade a student's answer to a targeted comprehension question.\n"
-        "Score: 0 = wrong/missing, 1 = partially correct, 2 = correct.\n"
-        f"Variant params: {json.dumps(variant_params)}\n\n"
-        f"Question: {question}\n"
-        f"Student answer: {answer}\n\n"
-        'Reply with strict JSON: {"score": 0|1|2, "why": "one short line"}'
-    )
-    text = ""
-    async for tok in stream_chat(prompt, [{"role": "user", "content": "Grade now."}]):
-        text += tok
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("```", 2)[1]
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-    try:
-        result = json.loads(text)
-        return int(result["score"]), str(result["why"])
-    except (json.JSONDecodeError, KeyError, ValueError):
-        return 0, "Could not parse grader output"

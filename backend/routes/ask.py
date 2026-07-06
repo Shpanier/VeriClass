@@ -1,13 +1,12 @@
 import asyncio
 import logging
-from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend import auth, db, exercises, student_llm
+from backend import db, deps, exercises, student_llm
 from backend.agents import tutor
 from backend.prompts import student_system_prompt
 from backend.routes import review as review_mod
@@ -33,20 +32,17 @@ _DENYLIST_PHRASES = [
 
 
 @router.post("/ask")
-async def ask(req: AskRequest, authorization: str = Header(None)):
-    _user_or_401(authorization)
+async def ask(req: AskRequest, user: dict = Depends(deps.current_user)):
+    # 404 unknown / 403 someone else's session — before we touch the LLM.
+    s = deps.require_owns_session(req.session_id, user)
     if any(p in req.message.lower() for p in _DENYLIST_PHRASES):
         raise HTTPException(400, "Request looks like prompt injection — refused.")
 
     with db.conn() as c:
-        s = c.execute(
-            "SELECT exercise, mode, variant FROM sessions WHERE id = ?", (req.session_id,)
-        ).fetchone()
-        if not s:
-            raise HTTPException(404, "Unknown session")
         history = c.execute(
             "SELECT role, body FROM messages WHERE session_id = ? "
-            "ORDER BY created_at DESC LIMIT 20",
+            "AND trim(body) != '' "
+            "ORDER BY created_at DESC, id DESC LIMIT 20",
             (req.session_id,),
         ).fetchall()
 
@@ -88,11 +84,18 @@ async def ask(req: AskRequest, authorization: str = Header(None)):
             log.warning("Student LLM (gemini) unreachable: %s", e)
             yield "\n\n_⚠️ Student LLM (gemini) unreachable. Check network / GEMINI_API_KEY._\n"
         finally:
+            reply = "".join(collected)
             with db.conn() as c:
-                c.execute(
-                    "INSERT INTO messages (session_id, role, body, mode_at_time) VALUES (?, ?, ?, ?)",
-                    (req.session_id, "assistant", "".join(collected), s["mode"]),
-                )
+                # Only persist a real reply. Storing an empty assistant turn
+                # (transient Gemini error / safety block) poisons the session:
+                # it comes back as an empty model part with broken user/model
+                # alternation, which Gemini mishandles — the model then answers
+                # as if it forgot the conversation.
+                if reply.strip():
+                    c.execute(
+                        "INSERT INTO messages (session_id, role, body, mode_at_time) VALUES (?, ?, ?, ?)",
+                        (req.session_id, "assistant", reply, s["mode"]),
+                    )
                 c.execute(
                     "UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (req.session_id,),
@@ -169,12 +172,3 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict]):
             )
     finally:
         review_mod.drop_event(review_id)
-
-
-def _user_or_401(authorization: Optional[str]) -> int:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Missing token")
-    user_id = auth.user_id_for_token(authorization.removeprefix("Bearer ").strip())
-    if user_id is None:
-        raise HTTPException(401, "Invalid token")
-    return user_id

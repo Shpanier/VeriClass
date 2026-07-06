@@ -42,7 +42,11 @@ class OsLabPanel(
 
     private val api = OsLabApiClient()
     private val loginPanel = LoginPanel(::doLogin)
-    private var examGuard: ExamGuard? = null
+    // Everything tied to one logged-in session (chat, probe poller, exam guard)
+    // is registered to this child disposable so a re-login tears the previous
+    // session down completely — otherwise a second login stacks a second
+    // forever-running ProbePoller and re-attaches exam window listeners.
+    private var sessionDisposable: Disposable? = null
 
     init {
         add(loginPanel, BorderLayout.CENTER)
@@ -61,7 +65,7 @@ class OsLabPanel(
             try {
                 val login = api.login(code)
                 val session = api.startSession(login.token)
-                val exercise = api.activeExercise(session.variant)
+                val exercise = api.activeExercise(session.variant, login.token)
                 val config = api.clientConfig()
                 ApplicationManager.getApplication().invokeLater {
                     if (project.isDisposed) return@invokeLater
@@ -87,6 +91,13 @@ class OsLabPanel(
     ) {
         removeAll()
 
+        // Tear down the previous session's background work (poller/chat/guard)
+        // before building the new one, then scope everything to a fresh child.
+        sessionDisposable?.let { Disposer.dispose(it) }
+        val sessionScope = Disposer.newDisposable("oslab-session")
+        Disposer.register(parent, sessionScope)
+        sessionDisposable = sessionScope
+
         // North stack: an (initially hidden) exam warning banner above the header.
         // BorderLayout stretches both to the full tool-window width.
         val banner = ExamBanner()
@@ -96,7 +107,7 @@ class OsLabPanel(
         }
         add(north, BorderLayout.NORTH)
 
-        val chat = ChatPanel(api, login.token, session.session_id, parent)
+        val chat = ChatPanel(api, login.token, session.session_id, sessionScope)
 
         val column = ScrollableColumn().apply {
             add(BriefingPanel(exercise, session.variant, session.mode).apply {
@@ -126,20 +137,17 @@ class OsLabPanel(
             ExerciseScaffolder.scaffold(project, config.scaffold_filename, exercise)
         }
 
-        ProbePoller(api, session.session_id, config.poll_interval_ms.toLong(), parent)
+        ProbePoller(api, session.session_id, login.token, config.poll_interval_ms.toLong(), sessionScope)
 
         // Exam mode: arm the proctor (full screen + leave-the-IDE detection).
-        // Dispose any prior guard first so a re-login can't double-attach
-        // window listeners or run two full-screen watchdogs.
-        examGuard?.let { Disposer.dispose(it) }
-        examGuard = if (config.isExamMode) {
+        // Scoped to sessionScope, so a re-login disposes it before re-arming —
+        // no double-attached window listeners or duplicate full-screen watchdogs.
+        if (config.isExamMode) {
             ExamGuard(
-                project, api, session.session_id, config,
+                project, api, session.session_id, login.token, config,
                 onViolation = { count, reason -> banner.show(count, reason) },
-                parent = parent,
+                parent = sessionScope,
             )
-        } else {
-            null
         }
 
         revalidate()

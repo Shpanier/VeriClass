@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class ProbePoller(
     private val api: OsLabApiClient,
     private val sessionId: String,
+    private val token: String,
     private val pollIntervalMs: Long,
     parent: Disposable,
 ) : Disposable {
@@ -44,7 +45,7 @@ class ProbePoller(
     private fun pollOnce() {
         if (stopped.get()) return
         val probes = try {
-            api.pendingProbes(sessionId)
+            api.pendingProbes(sessionId, token)
         } catch (e: Exception) {
             thisLogger().debug("probe poll failed", e)
             return
@@ -70,7 +71,7 @@ class ProbePoller(
         }
         ApplicationManager.getApplication().executeOnPooledThread {
             val result = try {
-                api.answerProbe(probeId, answer)
+                api.answerProbe(probeId, answer, token)
             } catch (e: Exception) {
                 ApplicationManager.getApplication().invokeLater {
                     Messages.showErrorDialog(

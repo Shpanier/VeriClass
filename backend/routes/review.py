@@ -8,10 +8,10 @@ held /ask request unblocks and streams the chosen text back to the student.
 import asyncio
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend import db
+from backend import db, deps
 
 router = APIRouter()
 
@@ -48,12 +48,12 @@ class ReviewModeRequest(BaseModel):
 
 
 @router.get("/review_mode")
-def get_review_mode():
+def get_review_mode(teacher: dict = Depends(deps.require_teacher)):
     return {"enabled": review_mode_enabled()}
 
 
 @router.post("/review_mode")
-def set_review_mode(req: ReviewModeRequest):
+def set_review_mode(req: ReviewModeRequest, teacher: dict = Depends(deps.require_teacher)):
     value = "on" if req.enabled else "off"
     with db.conn() as c:
         c.execute(
@@ -67,7 +67,7 @@ def set_review_mode(req: ReviewModeRequest):
 # --- pending queue --------------------------------------------------------
 
 @router.get("/reviews/pending")
-def pending_reviews():
+def pending_reviews(teacher: dict = Depends(deps.require_teacher)):
     with db.conn() as c:
         rows = c.execute(
             """
@@ -107,7 +107,7 @@ _VARIANT_COL = {
 
 
 @router.post("/reviews/{review_id}/select")
-def select_variant(review_id: int, req: SelectRequest):
+def select_variant(review_id: int, req: SelectRequest, teacher: dict = Depends(deps.require_teacher)):
     col = _VARIANT_COL[(req.chosen, req.lang)]
     with db.conn() as c:
         row = c.execute(

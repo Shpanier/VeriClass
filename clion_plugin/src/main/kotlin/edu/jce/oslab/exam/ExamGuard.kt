@@ -45,6 +45,7 @@ class ExamGuard(
     private val project: Project,
     private val api: OsLabApiClient,
     private val sessionId: String,
+    private val token: String,
     private val config: ClientConfig,
     /** Updates the in-tool-window warning banner. Always invoked on the EDT. */
     private val onViolation: (count: Int, reason: String) -> Unit,
@@ -160,7 +161,7 @@ class ExamGuard(
 
     private fun safeHeartbeat() {
         if (stopped.get()) return
-        api.proctorHeartbeat(sessionId)
+        api.proctorHeartbeat(sessionId, token)
     }
 
     /**
@@ -194,7 +195,7 @@ class ExamGuard(
     private fun report(kind: String, detail: String?, awayMs: Long?) {
         if (stopped.get()) return
         ApplicationManager.getApplication().executeOnPooledThread {
-            api.reportProctorEvent(sessionId, kind, detail, awayMs)
+            api.reportProctorEvent(sessionId, kind, token, detail, awayMs)
         }
     }
 

@@ -1,6 +1,6 @@
 [project]
-# Whether to enable telemetry (default: true). No personal data is collected.
-enable_telemetry = true
+# Off during proctored assessment — no third-party telemetry from an exam.
+enable_telemetry = false
 
 
 # List of environment variables to be provided by each user to use the app.
@@ -12,8 +12,9 @@ session_timeout = 3600
 # Enable third parties caching (e.g LangChain cache)
 cache = false
 
-# Authorized origins
-allow_origins = ["*"]
+# Authorized origins — the student app is served to browsers on the lab host.
+# Tighten to your deployment origin(s) in production instead of "*".
+allow_origins = ["http://localhost:8011", "http://127.0.0.1:8011"]
 
 # Follow symlink for asset mount (see https://github.com/Chainlit/chainlit/issues/317)
 # follow_symlink = false
@@ -31,12 +32,14 @@ auto_tag_thread = true
 # Allow users to edit their own messages
 edit_message = true
 
-# Authorize users to spontaneously upload files with messages
+# Disabled: the tutor never consumes uploads, so an open 500MB */* upload is
+# pure abuse surface during an exam. Re-enable narrowly if a future exercise
+# needs file submission.
 [features.spontaneous_file_upload]
-    enabled = true
-    accept = ["*/*"]
-    max_files = 20
-    max_size_mb = 500
+    enabled = false
+    accept = ["text/plain"]
+    max_files = 1
+    max_size_mb = 5
 
 [features.audio]
     # Threshold for audio recording
