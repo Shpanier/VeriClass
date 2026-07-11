@@ -42,10 +42,25 @@ class BriefingPanel(exercise: Exercise, variantId: String, mode: String) :
         sb.append(MarkdownLite.toHtml(ex.brief_md))
 
         if (v != null) {
-            sb.append("<h3>Your variant parameters</h3><ul>")
+            sb.append("<h3>Your variant</h3><ul>")
+            val covered = HashSet<String>()
+            // Authored labels first (in order); they connect each param to the exercise.
+            for (pl in ex.param_labels) {
+                if (pl.key.isBlank() || !v.params.containsKey(pl.key)) continue
+                covered.add(pl.key)
+                val label = if (pl.label.isNullOrBlank()) Format.prettifyKey(pl.key) else pl.label
+                sb.append("<li><b>").append(Format.html(label)).append(":</b> ")
+                    .append(Format.html(Format.paramValue(v.params[pl.key])))
+                if (!pl.note.isNullOrBlank()) {
+                    sb.append(" <span style=\"color:gray;\">&mdash; ").append(Format.html(pl.note)).append("</span>")
+                }
+                sb.append("</li>")
+            }
+            // Any remaining params fall back to a prettified key.
             for ((k, value) in v.params) {
-                sb.append("<li><code>").append(Format.html(k)).append("</code> = <code>")
-                    .append(Format.html(Format.value(value))).append("</code></li>")
+                if (covered.contains(k)) continue
+                sb.append("<li><b>").append(Format.html(Format.prettifyKey(k))).append(":</b> ")
+                    .append(Format.html(Format.paramValue(value))).append("</li>")
             }
             sb.append("</ul>")
 

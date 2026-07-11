@@ -151,21 +151,61 @@ pip install -r requirements.txt
 cp .env.example .env
 # edit .env — set GEMINI_API_KEY (the only LLM key needed)
 
-# 4. Seed students
-python scripts/add_students.py --names "Yossi Cohen,Shira Levi,Ahmed Alyan"
+# 4. Seed students — and at least one instructor (see "Instructor login" below)
+python scripts/add_students.py \
+  --names "Yossi Cohen,Shira Levi,Ahmed Alyan" \
+  --teachers "Dr. Cohen"
 ```
 
-Demo students after seeding:
+Demo accounts after seeding:
 
-| Name         | Login code |
-|--------------|------------|
-| Yossi Cohen  | STU1-XXXX   |
-| Shira Levi   | STU2-XXXX   |
-| Ahmed Alyan  | STU3-XXXX   |
+| Name         | Login code | Role       |
+|--------------|------------|------------|
+| Instructor   | LMT-6JCF   | teacher    |
+| Yossi Cohen  | STU1-XXXX   | student    |
+| Shira Levi   | STU2-XXXX   | student    |
+| Ahmed Alyan  | STU3-XXXX   | student    |
+
+> Sign into the dashboard (`http://localhost:5173`) with the **instructor**
+> code **`LMT-6JCF`**. Your own codes will differ — the seeding script
+> generates them randomly; run the `sqlite3` query below to list yours.
 
 Students go to `http://localhost:8011`, instructor to `http://localhost:5173`.
 Prefer the IDE? Skip the browser and use the CLion plugin client instead — see
 [Alternative student client: the CLion plugin](#alternative-student-client-the-clion-plugin).
+
+### Instructor login
+
+The dashboard (`http://localhost:5173`) is gated by an instructor login — its
+sign-in screen reads **"כניסת מרצה — enter your instructor code"**. A teacher
+signs in with a **login code**, exactly like a student, except their account
+carries `role=teacher`. A student code is rejected here (*"That code isn't an
+instructor account."*).
+
+Create instructor codes with the same seeding script, using `--teachers`:
+
+```bash
+python scripts/add_students.py --teachers "Dr. Cohen,TA Levi"
+```
+
+It prints a `name → code` table (a separate **"teachers (dashboard login)"**
+section). Distribute that code to the instructor; they type it into the login
+screen (codes are case-insensitive). To add a teacher to an existing database
+directly:
+
+```bash
+sqlite3 oslab.db \
+  "INSERT INTO users(username, login_code, role) VALUES('Dr. Cohen','TEACH-01','teacher');"
+```
+
+List the instructor codes already in your database at any time:
+
+```bash
+sqlite3 oslab.db "SELECT username, login_code FROM users WHERE role='teacher';"
+```
+
+Only a `role=teacher` account can open the **Exercises** tab and author new
+exercises, switch a student's persona, or toggle review mode.
 
 ---
 

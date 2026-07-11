@@ -9,17 +9,24 @@ import { ProctorBanner } from "./components/ProctorBanner";
 import { ProctorLogModal } from "./components/ProctorLogModal";
 import { ReviewQueue } from "./components/ReviewQueue";
 import { LoginGate } from "./components/LoginGate";
+import { ExercisesPanel } from "./components/ExercisesPanel";
 import { alertBeep, primeAudio } from "./proctor";
 import { LanguageToggle, useLang } from "./i18n";
+
+type Tab = "monitor" | "exercises";
 
 export function App() {
   const { t } = useLang();
   const [authed, setAuthed] = useState<boolean>(() => !!auth.get());
+  const [tab, setTab] = useState<Tab>("monitor");
   const [exercise, setExercise] = useState<ActiveExercise | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [askingSessionId, setAskingSessionId] = useState<string | null>(null);
   const [viewingSessionId, setViewingSessionId] = useState<string | null>(null);
   const [proctorSessionId, setProctorSessionId] = useState<string | null>(null);
+
+  const refreshActiveExercise = () =>
+    api.activeExercise().then(setExercise).catch(console.error);
 
   // Any 401/403 from the API bounces us back to the login screen.
   useEffect(() => {
@@ -28,7 +35,7 @@ export function App() {
 
   useEffect(() => {
     if (!authed) return;
-    api.activeExercise().then(setExercise).catch(console.error);
+    refreshActiveExercise();
   }, [authed]);
 
   useEffect(() => {
@@ -97,19 +104,29 @@ export function App() {
           </button>
         </div>
       </div>
-      {exercise && <ExerciseHeader exercise={exercise} studentCount={students.length} />}
-      <ProctorBanner students={students} onInspect={setProctorSessionId} />
-      <ReviewQueue />
-      <StudentGrid
-        students={students}
-        onModeChange={async (id, mode) => {
-          await api.setMode(id, mode);
-          api.students().then(setStudents);
-        }}
-        onAskThem={(id) => setAskingSessionId(id)}
-        onViewChat={(id) => setViewingSessionId(id)}
-        onProctorLog={(id) => setProctorSessionId(id)}
-      />
+      <TabBar tab={tab} onChange={setTab} t={t} />
+
+      {tab === "monitor" && (
+        <>
+          {exercise && <ExerciseHeader exercise={exercise} studentCount={students.length} />}
+          <ProctorBanner students={students} onInspect={setProctorSessionId} />
+          <ReviewQueue />
+          <StudentGrid
+            students={students}
+            paramLabels={exercise?.param_labels}
+            onModeChange={async (id, mode) => {
+              await api.setMode(id, mode);
+              api.students().then(setStudents);
+            }}
+            onAskThem={(id) => setAskingSessionId(id)}
+            onViewChat={(id) => setViewingSessionId(id)}
+            onProctorLog={(id) => setProctorSessionId(id)}
+          />
+        </>
+      )}
+
+      {tab === "exercises" && <ExercisesPanel onActiveChanged={refreshActiveExercise} />}
+
       {askingTarget && (
         <AskThemModal
           student={askingTarget}
@@ -121,11 +138,56 @@ export function App() {
         />
       )}
       {viewingTarget && (
-        <ChatViewModal student={viewingTarget} onClose={() => setViewingSessionId(null)} />
+        <ChatViewModal
+          student={viewingTarget}
+          paramLabels={exercise?.param_labels}
+          onClose={() => setViewingSessionId(null)}
+        />
       )}
       {proctorTarget && (
         <ProctorLogModal student={proctorTarget} onClose={() => setProctorSessionId(null)} />
       )}
+    </div>
+  );
+}
+
+function TabBar({
+  tab,
+  onChange,
+  t,
+}: {
+  tab: Tab;
+  onChange: (t: Tab) => void;
+  t: (key: "tabMonitor" | "tabExercises") => string;
+}) {
+  const tabs: { key: Tab; label: string }[] = [
+    { key: "monitor", label: t("tabMonitor") },
+    { key: "exercises", label: t("tabExercises") },
+  ];
+  return (
+    <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #e5e7eb", marginBottom: 20 }}>
+      {tabs.map(({ key, label }) => {
+        const active = tab === key;
+        return (
+          <button
+            key={key}
+            onClick={() => onChange(key)}
+            style={{
+              padding: "8px 16px",
+              border: "none",
+              borderBottom: `2px solid ${active ? "#111827" : "transparent"}`,
+              background: "none",
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: active ? 700 : 500,
+              color: active ? "#111827" : "#6b7280",
+              marginBottom: -1,
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
     </div>
   );
 }

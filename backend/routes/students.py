@@ -1,12 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend import db, deps
+from backend import db, deps, exercises
 from backend.routes.proctor import ALERT_KINDS
 
 router = APIRouter()
 
 # Build the "(?, ?, ?)" placeholder list + params once for the alert-count subquery.
 _ALERT_PLACEHOLDERS = ", ".join("?" for _ in ALERT_KINDS)
+
+
+def _variant_params(exercise_id: str, variant_id: str) -> dict:
+    """This session's variant parameters, for the dashboard to render. Empty if
+    the exercise/variant no longer exists (e.g. an edit removed the variant)."""
+    try:
+        return exercises.variant(exercise_id, variant_id).get("params", {})
+    except Exception:
+        return {}
 
 
 @router.get("/students")
@@ -48,6 +57,7 @@ def list_students(teacher: dict = Depends(deps.require_teacher)):
     for r in rows:
         d = dict(r)
         d["away"] = d["last_focus_kind"] in ALERT_KINDS
+        d["variant_params"] = _variant_params(d["exercise"], d["variant"])
         students.append(d)
     return students
 
@@ -77,8 +87,10 @@ def session_messages(session_id: str, teacher: dict = Depends(deps.require_teach
             "sent_at, answered_at FROM probes WHERE session_id = ? ORDER BY sent_at ASC",
             (session_id,),
         ).fetchall()
+    session = dict(sess)
+    session["variant_params"] = _variant_params(session["exercise"], session["variant"])
     return {
-        "session": dict(sess),
+        "session": session,
         "messages": [dict(m) for m in messages],
         "probes": [dict(p) for p in probes],
     }

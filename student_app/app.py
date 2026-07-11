@@ -88,16 +88,52 @@ async def on_chat_end():
         task.cancel()
 
 
+def _format_param_value(value) -> str:
+    """Render a param value for humans: bools as yes/no, lists comma-joined."""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(x) for x in value)
+    return str(value)
+
+
+def _prettify_key(key: str) -> str:
+    return key.replace("_", " ").replace("-", " ").strip().capitalize()
+
+
+def _format_params(params: dict, labels: list[dict]) -> str:
+    """A labeled markdown list connecting each variant param to its meaning.
+    `labels` (exercise-level param_labels) sets the order + friendly labels;
+    any params not covered fall back to a prettified key."""
+    lines: list[str] = []
+    covered: set[str] = set()
+    for pl in labels or []:
+        key = pl.get("key")
+        if key is None or key not in params:
+            continue
+        covered.add(key)
+        label = pl.get("label") or _prettify_key(key)
+        note = pl.get("note")
+        suffix = f" — _{note}_" if note else ""
+        lines.append(f"- **{label}:** {_format_param_value(params[key])}{suffix}")
+    for key, value in params.items():
+        if key in covered:
+            continue
+        lines.append(f"- **{_prettify_key(key)}:** {_format_param_value(value)}")
+    return "\n".join(lines)
+
+
 async def _send_briefing(exercise: dict, variant_id: str, mode: str):
     v = exercise["variant"]
     test_lines = "\n".join(
         f"- `mcalc \"{t['input']}\"` → `{t['expected_output']}`"
         for t in v["test_inputs"]
     )
+    params_block = _format_params(v["params"], exercise.get("param_labels", []))
     body = (
         f"### 📘 Your exercise: {exercise['title_en']} (variant {variant_id})\n\n"
         f"{exercise['brief_md']}\n\n"
-        f"**Your variant parameters:** `{v['params']}`\n\n"
+        f"**Your variant:**\n{params_block}\n\n"
         f"**Test inputs you must pass:**\n{test_lines}\n\n"
         f"**Mode:** `{mode}`"
     )

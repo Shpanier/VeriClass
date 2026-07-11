@@ -41,6 +41,23 @@ CREATE TABLE IF NOT EXISTS system_settings (
     value TEXT NOT NULL
 );
 
+-- Teacher-authored exercises. Bundled exercises still live as YAML under
+-- config/exercises/; these are the ones created from the instructor console.
+-- Top-level fields mirror the YAML; variants + optional lists are kept in the
+-- `data` JSON blob so the loader can rebuild the exact dict shape that the rest
+-- of the backend already expects. `source` is always 'console' here (YAML
+-- exercises carry 'yaml' in memory but are never written to this table).
+CREATE TABLE IF NOT EXISTS exercises (
+    exercise_id   TEXT PRIMARY KEY,
+    title_en      TEXT NOT NULL,
+    title_he      TEXT,
+    default_mode  TEXT NOT NULL,          -- mentor | coding_partner
+    brief_md      TEXT NOT NULL,
+    data          TEXT NOT NULL,          -- JSON: {variants, welcome_suggestions, required_error_strings}
+    source        TEXT NOT NULL DEFAULT 'console',
+    created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS pending_reviews (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id   TEXT NOT NULL,

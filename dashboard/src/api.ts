@@ -1,7 +1,10 @@
 import type {
   ActiveExercise,
   AnswerLevel,
+  ExerciseSummary,
+  FullExercise,
   Lang,
+  NewExercise,
   PendingReview,
   ProbeSuggestion,
   ProctorEvent,
@@ -39,8 +42,33 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
     onUnauthorized?.();
     throw new Error(`${r.status} unauthorized`);
   }
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  if (!r.ok) {
+    // Surface FastAPI's `detail` (or a 422 validation summary) so callers like
+    // the exercise-authoring form can show why a request was rejected.
+    const detail = await readErrorDetail(r);
+    throw new Error(detail || `${r.status} ${r.statusText}`);
+  }
   return r.json() as Promise<T>;
+}
+
+// FastAPI puts errors in `detail`: a string for HTTPException, or an array of
+// {loc, msg} for 422 validation failures. Fold either into one readable line.
+async function readErrorDetail(r: Response): Promise<string | null> {
+  try {
+    const body = await r.json();
+    const d = body?.detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d)) {
+      return d
+        .map((e: { loc?: unknown[]; msg?: string }) =>
+          `${(e.loc || []).slice(1).join(".")}: ${e.msg ?? ""}`.trim()
+        )
+        .join("; ");
+    }
+  } catch {
+    // Non-JSON body — fall through to the status line.
+  }
+  return null;
 }
 
 export interface LoginResult {
@@ -64,6 +92,23 @@ export async function login(code: string): Promise<LoginResult> {
 
 export const api = {
   activeExercise: () => j<ActiveExercise>("/api/exercises/active"),
+  exercises: () => j<ExerciseSummary[]>("/api/exercises"),
+  exercise: (id: string) => j<FullExercise>(`/api/exercises/${encodeURIComponent(id)}`),
+  createExercise: (payload: NewExercise) =>
+    j<ExerciseSummary>("/api/exercises", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateExercise: (id: string, payload: NewExercise) =>
+    j<ExerciseSummary>(`/api/exercises/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  setActiveExercise: (exerciseId: string) =>
+    j<{ exercise_id: string }>("/api/exercises/active", {
+      method: "POST",
+      body: JSON.stringify({ exercise_id: exerciseId }),
+    }),
   students: () => j<Student[]>("/api/students"),
   sessionDetail: (sessionId: string) =>
     j<SessionDetail>(`/api/students/${sessionId}/messages`),

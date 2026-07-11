@@ -19,6 +19,10 @@ BACKEND_PORT=8010
 STUDENT_PORT=8011
 DASH_PORT=5173
 
+# Every window we open gets its tab's custom title prefixed with this tag, so a
+# later run can find and close the previous run's windows (and only those).
+WIN_TAG="OSLAB-DEV"
+
 kill_port() {
   local port=$1
   local pids
@@ -43,6 +47,25 @@ pkill -f 'uvicorn backend.main' 2>/dev/null || true
 pkill -f 'chainlit run student_app' 2>/dev/null || true
 sleep 0.3
 
+echo "==> closing Terminal windows from a previous run"
+# The processes are dead now (killed above), so the windows just hold an idle
+# shell — closing them won't prompt. We match on the custom title we stamped
+# each tab with, so only OUR windows close, never the one you launched from.
+osascript <<EOF 2>/dev/null || true
+tell application "Terminal"
+  repeat with w in (every window)
+    try
+      repeat with t in (tabs of w)
+        if custom title of t starts with "$WIN_TAG" then
+          close w saving no
+          exit repeat
+        end if
+      end repeat
+    end try
+  end repeat
+end tell
+EOF
+
 BACKEND_CMD="cd '$PROJECT_ROOT' && source .venv/bin/activate && uvicorn backend.main:app --reload --port $BACKEND_PORT"
 STUDENT_CMD="cd '$PROJECT_ROOT' && source .venv/bin/activate && BACKEND_URL=http://127.0.0.1:$BACKEND_PORT chainlit run student_app/app.py --port $STUDENT_PORT"
 DASH_CMD="cd '$PROJECT_ROOT/dashboard' && npm run dev"
@@ -54,21 +77,39 @@ echo "==> launching three Terminal.app windows"
 # permission and fails with "osascript is not allowed to send keystrokes".
 # Opening windows needs only Automation (Terminal controlling Terminal), which
 # macOS prompts for once on first run — just click OK.
+# Stamp each new tab's custom title with WIN_TAG so the next run can find and
+# close exactly these windows.
 osascript <<EOF
 tell application "Terminal"
   activate
-  do script "echo '--- backend (uvicorn :$BACKEND_PORT) ---'; $BACKEND_CMD"
-  do script "echo '--- student app (chainlit :$STUDENT_PORT) ---'; $STUDENT_CMD"
-  do script "echo '--- dashboard (vite :$DASH_PORT) ---'; $DASH_CMD"
+  set custom title of (do script "echo '--- backend (uvicorn :$BACKEND_PORT) ---'; $BACKEND_CMD") to "$WIN_TAG backend :$BACKEND_PORT"
+  set custom title of (do script "echo '--- student app (chainlit :$STUDENT_PORT) ---'; $STUDENT_CMD") to "$WIN_TAG student :$STUDENT_PORT"
+  set custom title of (do script "echo '--- dashboard (vite :$DASH_PORT) ---'; $DASH_CMD") to "$WIN_TAG dashboard :$DASH_PORT"
 end tell
 EOF
+
+# Open the teacher dashboard in the default browser once Vite is actually
+# serving. We poll the port (up to ~30s) instead of opening immediately, so the
+# browser doesn't land on a connection-refused page while Vite boots. Runs in
+# the background so the script returns right away.
+DASH_URL="http://localhost:$DASH_PORT/"
+(
+  for _ in $(seq 1 60); do
+    if lsof -ti tcp:"$DASH_PORT" >/dev/null 2>&1; then
+      open "$DASH_URL"
+      exit 0
+    fi
+    sleep 0.5
+  done
+  echo "  (dashboard didn't come up in time — open $DASH_URL manually)" >&2
+) &
 
 cat <<MSG
 
 ==> launched.
     backend     http://127.0.0.1:$BACKEND_PORT
     student app http://127.0.0.1:$STUDENT_PORT
-    dashboard   http://127.0.0.1:$DASH_PORT
+    dashboard   http://127.0.0.1:$DASH_PORT  (opening in your browser…)
 
     Alternative student client: the CLion plugin (clion_plugin/).
     Behavior is set by STUDENT_CLIENT_MODE in .env (chat | ide).

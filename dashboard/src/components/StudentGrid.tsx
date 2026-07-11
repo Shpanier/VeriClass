@@ -1,15 +1,17 @@
-import type { Student } from "../types";
+import type { ParamLabel, Student } from "../types";
+import { renderParams } from "../params";
 import { useLang } from "../i18n";
 
 interface Props {
   students: Student[];
+  paramLabels?: ParamLabel[];
   onModeChange: (sessionId: string, mode: "mentor" | "coding_partner") => void;
   onAskThem: (sessionId: string) => void;
   onViewChat: (sessionId: string) => void;
   onProctorLog: (sessionId: string) => void;
 }
 
-export function StudentGrid({ students, onModeChange, onAskThem, onViewChat, onProctorLog }: Props) {
+export function StudentGrid({ students, paramLabels, onModeChange, onAskThem, onViewChat, onProctorLog }: Props) {
   if (students.length === 0) return null;
   return (
     <div
@@ -23,6 +25,7 @@ export function StudentGrid({ students, onModeChange, onAskThem, onViewChat, onP
         <StudentCard
           key={s.session_id}
           s={s}
+          paramLabels={paramLabels}
           onModeChange={onModeChange}
           onAskThem={onAskThem}
           onViewChat={onViewChat}
@@ -35,18 +38,21 @@ export function StudentGrid({ students, onModeChange, onAskThem, onViewChat, onP
 
 function StudentCard({
   s,
+  paramLabels,
   onModeChange,
   onAskThem,
   onViewChat,
   onProctorLog,
 }: {
   s: Student;
+  paramLabels?: ParamLabel[];
   onModeChange: Props["onModeChange"];
   onAskThem: Props["onAskThem"];
   onViewChat: Props["onViewChat"];
   onProctorLog: Props["onProctorLog"];
 }) {
   const { t } = useLang();
+  const params = renderParams(s.variant_params, paramLabels);
   const initials = s.username
     .split(" ")
     .map((p) => p[0])
@@ -122,6 +128,17 @@ function StudentCard({
         </Chip>
         <Chip>🔎 {s.probe_count}</Chip>
       </div>
+      {params.length > 0 && (
+        <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 6, lineHeight: 1.5 }}>
+          {params.map((p, i) => (
+            <span key={i}>
+              {i > 0 && <span style={{ color: "#d1d5db" }}> · </span>}
+              <span style={{ color: "#6b7280" }}>{p.label}:</span>{" "}
+              <span style={{ fontWeight: 600 }} dir="auto">{p.value}</span>
+            </span>
+          ))}
+        </div>
+      )}
       <div style={{ fontSize: 12, color: "#666" }}>{t("lastActive", { t: s.last_active_at })}</div>
       <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
         <select

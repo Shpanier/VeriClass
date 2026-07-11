@@ -1,13 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { Message, Probe, SessionDetail, Student } from "../types";
+import type { Message, ParamLabel, Probe, SessionDetail, Student } from "../types";
+import { renderParams } from "../params";
 import { useLang } from "../i18n";
 
-export function ChatViewModal({ student, onClose }: { student: Student; onClose: () => void }) {
+export function ChatViewModal({
+  student,
+  paramLabels,
+  onClose,
+}: {
+  student: Student;
+  paramLabels?: ParamLabel[];
+  onClose: () => void;
+}) {
   const { t } = useLang();
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const params = renderParams(detail?.session.variant_params ?? student.variant_params, paramLabels);
 
   useEffect(() => {
     const tick = () =>
@@ -63,6 +73,17 @@ export function ChatViewModal({ student, onClose }: { student: Student; onClose:
             <button onClick={onClose}>{t("close")}</button>
           </div>
         </header>
+
+        {params.length > 0 && (
+          <div style={{ marginTop: 8, fontSize: 12, color: "#4b5563", display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {params.map((p, i) => (
+              <span key={i} title={p.note ?? undefined} style={{ background: "#f3f4f6", borderRadius: 6, padding: "2px 8px" }}>
+                <span style={{ color: "#6b7280" }}>{p.label}:</span>{" "}
+                <span style={{ fontWeight: 600 }} dir="auto">{p.value}</span>
+              </span>
+            ))}
+          </div>
+        )}
 
         <div
           style={{

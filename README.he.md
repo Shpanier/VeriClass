@@ -106,26 +106,76 @@ pip install -r requirements.txt
 cp .env.example .env
 # ערוך את .env — קבע GEMINI_API_KEY (המפתח היחיד שצריך)
 
-# 4. זריעת סטודנטים
-python scripts/add_students.py --names "Yossi Cohen,Shira Levi,Ahmed Alyan"
+# 4. זריעת סטודנטים — וגם לפחות מרצה אחד (ראו "כניסת מרצה" למטה)
+python scripts/add_students.py \
+  --names "Yossi Cohen,Shira Levi,Ahmed Alyan" \
+  --teachers "Dr. Cohen"
 ```
 
 </div>
 
-סטודנטי הדגמה לאחר זריעה:
+חשבונות הדגמה לאחר זריעה:
 
 <div dir="ltr">
 
-| Name         | Login code |
-|--------------|------------|
-| Yossi Cohen  | STU1-XXXX   |
-| Shira Levi   | STU2-XXXX   |
-| Ahmed Alyan  | STU3-XXXX   |
+| Name         | Login code | Role    |
+|--------------|------------|---------|
+| Instructor   | LMT-6JCF   | teacher |
+| Yossi Cohen  | STU1-XXXX   | student |
+| Shira Levi   | STU2-XXXX   | student |
+| Ahmed Alyan  | STU3-XXXX   | student |
 
 </div>
 
+> היכנסו ללוח הבקרה (`http://localhost:5173`) עם קוד ה**מרצה** **`LMT-6JCF`**.
+> הקודים אצלכם יהיו שונים — סקריפט הזריעה מייצר אותם באקראי; הריצו את שאילתת
+> ה־`sqlite3` בסעיף "כניסת מרצה" כדי לראות את שלכם.
+
 הסטודנטים פותחים את `http://localhost:8011`, המרצה את `http://localhost:5173`.
 מעדיפים את ה־IDE? דלגו על הדפדפן והשתמשו בקליינט תוסף ה־CLion במקום — ראו [קליינט סטודנט חלופי: תוסף ה־CLion](#קליינט-סטודנט-חלופי-תוסף-ה־clion).
+
+### כניסת מרצה
+
+לוח הבקרה (`http://localhost:5173`) מוגן מאחורי כניסת מרצה — מסך הכניסה שלו מציג
+**"כניסת מרצה — enter your instructor code"**. מרצה נכנס עם **קוד כניסה**, בדיוק
+כמו סטודנט, רק שהחשבון שלו נושא `role=teacher`. קוד של סטודנט נדחה כאן
+(*"That code isn't an instructor account."*).
+
+צרו קודי מרצה עם אותו סקריפט זריעה, בעזרת `--teachers`:
+
+<div dir="ltr">
+
+```bash
+python scripts/add_students.py --teachers "Dr. Cohen,TA Levi"
+```
+
+</div>
+
+הסקריפט מדפיס טבלת `name → code` (בקטע נפרד **"teachers (dashboard login)"**).
+מסרו את הקוד למרצה; הוא מקליד אותו במסך הכניסה (הקודים אינם תלויי אותיות
+גדולות/קטנות). כדי להוסיף מרצה לבסיס נתונים קיים ישירות:
+
+<div dir="ltr">
+
+```bash
+sqlite3 oslab.db \
+  "INSERT INTO users(username, login_code, role) VALUES('Dr. Cohen','TEACH-01','teacher');"
+```
+
+</div>
+
+לרשימת קודי המרצה שכבר קיימים בבסיס הנתונים בכל רגע:
+
+<div dir="ltr">
+
+```bash
+sqlite3 oslab.db "SELECT username, login_code FROM users WHERE role='teacher';"
+```
+
+</div>
+
+רק חשבון עם `role=teacher` יכול לפתוח את לשונית **התרגילים** וליצור תרגילים
+חדשים, להחליף את אישיות המודל של סטודנט, או להפעיל מצב סקירה.
 
 ---
 

@@ -18,6 +18,21 @@ object Format {
         else -> v.toString()
     }
 
+    /**
+     * Human-friendly rendering of a variant param value for the briefing's
+     * labeled list: booleans as yes/no, lists comma-joined without brackets.
+     */
+    fun paramValue(v: Any?): String = when (v) {
+        is Boolean -> if (v) "yes" else "no"
+        is List<*> -> v.joinToString(", ") { value(it) }
+        else -> value(v)
+    }
+
+    /** "max_number" -> "Max number" — the fallback label when none is authored. */
+    fun prettifyKey(key: String): String =
+        key.replace('_', ' ').replace('-', ' ').trim()
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+
     /** Escape text for safe inclusion in the HTML we feed to Swing JLabels/JTextPanes. */
     fun html(s: String): String = StringUtil.escapeXmlEntities(s)
 }

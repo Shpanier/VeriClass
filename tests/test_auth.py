@@ -84,6 +84,29 @@ def alice_session(client, alice):
 
 # --- teacher-only endpoints: 401 without a token, 403 for a student --------
 
+# A schema-valid exercise payload, reused by the gating table and the happy path.
+def _sample_exercise(exercise_id="auth-probe-ex"):
+    return {
+        "exercise_id": exercise_id,
+        "title_en": "Auth Probe Exercise",
+        "title_he": "תרגיל בדיקה",
+        "default_mode": "mentor",
+        "brief_md": "Do the thing.",
+        "variants": [
+            {
+                "id": "V-1",
+                "params": {"max_number": 100},
+                "test_inputs": [{"input": "1+1", "expected_output": "2"}],
+            },
+            {
+                "id": "V-2",
+                "params": {"max_number": 200},
+                "test_inputs": [{"input": "2+2", "expected_output": "4"}],
+            },
+        ],
+    }
+
+
 # (method, path, body) with schema-valid bodies so we isolate auth (not 422).
 TEACHER_ROUTES = [
     ("get", "/api/students", None),
@@ -96,6 +119,11 @@ TEACHER_ROUTES = [
     ("get", "/api/reviews/pending", None),
     ("post", "/api/reviews/1/select", {"chosen": "nudge"}),
     ("get", "/api/proctor/events", None),
+    ("get", "/api/exercises", None),
+    ("get", "/api/exercises/ex3-mcalc", None),
+    ("post", "/api/exercises", _sample_exercise("gating-probe-ex")),
+    ("put", "/api/exercises/ex3-mcalc", _sample_exercise("ex3-mcalc")),
+    ("post", "/api/exercises/active", {"exercise_id": "gating-probe-ex"}),
 ]
 
 
@@ -198,3 +226,170 @@ def test_override_validates_grade_and_probe(client, teacher):
     # Valid grade but unknown probe -> 404 (no silent success).
     r = client.post("/api/probe/override", json={"probe_id": 999999, "grade": 2}, headers=_hdr(teacher))
     assert r.status_code == 404
+
+
+# --- exercise authoring (teacher creates + activates from the console) ------
+# These run last so mutating the active exercise doesn't disturb the tests above.
+
+def test_create_exercise_validation(client, teacher):
+    # Missing a required field -> 422 (Pydantic).
+    bad = _sample_exercise("no-brief-ex")
+    del bad["brief_md"]
+    assert client.post("/api/exercises", json=bad, headers=_hdr(teacher)).status_code == 422
+    # Schema-valid but semantically wrong default_mode -> 400 (_validate).
+    bad = _sample_exercise("bad-mode-ex")
+    bad["default_mode"] = "wizard"
+    assert client.post("/api/exercises", json=bad, headers=_hdr(teacher)).status_code == 400
+    # An id that isn't a safe slug -> 400.
+    bad = _sample_exercise("Bad_ID")
+    assert client.post("/api/exercises", json=bad, headers=_hdr(teacher)).status_code == 400
+    # Duplicate variant ids -> 400.
+    bad = _sample_exercise("dup-variant-ex")
+    bad["variants"][1]["id"] = bad["variants"][0]["id"]
+    assert client.post("/api/exercises", json=bad, headers=_hdr(teacher)).status_code == 400
+
+
+def test_exercise_authoring_flow(client, teacher, bob):
+    ex_id = "console-authored-ex"
+    payload = _sample_exercise(ex_id)
+
+    # Create -> 200 and appears in the list marked source=console.
+    r = client.post("/api/exercises", json=payload, headers=_hdr(teacher))
+    assert r.status_code == 200, r.text
+    assert r.json()["exercise_id"] == ex_id
+
+    listing = client.get("/api/exercises", headers=_hdr(teacher)).json()
+    mine = next(e for e in listing if e["exercise_id"] == ex_id)
+    assert mine["source"] == "console"
+    assert mine["variant_count"] == 2
+
+    # Re-creating the same id -> 409.
+    assert client.post("/api/exercises", json=payload, headers=_hdr(teacher)).status_code == 409
+
+    # Activate it -> the active exercise now reflects the new one.
+    r = client.post("/api/exercises/active", json={"exercise_id": ex_id}, headers=_hdr(teacher))
+    assert r.status_code == 200
+    active = client.get("/api/exercises/active", headers=_hdr(teacher)).json()
+    assert active["exercise_id"] == ex_id
+
+    # Activating an unknown exercise -> 404.
+    assert client.post(
+        "/api/exercises/active", json={"exercise_id": "does-not-exist"}, headers=_hdr(teacher)
+    ).status_code == 404
+
+    # A student starting a session is assigned a variant of the new exercise —
+    # no server restart involved.
+    r = client.post("/api/sessions", json={}, headers=_hdr(bob))
+    assert r.status_code == 200, r.text
+    sess = r.json()
+    assert sess["exercise_id"] == ex_id
+    assert sess["variant"] in {"V-1", "V-2"}
+
+
+# --- edit + duplicate (built-in AND console) --------------------------------
+# Ordered: read/duplicate the pristine built-in first, THEN mutate it.
+
+def test_get_full_exercise(client, teacher):
+    r = client.get("/api/exercises/ex3-mcalc", headers=_hdr(teacher))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["exercise_id"] == "ex3-mcalc"
+    assert len(body["variants"]) == 8      # the full answer key, teacher-only
+    assert body["source"] == "yaml"
+    assert body["edited"] is False
+    # The bundled YAML ships param_labels connecting each param to the exercise.
+    assert len(body["param_labels"]) == 3
+    assert any(pl["key"] == "max_number" for pl in body["param_labels"])
+    assert client.get("/api/exercises/no-such-ex", headers=_hdr(teacher)).status_code == 404
+
+
+def test_duplicate_builtin_via_create(client, teacher):
+    # "Duplicate" = fetch the full exercise, POST it under a new id.
+    src = client.get("/api/exercises/ex3-mcalc", headers=_hdr(teacher)).json()
+    dup = {**src, "exercise_id": "ex3-mcalc-copy"}
+    r = client.post("/api/exercises", json=dup, headers=_hdr(teacher))
+    assert r.status_code == 200, r.text
+    assert r.json()["exercise_id"] == "ex3-mcalc-copy"
+    assert r.json()["source"] == "console"          # a copy is a console exercise
+    assert r.json()["variant_count"] == 8
+    # Same id again -> 409.
+    assert client.post("/api/exercises", json=dup, headers=_hdr(teacher)).status_code == 409
+
+
+def test_edit_builtin_overrides_yaml(client, teacher):
+    payload = _sample_exercise("ex3-mcalc")     # id must match the path
+    payload["title_en"] = "Edited mcalc"
+    payload["variants"] = [payload["variants"][0]]   # collapse to a single variant
+    r = client.put("/api/exercises/ex3-mcalc", json=payload, headers=_hdr(teacher))
+    assert r.status_code == 200, r.text
+    s = r.json()
+    assert s["source"] == "yaml"        # still a built-in...
+    assert s["edited"] is True          # ...but now flagged as overridden
+    assert s["variant_count"] == 1
+    full = client.get("/api/exercises/ex3-mcalc", headers=_hdr(teacher)).json()
+    assert full["title_en"] == "Edited mcalc"
+    assert full["edited"] is True
+
+
+def test_update_unknown_and_invalid(client, teacher):
+    # Unknown id -> 404.
+    assert client.put(
+        "/api/exercises/ghost", json=_sample_exercise("ghost"), headers=_hdr(teacher)
+    ).status_code == 404
+    # Known id but invalid body -> 400.
+    bad = _sample_exercise("ex3-mcalc")
+    bad["default_mode"] = "wizard"
+    assert client.put("/api/exercises/ex3-mcalc", json=bad, headers=_hdr(teacher)).status_code == 400
+
+
+# --- readable param labels + variant_params surfacing ----------------------
+
+def test_param_labels_roundtrip_and_variant_params(client, teacher):
+    # Create with param_labels -> they round-trip on GET full.
+    payload = _sample_exercise("labeled-ex")
+    payload["param_labels"] = [
+        {"key": "max_number", "label": "Maximum result", "note": "too big = out of range"},
+        {"key": "operators", "label": "Operators"},
+    ]
+    assert client.post("/api/exercises", json=payload, headers=_hdr(teacher)).status_code == 200
+    full = client.get("/api/exercises/labeled-ex", headers=_hdr(teacher)).json()
+    assert full["param_labels"][0]["label"] == "Maximum result"
+    assert full["param_labels"][0]["note"] == "too big = out of range"
+
+    # Active-exercise response carries param_labels too.
+    assert client.post(
+        "/api/exercises/active", json={"exercise_id": "labeled-ex"}, headers=_hdr(teacher)
+    ).status_code == 200
+    active = client.get("/api/exercises/active", headers=_hdr(teacher)).json()
+    assert any(pl["key"] == "max_number" for pl in active["param_labels"])
+
+    # /api/students rows expose each session's raw variant_params for rendering.
+    rows = client.get("/api/students", headers=_hdr(teacher)).json()
+    assert all("variant_params" in r for r in rows)
+
+
+def test_brief_at_refs_substituted_for_student(client, teacher, bob):
+    # An exercise whose brief references a param with @key.
+    payload = _sample_exercise("atref-ex")
+    payload["brief_md"] = "Results must not exceed @max_number for this variant."
+    payload["param_labels"] = [{"key": "max_number", "label": "Maximum result"}]
+    payload["variants"] = [
+        {"id": "V-1", "params": {"max_number": 42}, "test_inputs": [{"input": "1", "expected_output": "1"}]}
+    ]
+    assert client.post("/api/exercises", json=payload, headers=_hdr(teacher)).status_code == 200
+    assert client.post(
+        "/api/exercises/active", json={"exercise_id": "atref-ex"}, headers=_hdr(teacher)
+    ).status_code == 200
+
+    # The teacher (authoring view) sees the RAW brief with the @-reference.
+    raw = client.get("/api/exercises/active", headers=_hdr(teacher)).json()
+    assert "@max_number" in raw["brief_md"]
+
+    # A student assigned this variant sees the reference expanded to "Label: value".
+    sess = client.post("/api/sessions", json={}, headers=_hdr(bob)).json()
+    assert sess["exercise_id"] == "atref-ex"
+    seen = client.get(
+        f"/api/exercises/active?variant={sess['variant']}", headers=_hdr(bob)
+    ).json()
+    assert "@max_number" not in seen["brief_md"]
+    assert "Maximum result: 42" in seen["brief_md"]

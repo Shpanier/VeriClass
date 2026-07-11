@@ -16,7 +16,7 @@ brief_md: |
 
   Your `mcalc` must respect operator precedence (`*` and `/` before
   `+` and `-`) and the specific parameters of your assigned variant
-  (operators allowed, parentheses allowed, maximum number). Errors
+  (@operators, @allow_parens, @max_number). Errors
   must use the exact format described under `required_error_strings`
   — the grader checks bytes, not meaning.
 
@@ -100,6 +100,20 @@ variants:
       - { input: "(2 + 3) * 4", expected_output: "20" }
       - { input: "11 * 10", expected_output: "Error: result out of range" }
       - { input: "5 / 1", expected_output: "Error: invalid expression" }
+
+# Human-readable labels for the per-variant `params` keys above. These connect
+# the raw values (max_number, operators, allow_parens) to what they mean in the
+# exercise, and are rendered as a labeled list in the student briefing and the
+# teacher dashboard. Optional — keys without a label fall back to a prettified
+# version of the key.
+param_labels:
+  - key: max_number
+    label: "Maximum result"
+    note: "results above this must print 'Error: result out of range'"
+  - key: operators
+    label: "Allowed operators"
+  - key: allow_parens
+    label: "Parentheses allowed"
 
 welcome_suggestions:
   - "Explain how to parse an arithmetic expression"

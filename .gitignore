@@ -12,6 +12,8 @@ dist/
 *.sqlite
 *.sqlite3
 .env
+.env.local
+.env.*.local
 config/instructors.yaml
 
 .DS_Store

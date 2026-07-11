@@ -44,6 +44,8 @@ async def lifespan(app: FastAPI):
             f"No exercises found in {EXERCISES_DIR}. "
             "At least one YAML file must exist for the system to boot."
         )
+    # Merge in teacher-authored exercises created from the instructor console.
+    exercises.load_from_db()
     print(f"[startup] loaded {len(loaded)} exercise(s): {list(loaded)}")
     yield
 

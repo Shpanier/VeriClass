@@ -31,6 +31,13 @@ data class Variant(
     val test_inputs: List<TestInput> = emptyList(),
 )
 
+/** Exercise-level friendly label for a variant param key (connects it to the exercise). */
+data class ParamLabel(
+    val key: String = "",
+    val label: String? = null,
+    val note: String? = null,
+)
+
 data class Exercise(
     val exercise_id: String = "",
     val title_en: String = "",
@@ -39,6 +46,7 @@ data class Exercise(
     val brief_md: String = "",
     val welcome_suggestions: List<String> = emptyList(),
     val required_error_strings: List<String> = emptyList(),
+    val param_labels: List<ParamLabel> = emptyList(),
     /** Present when the active-exercise call is made with a ?variant= query. */
     val variant: Variant? = null,
 )
