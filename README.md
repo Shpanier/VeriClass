@@ -131,7 +131,7 @@ The student has **two interchangeable clients** for the same backend: the
 Chainlit web app (component 4) and a **CLion plugin** (4b) that puts the same
 login → briefing → chat → probes flow inside the IDE. See
 [*Alternative student client: the CLion plugin*](#alternative-student-client-the-clion-plugin)
-and [`clion_plugin/README.md`](clion_plugin/README.md).
+and [`oslab_plugin/README.md`](oslab_plugin/README.md).
 
 All LLM calls — the student chat and the CrewAI agents (review drafts, probe
 suggestions, grading) — run on Gemini. Anything sent to the agents is first
@@ -161,13 +161,13 @@ Demo accounts after seeding:
 
 | Name         | Login code | Role       |
 |--------------|------------|------------|
-| Instructor   | LMT-6JCF   | teacher    |
+| Instructor   | TEACH-XXXX   | teacher    |
 | Yossi Cohen  | STU1-XXXX   | student    |
 | Shira Levi   | STU2-XXXX   | student    |
 | Ahmed Alyan  | STU3-XXXX   | student    |
 
 > Sign into the dashboard (`http://localhost:5173`) with the **instructor**
-> code **`LMT-6JCF`**. Your own codes will differ — the seeding script
+> code **`TEACH-XXXX`**. Your own codes will differ — the seeding script
 > generates them randomly; run the `sqlite3` query below to list yours.
 
 Students go to `http://localhost:8011`, instructor to `http://localhost:5173`.
@@ -317,12 +317,14 @@ shows their test inputs as a checklist.
 
 ---
 
-## Alternative student client: the CLion plugin
+## Alternative student client: the CLion & PyCharm plugin
 
-Students in this course already write their C in CLion. The
-[`clion_plugin/`](clion_plugin/) directory is a JetBrains plugin that embeds the
-*entire* student client in a CLion tool window, so they never leave the IDE to
-talk to the tutor. It uses the same six backend endpoints as Chainlit — the
+Students already work in a JetBrains IDE — CLion for C, PyCharm for Python. The
+[`oslab_plugin/`](oslab_plugin/) directory is a JetBrains plugin that embeds the
+*entire* student client in an IDE tool window, so they never leave the IDE to
+talk to the tutor. One shared source tree builds both the CLion and PyCharm
+plugins (`:clion` / `:pycharm` Gradle modules). It uses the same six backend
+endpoints as Chainlit — the
 backend is unchanged except for one tiny read-only endpoint
 (`GET /api/client-config`) that exposes the behavior switch below.
 
@@ -335,17 +337,33 @@ one place — it is *not* a per-student plugin setting):
 | `STUDENT_CLIENT_MODE=chat`   | Faithful chat port — login, briefing, streaming chat, suggestion chips, probes. Same as Chainlit, in a tool window. |
 | `STUDENT_CLIENT_MODE=ide`    | Everything in `chat`, **plus** it scaffolds the student's assigned variant as a starter `mcalc.c` in their project and shows the variant's required test inputs as a checklist. |
 
-Build & run (full details in [`clion_plugin/README.md`](clion_plugin/README.md)):
+Build & run (full details in [`oslab_plugin/README.md`](oslab_plugin/README.md)):
 
 ```bash
-cd clion_plugin
+cd oslab_plugin
 gradle wrapper --gradle-version 8.10.2   # one-time, generates the wrapper jar
-./gradlew runIde                         # launches a sandbox CLion with the plugin
+./gradlew :clion:runIde                  # sandbox CLion with the plugin
+./gradlew :pycharm:runIde                # sandbox PyCharm with the plugin
 ```
 
 In the sandbox, set the backend URL under **Settings → Tools → OS Lab**, open the
 **OS Lab** tool window, and log in with a course code. Chainlit and the plugin can
 be used at the same time against the same backend.
+
+**Shipping updates to students without passing files around.** When the backend
+is exposed over a tunnel (see [`deploy/README-NGROK.md`](deploy/README-NGROK.md)),
+it also distributes the plugin. Build + upload once on the JDK-21 machine
+(`cd oslab_plugin && ./publish.sh` — add `--product pycharm` for the PyCharm
+build), then each student runs a single command:
+
+```bash
+curl -fsSL https://<your-domain>.ngrok-free.dev/api/plugin/install.sh | bash
+```
+
+That installs the latest build into their matching IDE, CLion or PyCharm (they
+just restart). Full
+details in [`oslab_plugin/README.md`](oslab_plugin/README.md) →
+*Distributing updates over the tunnel*.
 
 ---
 
@@ -436,7 +454,7 @@ backend/                     # FastAPI app
 student_app/
   app.py                     # Chainlit student UI (login + chat + probes)
 
-clion_plugin/                # alternative student client: a CLion/JetBrains plugin
+oslab_plugin/                # alternative student client: a CLion/JetBrains plugin
   build.gradle.kts           # IntelliJ Platform Gradle build (targets CLion)
   src/main/kotlin/edu/jce/oslab/
     api/                     # DTOs + HTTP/streaming client over the 6 endpoints

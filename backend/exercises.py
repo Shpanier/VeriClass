@@ -33,6 +33,7 @@ def load_all(directory: Path) -> dict[str, dict[str, Any]]:
         data["source"] = "yaml"
         data["edited"] = False
         data.setdefault("param_labels", [])
+        data.setdefault("scaffold_filename", None)
         _LOADED[data["exercise_id"]] = data
         _YAML_IDS.add(data["exercise_id"])
     return _LOADED
@@ -65,6 +66,7 @@ def _row_to_exercise(row: Any) -> dict[str, Any]:
         "welcome_suggestions": extra.get("welcome_suggestions", []),
         "required_error_strings": extra.get("required_error_strings", []),
         "param_labels": extra.get("param_labels", []),
+        "scaffold_filename": extra.get("scaffold_filename"),
         # An edit of a built-in keeps the 'yaml' source but is flagged edited so
         # the dashboard can show "built-in (edited)".
         "source": "yaml" if is_yaml else "console",
@@ -141,6 +143,7 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
         "welcome_suggestions": payload.get("welcome_suggestions", []),
         "required_error_strings": payload.get("required_error_strings", []),
         "param_labels": payload.get("param_labels", []),
+        "scaffold_filename": payload.get("scaffold_filename"),
     }
     with db.conn() as c:
         c.execute(
@@ -172,6 +175,7 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
         "welcome_suggestions": data["welcome_suggestions"],
         "required_error_strings": data["required_error_strings"],
         "param_labels": data["param_labels"],
+        "scaffold_filename": data["scaffold_filename"],
         "source": "yaml" if is_yaml else "console",
         "edited": is_yaml,
     }
@@ -246,3 +250,10 @@ def _validate(data: dict[str, Any], where: str) -> None:
         for i, pl in enumerate(labels):
             if not isinstance(pl, dict) or not pl.get("key"):
                 raise ValueError(f"{where}: param_labels #{i + 1} is missing a 'key'")
+
+    # scaffold_filename is optional; if given it selects the starter file (and,
+    # via its extension, the language) the IDE plugin scaffolds for this exercise.
+    sf = data.get("scaffold_filename")
+    if sf is not None:
+        if not isinstance(sf, str) or not sf.strip() or "." not in sf:
+            raise ValueError(f"{where}: scaffold_filename must be a filename with an extension")

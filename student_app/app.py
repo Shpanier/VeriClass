@@ -34,11 +34,21 @@ async def on_chat_start():
             await cl.Message(content="No code received. Refresh the page to try again.").send()
             return
 
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            login = await client.post(f"{BACKEND}/api/login", json={"code": code})
-    except httpx.HTTPError as e:
-        log.warning("login request failed: %s", e)
+    # The dev launcher starts the backend, this app, and the browser at once, so
+    # on a fresh boot our first request can beat uvicorn to the port. Retry a few
+    # times with backoff instead of dead-ending the student on a transient miss.
+    login = None
+    for attempt in range(5):
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                login = await client.post(f"{BACKEND}/api/login", json={"code": code})
+            break
+        except httpx.HTTPError as e:
+            log.warning("login request failed (attempt %d/5): %s", attempt + 1, e)
+            if attempt == 0:
+                await cl.Message(content="⏳ Waiting for the lab server to start…").send()
+            await asyncio.sleep(1.5)
+    if login is None:
         await cl.Message(content="⚠️ Can't reach the lab server. Ask the instructor.").send()
         return
     if login.status_code == 401:

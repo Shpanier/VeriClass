@@ -16,13 +16,16 @@ from backend.routes import (
     ask,
     client_config,
     exercises as ex_routes,
+    grade,
     login,
     mode,
+    plugin,
     probes,
     proctor,
     review,
     sessions,
     students,
+    submissions,
 )
 
 # Silence the noisy per-request access log (polling hits /api/students and
@@ -69,6 +72,9 @@ app.include_router(mode.router, prefix="/api")
 app.include_router(review.router, prefix="/api")
 app.include_router(client_config.router, prefix="/api")
 app.include_router(proctor.router, prefix="/api")
+app.include_router(submissions.router, prefix="/api")
+app.include_router(plugin.router, prefix="/api")
+app.include_router(grade.router, prefix="/api")
 
 
 @app.get("/healthz")

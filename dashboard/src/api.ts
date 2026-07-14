@@ -3,6 +3,7 @@ import type {
   AnswerLevel,
   ExerciseSummary,
   FullExercise,
+  GradeRecommendation,
   Lang,
   NewExercise,
   PendingReview,
@@ -10,6 +11,7 @@ import type {
   ProctorEvent,
   SessionDetail,
   Student,
+  Submission,
 } from "./types";
 
 const TOKEN_KEY = "oslab.teacher.token";
@@ -114,6 +116,21 @@ export const api = {
     j<SessionDetail>(`/api/students/${sessionId}/messages`),
   proctorEvents: (sessionId: string) =>
     j<ProctorEvent[]>(`/api/proctor/events?session_id=${encodeURIComponent(sessionId)}`),
+  submissions: (sessionId: string) =>
+    j<Submission[]>(`/api/submissions?session_id=${encodeURIComponent(sessionId)}`),
+  // Recommended grade: fetch the current one, (re)compute, or override.
+  gradeFor: (sessionId: string) =>
+    j<GradeRecommendation | null>(`/api/grade/${encodeURIComponent(sessionId)}`),
+  recommendGrade: (sessionId: string, lang: Lang = "en") =>
+    j<GradeRecommendation>("/api/grade/recommend", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, lang }),
+    }),
+  overrideGrade: (sessionId: string, grade: number) =>
+    j<{ ok: boolean }>("/api/grade/override", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, grade }),
+    }),
   setMode: (sessionId: string, mode: "mentor" | "coding_partner") =>
     j<{ ok: boolean }>("/api/mode", {
       method: "POST",

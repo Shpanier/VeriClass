@@ -39,10 +39,10 @@ student CLion plugin ──https──► your-domain.ngrok-free.app ──► y
 5. **Build the student package once** (on a JDK-21 machine — NOT the dev box),
    stamping the SAME url (note the `https://`):
    ```bash
-   cd clion_plugin
+   cd oslab_plugin
    ./packaging/make_exam_package.sh --backend-url https://chip-calm-mallard.ngrok-free.app
    ```
-   → `clion_plugin/dist/OsLabExam.zip` — hand this to students. They install it
+   → `oslab_plugin/dist/OsLabExam.zip` — hand this to students. They install it
    once; they never touch ngrok.
 
 ---
@@ -68,10 +68,32 @@ student CLion plugin ──https──► your-domain.ngrok-free.app ──► y
 
 ---
 
+## Distribute plugin updates over the same tunnel
+
+Once the tunnel is up, the backend also serves the CLion plugin, so you never
+have to hand-carry a zip between machines. Full details in
+`oslab_plugin/README.md` → *Distributing updates over the tunnel*. In short:
+
+- **Build machine** (JDK 21): `cd oslab_plugin && ./publish.sh` — builds and
+  uploads the new zip to the backend (teacher-authenticated).
+- **Students / teacher:** one command pulls + installs the latest build:
+  ```bash
+  curl -fsSL https://<your-domain>.ngrok-free.dev/api/plugin/install.sh | bash
+  ```
+  then restart CLion. Send students that link; the installer figures out the
+  rest (it fetches the extension from `/api/plugin/latest`).
+
+Public, no-auth endpoints for this: `GET /api/plugin/version`,
+`GET /api/plugin/latest`, `GET /api/plugin/install.sh`. The upload endpoint
+(`POST /api/plugin/publish`) requires a teacher token.
+
+---
+
 ## Notes
 - **Stable URL ⇒ package once.** Only change the plugin package if you change
   `NGROK_DOMAIN`. Even then you don't need JDK again — just edit
-  `clion_plugin/dist/OsLabExam/exam.conf` and re-zip.
-- The ngrok "browser warning" page only affects real browsers, not the plugin.
+  `oslab_plugin/dist/OsLabExam/exam.conf` and re-zip.
+- The ngrok "browser warning" page only affects real browsers, not the plugin
+  or `curl`. The install endpoints send the skip header themselves anyway.
 - Watch your usage at https://dashboard.ngrok.com. Nearing the request/GB cap is
   your signal to move to Cloudflare.

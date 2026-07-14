@@ -7,6 +7,12 @@ export interface Student {
   started_at: string;
   last_active_at: string;
   probe_count: number;
+  // How many times the student has pressed "Send to teacher" in the plugin.
+  submission_count?: number;
+  // Recommended grade summary (present once a teacher has computed one).
+  recommended_grade?: number | null;
+  grade_band?: string | null;
+  grade_override?: number | null;
   // This session's variant parameters (raw), for readable rendering.
   variant_params?: Record<string, unknown>;
   // Exam/proctor signals (present when the student runs the CLion exam client).
@@ -21,6 +27,46 @@ export interface ParamLabel {
   key: string;
   label?: string | null;
   note?: string | null;
+}
+
+// One test case from the plugin's actual compile/run of the submission.
+export interface RunCase {
+  input: string;
+  expected: string;
+  actual: string;
+  passed: boolean;
+}
+
+// One "Send to teacher" submission: a source file + captured console output,
+// plus the plugin's real compile/run result when available.
+export interface Submission {
+  id: number;
+  session_id: string;
+  filename: string | null;
+  source_code: string;
+  console_output: string | null;
+  language?: string | null;
+  compile_ok?: number | null;
+  compile_output?: string | null;
+  run_report?: RunCase[] | null;
+  created_at: string;
+}
+
+// The recommended grade for a session (GET /api/grade/{session_id} or the
+// POST /api/grade/recommend result). Correctness is deterministic from the run;
+// wise_use is the LLM judge; recommended = 0.3*correctness + 0.7*wise_use.
+export interface GradeRecommendation {
+  session_id: string;
+  submission_id: number | null;
+  correctness: number | null;
+  wise_use: number | null;
+  recommended: number | null;
+  band: string | null;
+  rationale: string | null;
+  components: { signals?: string[]; features?: unknown } | null;
+  override_grade: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ProctorEvent {

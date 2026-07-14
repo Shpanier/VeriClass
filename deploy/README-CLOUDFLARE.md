@@ -49,7 +49,7 @@ CF_TUNNEL_NAME=oslab-exam
 
 Build the student package once (JDK-21 machine) with the **routed hostname**:
 ```bash
-cd clion_plugin
+cd oslab_plugin
 ./packaging/make_exam_package.sh --backend-url https://exam.yourdomain.com
 ```
 
@@ -71,8 +71,8 @@ It prints a random `https://<words>.trycloudflare.com` URL.
 ⚠️ **The URL changes every run.** Each time you must re-stamp it into the plugin
 package and students must reinstall:
 ```bash
-# edit clion_plugin/dist/OsLabExam/exam.conf → BACKEND_URL=https://<new>.trycloudflare.com
-cd clion_plugin/dist && rm -f OsLabExam.zip && zip -rqX OsLabExam.zip OsLabExam
+# edit oslab_plugin/dist/OsLabExam/exam.conf → BACKEND_URL=https://<new>.trycloudflare.com
+cd oslab_plugin/dist && rm -f OsLabExam.zip && zip -rqX OsLabExam.zip OsLabExam
 ```
 Avoid this mode for real exams — use a named tunnel.
 

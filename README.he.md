@@ -86,7 +86,7 @@
 
 </div>
 
-לסטודנט יש **שני קליינטים מתחלפים** מול אותו צד שרת: אפליקציית הוויב של Chainlit (רכיב 4) ו**תוסף ל־CLion** (רכיב 4b) שמכניס את אותו זרם של כניסה ← תדריך ← צ׳אט ← שאלות הבנה אל תוך ה־IDE. ראו [*קליינט סטודנט חלופי: תוסף ה־CLion*](#קליינט-סטודנט-חלופי-תוסף-ה־clion) ואת [`clion_plugin/README.md`](clion_plugin/README.md).
+לסטודנט יש **שני קליינטים מתחלפים** מול אותו צד שרת: אפליקציית הוויב של Chainlit (רכיב 4) ו**תוסף ל־CLion** (רכיב 4b) שמכניס את אותו זרם של כניסה ← תדריך ← צ׳אט ← שאלות הבנה אל תוך ה־IDE. ראו [*קליינט סטודנט חלופי: תוסף ה־CLion*](#קליינט-סטודנט-חלופי-תוסף-ה־clion) ואת [`oslab_plugin/README.md`](oslab_plugin/README.md).
 
 המודל המקומי הוא הנתיב היחיד שרואה הודעות של סטודנטים. המודל הענני משמש **אך ורק** להצעות שאלות הבנה למרצה (`/api/probe/suggest`), ורק אחרי ש־`backend/sanitize.py` הסיר שמות, קודים ומידע מזהה אחר.
 
@@ -120,14 +120,14 @@ python scripts/add_students.py \
 
 | Name         | Login code | Role    |
 |--------------|------------|---------|
-| Instructor   | LMT-6JCF   | teacher |
+| Instructor   | TEACH-XXXX   | teacher |
 | Yossi Cohen  | STU1-XXXX   | student |
 | Shira Levi   | STU2-XXXX   | student |
 | Ahmed Alyan  | STU3-XXXX   | student |
 
 </div>
 
-> היכנסו ללוח הבקרה (`http://localhost:5173`) עם קוד ה**מרצה** **`LMT-6JCF`**.
+> היכנסו ללוח הבקרה (`http://localhost:5173`) עם קוד ה**מרצה** **`TEACH-XXXX`**.
 > הקודים אצלכם יהיו שונים — סקריפט הזריעה מייצר אותם באקראי; הריצו את שאילתת
 > ה־`sqlite3` בסעיף "כניסת מרצה" כדי לראות את שלכם.
 
@@ -272,7 +272,7 @@ GROUP BY s.user_id, answer_level;
 ## קליינט סטודנט חלופי: תוסף ה־CLion
 
 הסטודנטים בקורס הזה ממילא כותבים את קוד ה־C שלהם ב־CLion. הספרייה
-[`clion_plugin/`](clion_plugin/) היא תוסף JetBrains שמטמיע את *כל* קליינט הסטודנט
+[`oslab_plugin/`](oslab_plugin/) היא תוסף JetBrains שמטמיע את *כל* קליינט הסטודנט
 בתוך חלון כלים (tool window) ב־CLion, כך שלא צריך לצאת מה־IDE כדי לדבר עם החונך.
 הוא משתמש באותם שישה endpoints של צד השרת כמו Chainlit — צד השרת ללא שינוי, פרט
 ל־endpoint קטן אחד לקריאה בלבד (`GET /api/client-config`) שחושף את מתג ההתנהגות.
@@ -289,14 +289,15 @@ GROUP BY s.user_id, answer_level;
 
 </div>
 
-בנייה והרצה (פירוט מלא ב־[`clion_plugin/README.md`](clion_plugin/README.md)):
+בנייה והרצה (פירוט מלא ב־[`oslab_plugin/README.md`](oslab_plugin/README.md)):
 
 <div dir="ltr">
 
 ```bash
-cd clion_plugin
+cd oslab_plugin
 gradle wrapper --gradle-version 8.10.2   # פעם אחת, יוצר את ה-wrapper jar
-./gradlew runIde                         # מריץ CLion ארגז-חול עם התוסף טעון
+./gradlew :clion:runIde                  # מריץ CLion ארגז-חול עם התוסף טעון
+./gradlew :pycharm:runIde                # מריץ PyCharm ארגז-חול עם התוסף טעון
 ```
 
 </div>
@@ -387,7 +388,7 @@ backend/                     # FastAPI app
 student_app/
   app.py                     # Chainlit student UI (login + chat + probes)
 
-clion_plugin/                # alternative student client: a CLion/JetBrains plugin
+oslab_plugin/                # alternative student client: a CLion/JetBrains plugin
   build.gradle.kts           # IntelliJ Platform Gradle build (targets CLion)
   src/main/kotlin/edu/jce/oslab/
     api/                     # DTOs + HTTP/streaming client over the 6 endpoints

@@ -9,8 +9,11 @@ dist/
 .vite/
 
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
+plugin_dist/
 .env
 .env.local
 .env.*.local
@@ -19,3 +22,14 @@ config/instructors.yaml
 .DS_Store
 .idea/
 .vscode/
+
+# Private: student-simulation / fake-answer mechanism (do NOT publish)
+scripts/grade_archetypes.py
+scripts/realistic_sim.py
+scripts/simulate_grades.py
+scripts/token_meter.py
+tests/test_grading.py
+
+# Private: not for the public repo
+crewaiagentsmemory.bundle
+OS_Lab_HE.pptx

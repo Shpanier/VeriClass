@@ -35,3 +35,25 @@ class ProbeList(BaseModel):
 class Grade(BaseModel):
     score: int = Field(description="0 = wrong/missing, 1 = partial, 2 = correct", ge=0, le=2)
     why: str = Field(description="One short line explaining the score")
+
+
+class GradeRecommendation(BaseModel):
+    """The LLM's judgment of how *wisely* the student used the tutor.
+
+    Correctness is measured deterministically from the real run, so the judge
+    only scores the process (goal #2, the main part) and explains it. The final
+    blended grade + band are computed in Python from wise_use + correctness.
+    """
+    wise_use: int = Field(
+        description=(
+            "0-100. How well the student used the LLM to LEARN vs plug-and-play. "
+            "High = specific questions about their own code/errors, gradual hints, "
+            "real understanding shown in probes. Low = 'just give me the code', "
+            "instant copy-paste, failed comprehension probes."
+        ),
+        ge=0, le=100,
+    )
+    rationale: str = Field(description="2-3 sentences justifying the wise_use score")
+    signals: list[str] = Field(
+        description="Concrete green/red flags observed, each prefixed '+ ' or '- '"
+    )

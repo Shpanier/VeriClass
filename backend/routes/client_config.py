@@ -2,6 +2,8 @@ import os
 
 from fastapi import APIRouter
 
+from backend import exercises
+
 router = APIRouter()
 
 # Single source of truth for which student client behavior is active. The
@@ -26,8 +28,9 @@ def client_config():
     mode:
       chat — faithful chat port: login + briefing + streaming chat + probes.
       ide  — IDE-native: everything in `chat` PLUS scaffold the assigned
-             variant's starter C file into the project and show the variant's
-             required test inputs as a checklist.
+             variant's starter file into the project (the active exercise's
+             `scaffold_filename` picks the language, e.g. mcalc.c / pycalc.py)
+             and show the variant's required test inputs as a checklist.
 
     Exam/proctor controls (the plugin's anti-cheating "exam mode"):
       exam_mode       — when true the plugin reports to POST /api/proctor/event
@@ -48,11 +51,25 @@ def client_config():
     exam_mode = _envbool("EXAM_MODE", default=(mode == "ide"))
     force_fullscreen = _envbool("FULLSCREEN", default=exam_mode)
 
+    # The active exercise's scaffold_filename wins (so activating a Python
+    # exercise scaffolds pycalc.py without any .env change); fall back to the
+    # global SCAFFOLD_FILENAME env, then the original mcalc.c default.
+    try:
+        chosen = (exercises.active().get("scaffold_filename") or "").strip()
+    except Exception:
+        chosen = ""
+    scaffold_filename = chosen or os.environ.get("SCAFFOLD_FILENAME", "mcalc.c").strip() or "mcalc.c"
+
     return {
         "mode": mode,
-        "scaffold_filename": os.environ.get("SCAFFOLD_FILENAME", "mcalc.c").strip() or "mcalc.c",
+        "scaffold_filename": scaffold_filename,
         "poll_interval_ms": 2000,
         "exam_mode": exam_mode,
         "force_fullscreen": force_fullscreen,
         "heartbeat_ms": 30000,
+        # Dev convenience: hand the plugin a code to auto-login with, so it needs
+        # no per-machine setup — the same DEV_AUTO_LOGIN_CODE the Chainlit student
+        # app uses. Empty (the default) in exam/production, so auto-login is off
+        # there. Only ever a student code; never a teacher one.
+        "dev_auto_login_code": os.environ.get("DEV_AUTO_LOGIN_CODE", "").strip(),
     }

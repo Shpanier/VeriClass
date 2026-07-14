@@ -88,20 +88,28 @@ tell application "Terminal"
 end tell
 EOF
 
-# Open the teacher dashboard in the default browser once Vite is actually
-# serving. We poll the port (up to ~30s) instead of opening immediately, so the
-# browser doesn't land on a connection-refused page while Vite boots. Runs in
-# the background so the script returns right away.
+# Open the teacher dashboard in the default browser once the stack is actually
+# ready. We wait for TWO things (up to ~30s), not just the dashboard port:
+#   1. the backend RESPONDS to HTTP on :$BACKEND_PORT — a bound port isn't
+#      enough, uvicorn binds before the app finishes importing, and the page
+#      auto-logs-in the instant it loads, so an early request hits a dead
+#      backend ("Can't reach the lab server").
+#   2. Vite is serving on :$DASH_PORT.
+# Runs in the background so the script returns right away.
 DASH_URL="http://localhost:$DASH_PORT/"
 (
+  backend_ready=""
   for _ in $(seq 1 60); do
-    if lsof -ti tcp:"$DASH_PORT" >/dev/null 2>&1; then
+    if [[ -z "$backend_ready" ]] && curl -s -o /dev/null "http://127.0.0.1:$BACKEND_PORT/"; then
+      backend_ready=1
+    fi
+    if [[ -n "$backend_ready" ]] && lsof -ti tcp:"$DASH_PORT" >/dev/null 2>&1; then
       open "$DASH_URL"
       exit 0
     fi
     sleep 0.5
   done
-  echo "  (dashboard didn't come up in time — open $DASH_URL manually)" >&2
+  echo "  (stack didn't come up in time — open $DASH_URL manually)" >&2
 ) &
 
 cat <<MSG
@@ -111,7 +119,7 @@ cat <<MSG
     student app http://127.0.0.1:$STUDENT_PORT
     dashboard   http://127.0.0.1:$DASH_PORT  (opening in your browser…)
 
-    Alternative student client: the CLion plugin (clion_plugin/).
+    Alternative student client: the CLion / PyCharm plugin (oslab_plugin/).
     Behavior is set by STUDENT_CLIENT_MODE in .env (chat | ide).
-    Run it with:  cd clion_plugin && ./gradlew runIde
+    Run it with:  cd oslab_plugin && ./gradlew :clion:runIde   (or :pycharm:runIde)
 MSG

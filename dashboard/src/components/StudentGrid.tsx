@@ -9,9 +9,10 @@ interface Props {
   onAskThem: (sessionId: string) => void;
   onViewChat: (sessionId: string) => void;
   onProctorLog: (sessionId: string) => void;
+  onViewSubmissions: (sessionId: string) => void;
 }
 
-export function StudentGrid({ students, paramLabels, onModeChange, onAskThem, onViewChat, onProctorLog }: Props) {
+export function StudentGrid({ students, paramLabels, onModeChange, onAskThem, onViewChat, onProctorLog, onViewSubmissions }: Props) {
   if (students.length === 0) return null;
   return (
     <div
@@ -30,6 +31,7 @@ export function StudentGrid({ students, paramLabels, onModeChange, onAskThem, on
           onAskThem={onAskThem}
           onViewChat={onViewChat}
           onProctorLog={onProctorLog}
+          onViewSubmissions={onViewSubmissions}
         />
       ))}
     </div>
@@ -43,6 +45,7 @@ function StudentCard({
   onAskThem,
   onViewChat,
   onProctorLog,
+  onViewSubmissions,
 }: {
   s: Student;
   paramLabels?: ParamLabel[];
@@ -50,6 +53,7 @@ function StudentCard({
   onAskThem: Props["onAskThem"];
   onViewChat: Props["onViewChat"];
   onProctorLog: Props["onProctorLog"];
+  onViewSubmissions: Props["onViewSubmissions"];
 }) {
   const { t } = useLang();
   const params = renderParams(s.variant_params, paramLabels);
@@ -127,6 +131,11 @@ function StudentCard({
           {s.mode === "mentor" ? t("mentor") : t("codingPartner")}
         </Chip>
         <Chip>🔎 {s.probe_count}</Chip>
+        {s.recommended_grade != null && (
+          <Chip color={bandColor(s.grade_band)}>
+            🎯 {Math.round(s.grade_override ?? s.recommended_grade)}
+          </Chip>
+        )}
       </div>
       {params.length > 0 && (
         <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 6, lineHeight: 1.5 }}>
@@ -176,6 +185,21 @@ function StudentCard({
         >
           🔎 {t("askThem")}
         </button>
+        <button
+          onClick={() => onViewSubmissions(s.session_id)}
+          title={t("openSubmissionsTitle")}
+          style={{
+            background: (s.submission_count ?? 0) > 0 ? "#7c3aed" : "#6b7280",
+            color: "white",
+            border: "none",
+            borderRadius: 6,
+            padding: "6px 12px",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          📤 {(s.submission_count ?? 0) > 0 ? t("submissionsN", { n: s.submission_count ?? 0 }) : t("submissions")}
+        </button>
         {examClient && (
           <button
             onClick={() => onProctorLog(s.session_id)}
@@ -196,6 +220,18 @@ function StudentCard({
       </div>
     </div>
   );
+}
+
+// Band -> chip color, matching the SubmissionsModal grade pills.
+function bandColor(band?: string | null): string {
+  switch (band) {
+    case "excellent": return "#10b981";
+    case "good": return "#3b82f6";
+    case "review": return "#f59e0b";
+    case "flagged": return "#b91c1c";
+    case "fail": return "#6b7280";
+    default: return "#8b5cf6";
+  }
 }
 
 function Chip({ children, color = "#e5e7eb" }: { children: React.ReactNode; color?: string }) {

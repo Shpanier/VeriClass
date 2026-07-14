@@ -7,6 +7,7 @@ import { AskThemModal } from "./components/AskThemModal";
 import { ChatViewModal } from "./components/ChatViewModal";
 import { ProctorBanner } from "./components/ProctorBanner";
 import { ProctorLogModal } from "./components/ProctorLogModal";
+import { SubmissionsModal } from "./components/SubmissionsModal";
 import { ReviewQueue } from "./components/ReviewQueue";
 import { LoginGate } from "./components/LoginGate";
 import { ExercisesPanel } from "./components/ExercisesPanel";
@@ -24,6 +25,7 @@ export function App() {
   const [askingSessionId, setAskingSessionId] = useState<string | null>(null);
   const [viewingSessionId, setViewingSessionId] = useState<string | null>(null);
   const [proctorSessionId, setProctorSessionId] = useState<string | null>(null);
+  const [submissionsSessionId, setSubmissionsSessionId] = useState<string | null>(null);
 
   const refreshActiveExercise = () =>
     api.activeExercise().then(setExercise).catch(console.error);
@@ -78,6 +80,7 @@ export function App() {
   const askingTarget = students.find((s) => s.session_id === askingSessionId) ?? null;
   const viewingTarget = students.find((s) => s.session_id === viewingSessionId) ?? null;
   const proctorTarget = students.find((s) => s.session_id === proctorSessionId) ?? null;
+  const submissionsTarget = students.find((s) => s.session_id === submissionsSessionId) ?? null;
 
   if (!authed) return <LoginGate onLoggedIn={() => setAuthed(true)} />;
 
@@ -121,6 +124,7 @@ export function App() {
             onAskThem={(id) => setAskingSessionId(id)}
             onViewChat={(id) => setViewingSessionId(id)}
             onProctorLog={(id) => setProctorSessionId(id)}
+            onViewSubmissions={(id) => setSubmissionsSessionId(id)}
           />
         </>
       )}
@@ -146,6 +150,9 @@ export function App() {
       )}
       {proctorTarget && (
         <ProctorLogModal student={proctorTarget} onClose={() => setProctorSessionId(null)} />
+      )}
+      {submissionsTarget && (
+        <SubmissionsModal student={submissionsTarget} onClose={() => setSubmissionsSessionId(null)} />
       )}
     </div>
   );

@@ -120,7 +120,48 @@ CREATE TABLE IF NOT EXISTS proctor_events (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
+-- Student submissions: each time a student presses "Send to teacher" in the
+-- CLion plugin, the current source file and the captured console output are
+-- stored here for the instructor to review on the dashboard. The plugin also
+-- reports the real compile/run result (language, compile_ok, compile_output,
+-- run_report JSON) so the recommended-grade correctness score is grounded in
+-- actual execution rather than an LLM guess.
+CREATE TABLE IF NOT EXISTS submissions (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id     TEXT NOT NULL,
+    filename       TEXT,
+    source_code    TEXT NOT NULL,
+    console_output TEXT,
+    language       TEXT,            -- 'c' | 'cpp' | 'python' | 'other' (from the file extension)
+    compile_ok     INTEGER,         -- 1 compiled, 0 failed, NULL not applicable (e.g. Python)
+    compile_output TEXT,            -- compiler stdout+stderr (C/C++)
+    run_report     TEXT,            -- JSON: [{input, expected, actual, passed}, ...] per variant test case
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+-- Recommended grade for a session: one current recommendation per session,
+-- upserted when a teacher clicks "Recommend grade" on the dashboard. The blend
+-- is 0.3*correctness + 0.7*wise_use (correctness is deterministic from the
+-- submission's run_report; wise_use is the LLM judge of how well the student
+-- used the tutor). `override_grade` lets the teacher set the final number.
+CREATE TABLE IF NOT EXISTS grade_recommendations (
+    session_id     TEXT PRIMARY KEY,
+    submission_id  INTEGER,
+    correctness    REAL,
+    wise_use       REAL,
+    recommended    REAL,
+    band           TEXT,            -- excellent | good | review | flagged | fail
+    rationale      TEXT,
+    components     TEXT,            -- JSON: the deterministic feature summary + LLM signals
+    override_grade REAL,
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_submissions_session ON submissions(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_probes_session ON probes(session_id, status);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, last_active_at);
 CREATE INDEX IF NOT EXISTS idx_pending_reviews_status ON pending_reviews(status, created_at);
@@ -162,4 +203,10 @@ def init_schema() -> None:
             "variant_more_he": "TEXT",
             "chosen_lang": "TEXT",
             "final_text": "TEXT",
+        })
+        _add_missing_columns(c, "submissions", {
+            "language": "TEXT",
+            "compile_ok": "INTEGER",
+            "compile_output": "TEXT",
+            "run_report": "TEXT",
         })

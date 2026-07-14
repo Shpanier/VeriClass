@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend import db, deps, exercises
+from backend.grading import service as grade_service
 from backend.routes.proctor import ALERT_KINDS
 
 router = APIRouter()
@@ -36,6 +37,7 @@ def list_students(teacher: dict = Depends(deps.require_teacher)):
             SELECT s.id AS session_id, u.username, s.exercise, s.variant,
                    s.mode, s.started_at, s.last_active_at,
                    (SELECT COUNT(*) FROM probes p WHERE p.session_id = s.id) AS probe_count,
+                   (SELECT COUNT(*) FROM submissions sub WHERE sub.session_id = s.id) AS submission_count,
                    (SELECT COUNT(*) FROM proctor_events e
                       WHERE e.session_id = s.id
                         AND e.kind IN ({_ALERT_PLACEHOLDERS})) AS focus_alerts,
@@ -44,9 +46,13 @@ def list_students(teacher: dict = Depends(deps.require_teacher)):
                       ORDER BY e.id DESC LIMIT 1) AS last_focus_kind,
                    (SELECT e.created_at FROM proctor_events e
                       WHERE e.session_id = s.id
-                      ORDER BY e.id DESC LIMIT 1) AS last_focus_at
+                      ORDER BY e.id DESC LIMIT 1) AS last_focus_at,
+                   g.recommended AS recommended_grade,
+                   g.override_grade AS grade_override,
+                   g.band AS grade_band
             FROM sessions s
             JOIN users u ON u.id = s.user_id
+            LEFT JOIN grade_recommendations g ON g.session_id = s.id
             WHERE s.last_active_at >= datetime('now', '-30 minutes')
             ORDER BY s.last_active_at DESC
             """,
@@ -93,4 +99,5 @@ def session_messages(session_id: str, teacher: dict = Depends(deps.require_teach
         "session": session,
         "messages": [dict(m) for m in messages],
         "probes": [dict(p) for p in probes],
+        "grade": grade_service.get(session_id),
     }

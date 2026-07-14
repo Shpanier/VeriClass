@@ -73,6 +73,7 @@ def _full(ex: dict[str, Any]) -> dict[str, Any]:
         "welcome_suggestions": ex.get("welcome_suggestions", []),
         "required_error_strings": ex.get("required_error_strings", []),
         "param_labels": ex.get("param_labels", []),
+        "scaffold_filename": ex.get("scaffold_filename"),
         "source": ex.get("source", "yaml"),
         "edited": ex.get("edited", False),
     }
@@ -119,6 +120,7 @@ class ExercisePayload(BaseModel):
     welcome_suggestions: list[str] = Field(default_factory=list)
     required_error_strings: list[str] = Field(default_factory=list)
     param_labels: list[ParamLabel] = Field(default_factory=list)
+    scaffold_filename: Optional[str] = None
 
 
 @router.post("/exercises")

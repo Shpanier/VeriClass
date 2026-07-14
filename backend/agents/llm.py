@@ -37,17 +37,23 @@ def _api_key() -> str:
     return key
 
 
-def gemini_llm(model: str | None = None, temperature: float = 0.4) -> LLM:
+def gemini_llm(
+    model: str | None = None,
+    temperature: float = 0.4,
+    timeout: float | None = None,
+) -> LLM:
     """Return a CrewAI LLM pinned to Gemini.
 
     `model` is a bare Gemini model name (e.g. 'gemini-2.5-pro'); the 'gemini/'
-    provider prefix is added here so callers never name a provider.
+    provider prefix is added here so callers never name a provider. `timeout`
+    overrides the config default (useful for long generations like writing a full
+    program, which can exceed the standard 30s).
     """
     name = model or _config().get("model") or DEFAULT_MODEL
-    timeout = float(_config().get("timeout_sec", 30))
+    tmo = timeout if timeout is not None else float(_config().get("timeout_sec", 30))
     return LLM(
         model=f"gemini/{name}",
         api_key=_api_key(),
         temperature=temperature,
-        timeout=timeout,
+        timeout=tmo,
     )
