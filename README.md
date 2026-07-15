@@ -271,24 +271,7 @@ A 90-minute lab session, end to end:
   your queue.
 
 **After class**
-- All transcripts and probe results are in `oslab.db`. Useful queries:
-
-```sql
--- Per-student probe scores
-SELECT u.username, COUNT(p.id) AS probes,
-       AVG(COALESCE(p.override_grade, p.auto_grade)) AS avg_score
-FROM users u
-JOIN sessions s ON s.user_id = u.id
-JOIN probes p ON p.session_id = s.id
-WHERE p.status = 'answered'
-GROUP BY u.username;
-
--- Distribution of answer levels chosen in review mode
-SELECT s.user_id, answer_level, COUNT(*)
-FROM messages m JOIN sessions s ON s.id = m.session_id
-WHERE answer_level IS NOT NULL
-GROUP BY s.user_id, answer_level;
-```
+- All transcripts and probe results are in `oslab.db`.
 
 ---
 
