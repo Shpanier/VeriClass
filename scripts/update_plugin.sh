@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────
-#  update_plugin.sh — install/update the OS Lab plugin over the tunnel.
+#  update_plugin.sh — install/update the VeriExam plugin over the tunnel.
 #
 #  Run this on ANY machine (teacher or student). It downloads the plugin the
 #  build machine published to the backend and drops it into the matching

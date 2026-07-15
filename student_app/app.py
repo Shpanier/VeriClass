@@ -26,7 +26,7 @@ async def on_chat_start():
         await cl.Message(content=f"🛠️ Dev mode: auto-login with `{code}`.").send()
     else:
         res = await cl.AskUserMessage(
-            content="🎓 Welcome to the OS Lab. Enter your login code to begin.",
+            content="🎓 Welcome to VeriExam. Enter your login code to begin.",
             timeout=600,
         ).send()
         code = (res or {}).get("output", "").strip().upper()

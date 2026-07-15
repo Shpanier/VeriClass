@@ -1,4 +1,4 @@
-# OS Lab — Instructor-Controlled LLM for CS Education
+# VeriExam — Instructor-Controlled LLM for CS Education
 ### Conference Presentation · Detailed Table of Contents & Speaker Guide
 **Format:** 12-minute talk (≈ 11 min speaking + 1 min buffer) · 13 slides · ~55 sec/slide average
 **Audience:** CS educators, ed-tech researchers, curriculum designers

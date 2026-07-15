@@ -128,6 +128,13 @@ def update(exercise_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     if exercise_id not in _LOADED:
         raise KeyError(exercise_id)
     payload = {**payload, "exercise_id": exercise_id}
+    # Preserve fields the editor UI may not send. The dashboard form has no
+    # scaffold_filename input, so a plain edit would otherwise wipe it (and with
+    # it the exercise's language) — keep the current value when none is given.
+    if not payload.get("scaffold_filename"):
+        existing = _LOADED.get(exercise_id, {}).get("scaffold_filename")
+        if existing:
+            payload["scaffold_filename"] = existing
     _validate(payload, "update")
     return _upsert(payload)
 

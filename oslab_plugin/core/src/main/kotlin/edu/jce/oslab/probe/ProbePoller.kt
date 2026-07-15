@@ -61,7 +61,7 @@ class ProbePoller(
         if (stopped.get()) return
         val answer = Messages.showInputDialog(
             "Your instructor is asking you:\n\n$body\n\nType your answer:",
-            "OS Lab — Comprehension Check",
+            "VeriExam — Comprehension Check",
             Messages.getQuestionIcon(),
         )?.trim()
         if (answer.isNullOrEmpty()) {
@@ -76,7 +76,7 @@ class ProbePoller(
                 ApplicationManager.getApplication().invokeLater {
                     Messages.showErrorDialog(
                         "Could not submit your answer: ${e.message}",
-                        "OS Lab",
+                        "VeriExam",
                     )
                 }
                 return@executeOnPooledThread
@@ -84,7 +84,7 @@ class ProbePoller(
             ApplicationManager.getApplication().invokeLater {
                 Messages.showInfoMessage(
                     "Answer submitted. Auto-grade: ${result.auto_grade}/2\n\n${result.why}",
-                    "OS Lab — Comprehension Check",
+                    "VeriExam — Comprehension Check",
                 )
             }
         }

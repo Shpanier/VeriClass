@@ -1,4 +1,4 @@
-# OS Lab — Instructor-Controlled LLM for CS Education
+# VeriExam — Instructor-Controlled LLM for CS Education
 
 > English version · [גרסה עברית](README.he.md)
 
@@ -346,8 +346,8 @@ gradle wrapper --gradle-version 8.10.2   # one-time, generates the wrapper jar
 ./gradlew :pycharm:runIde                # sandbox PyCharm with the plugin
 ```
 
-In the sandbox, set the backend URL under **Settings → Tools → OS Lab**, open the
-**OS Lab** tool window, and log in with a course code. Chainlit and the plugin can
+In the sandbox, set the backend URL under **Settings → Tools → VeriExam**, open the
+**VeriExam** tool window, and log in with a course code. Chainlit and the plugin can
 be used at the same time against the same backend.
 
 **Shipping updates to students without passing files around.** When the backend

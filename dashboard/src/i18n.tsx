@@ -13,7 +13,7 @@ import type { Lang } from "./types";
 const STRINGS = {
   en: {
     // chrome
-    appTitle: "OS Lab — Teacher Dashboard",
+    appTitle: "VeriExam — Teacher Dashboard",
     language: "עברית", // label shows the OTHER language you can switch to
     signOut: "Sign out",
     on: "On",
@@ -169,7 +169,7 @@ const STRINGS = {
   },
   he: {
     // chrome
-    appTitle: "מעבדת OS — לוח בקרה למורה",
+    appTitle: "VeriExam — לוח בקרה למורה",
     language: "English",
     signOut: "התנתקות",
     on: "פעיל",

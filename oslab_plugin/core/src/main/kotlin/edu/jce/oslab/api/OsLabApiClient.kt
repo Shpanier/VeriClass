@@ -21,7 +21,7 @@ class OsLabApiException(message: String) : RuntimeException(message)
 private const val NGROK_HEADER = "ngrok-skip-browser-warning"
 
 /**
- * Thin client over the six student-facing OS Lab endpoints. All calls are
+ * Thin client over the six student-facing VeriExam endpoints. All calls are
  * blocking and MUST be invoked off the EDT (use a pooled thread). The base URL
  * is read fresh from settings on every call so changing it takes effect without
  * a restart.

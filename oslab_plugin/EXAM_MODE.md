@@ -1,7 +1,7 @@
-# OS Lab — Exam / Proctor Mode (instructor guide)
+# VeriExam — Exam / Proctor Mode (instructor guide)
 
 Exam mode turns the CLion plugin into a lightweight proctored client: it opens
-CLion in **full screen**, keeps the student inside the IDE + the OS Lab tutor
+CLion in **full screen**, keeps the student inside the IDE + the VeriExam tutor
 chat, and **reports to your dashboard the moment a student leaves CLion**
 (minimizes, switches to another app, or exits full screen). You build a small
 package once and hand the **same ZIP** to every student; each logs in with their
@@ -91,7 +91,7 @@ every exam client picks it up at login. To end the exam for everyone, set
 
 ## What the student experiences
 
-- CLion opens in full screen with the **OS Lab** panel already in front.
+- CLion opens in full screen with the **VeriExam** panel already in front.
 - They log in and work: write C, ask the tutor, answer your comprehension probes.
 - If they minimize / switch app / leave full screen: a **sticky red warning**
   appears ("Exam mode — stay in CLion … reported to your instructor"), CLion is

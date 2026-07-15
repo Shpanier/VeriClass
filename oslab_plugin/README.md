@@ -1,6 +1,6 @@
-# OS Lab — CLion & PyCharm Student Plugin
+# VeriExam — CLion & PyCharm Student Plugin
 
-A JetBrains plugin that is an alternative **student client** for the OS Lab
+A JetBrains plugin that is an alternative **student client** for the VeriExam
 platform. It does everything the Chainlit web app does — log in, read the
 exercise briefing, chat with the locally-hosted tutor, answer instructor
 comprehension probes — but inside the IDE the student already uses to write code
@@ -78,7 +78,7 @@ from Disk…**
 
 ## Configure the connection
 
-**Settings → Tools → OS Lab:**
+**Settings → Tools → VeriExam:**
 
 - **Backend URL** — default `http://127.0.0.1:8000`. Point it at wherever the
   FastAPI backend runs.
@@ -89,7 +89,7 @@ from Disk…**
   empty in a real exam (clear `DEV_AUTO_LOGIN_CODE` in `.env`), so students log in
   with their own codes.
 
-Open the tool window from the right edge ("OS Lab") and log in with a course
+Open the tool window from the right edge ("VeriExam") and log in with a course
 code (e.g. one printed by `scripts/add_students.py`).
 
 ---

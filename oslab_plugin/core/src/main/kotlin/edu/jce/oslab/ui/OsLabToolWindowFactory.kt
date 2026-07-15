@@ -6,7 +6,7 @@ import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.content.ContentFactory
 
-/** Registers the "OS Lab" tool window and mounts the root panel into it. */
+/** Registers the "VeriExam" tool window and mounts the root panel into it. */
 class OsLabToolWindowFactory : ToolWindowFactory, DumbAware {
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {

@@ -1,12 +1,12 @@
-# OS Lab — exam client installer (Windows).
-# Run via install-windows.bat (double-click). Installs the OS Lab plugin into
+# VeriExam — exam client installer (Windows).
+# Run via install-windows.bat (double-click). Installs the VeriExam plugin into
 # your JetBrains IDE (CLion or PyCharm, per exam.conf), points it at your
 # instructor's backend, and launches the IDE. No admin.
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 
 Write-Host "=============================================="
-Write-Host "  OS Lab - Exam Client Installer (Windows)"
+Write-Host "  VeriExam - Exam Client Installer (Windows)"
 Write-Host "=============================================="
 Write-Host ""
 
@@ -127,7 +127,7 @@ if ($exe) {
 
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green
-Write-Host "  - Open the 'OS Lab' tool window on the right (it should appear automatically)."
+Write-Host "  - Open the 'VeriExam' tool window on the right (it should appear automatically)."
 Write-Host "  - Log in with the code your instructor gave you."
 Write-Host "  - The exam runs in full screen. Leaving $ideProduct notifies your instructor."
 Read-Host "Press Enter to close"

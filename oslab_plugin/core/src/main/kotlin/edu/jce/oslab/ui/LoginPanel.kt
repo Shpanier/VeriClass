@@ -32,7 +32,7 @@ class LoginPanel(private val onSubmit: (String) -> Unit) : JPanel(GridBagLayout(
             weightx = 1.0
         }
 
-        add(JBLabel("🎓 Welcome to the OS Lab").apply { horizontalAlignment = SwingConstants.CENTER }, c)
+        add(JBLabel("🎓 Welcome to VeriExam").apply { horizontalAlignment = SwingConstants.CENTER }, c)
         c.gridy++
         add(JBLabel("Enter your login code to begin:").apply { horizontalAlignment = SwingConstants.CENTER }, c)
         c.gridy++

@@ -7,14 +7,14 @@ import com.intellij.util.ui.FormBuilder
 import javax.swing.JComponent
 import javax.swing.JPanel
 
-/** Settings → Tools → OS Lab. */
+/** Settings → Tools → VeriExam. */
 class OsLabSettingsConfigurable : Configurable {
 
     private val backendUrlField = JBTextField()
     private val devCodeField = JBTextField()
     private var panel: JPanel? = null
 
-    override fun getDisplayName(): String = "OS Lab"
+    override fun getDisplayName(): String = "VeriExam"
 
     override fun createComponent(): JComponent {
         val built = FormBuilder.createFormBuilder()
@@ -24,7 +24,7 @@ class OsLabSettingsConfigurable : Configurable {
             )
             .addLabeledComponent(JBLabel("Dev auto-login code:"), devCodeField, 1, false)
             .addComponentToRightColumn(
-                JBLabel("Optional. If set, the OS Lab tool window logs in automatically. Leave blank in class."),
+                JBLabel("Optional. If set, the VeriExam tool window logs in automatically. Leave blank in class."),
             )
             .addComponentFillVertically(JPanel(), 0)
             .panel

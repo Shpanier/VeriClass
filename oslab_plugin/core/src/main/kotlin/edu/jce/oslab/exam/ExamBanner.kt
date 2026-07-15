@@ -10,7 +10,7 @@ import javax.swing.JButton
 import javax.swing.JPanel
 
 /**
- * Sticky red strip shown at the top of the OS Lab tool window after the student
+ * Sticky red strip shown at the top of the VeriExam tool window after the student
  * leaves the IDE during an exam. Starts hidden; [show] makes it visible and
  * refreshes the violation count. "Got it" only hides it — it reappears (with an
  * incremented count) on the next violation, so it can't be permanently

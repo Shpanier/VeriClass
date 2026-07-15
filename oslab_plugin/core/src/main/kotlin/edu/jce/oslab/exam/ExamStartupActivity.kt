@@ -8,7 +8,7 @@ import edu.jce.oslab.api.OsLabApiClient
 
 /**
  * On project open, ask the backend whether exam mode is active. If so, bring the
- * OS Lab tutor tool window to the front and (when configured) put the IDE in full
+ * VeriExam tutor tool window to the front and (when configured) put the IDE in full
  * screen straight away — so the student lands in the exam with the tutor chat
  * visible and nothing else inviting a click. The actual leave-the-IDE
  * monitoring arms once the student logs in inside that tool window (see
@@ -26,7 +26,7 @@ class ExamStartupActivity : ProjectActivity {
 
         ApplicationManager.getApplication().invokeLater {
             if (project.isDisposed) return@invokeLater
-            ToolWindowManager.getInstance(project).getToolWindow("OS Lab")?.activate(null)
+            ToolWindowManager.getInstance(project).getToolWindow("VeriExam")?.activate(null)
             if (config.force_fullscreen) ExamFullScreen.enter(project)
         }
     }

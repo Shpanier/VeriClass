@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# OS Lab — exam client installer (macOS).
-# Double-click this file. It installs the OS Lab plugin into your JetBrains IDE
+# VeriExam — exam client installer (macOS).
+# Double-click this file. It installs the VeriExam plugin into your JetBrains IDE
 # (CLion or PyCharm, per exam.conf), points it at your instructor's backend, and
 # launches the IDE into the exam. No admin rights.
 set -euo pipefail
@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 PKG_DIR="$(pwd)"
 
 echo "=============================================="
-echo "  OS Lab — Exam Client Installer (macOS)"
+echo "  VeriExam — Exam Client Installer (macOS)"
 echo "=============================================="
 echo
 
@@ -98,11 +98,11 @@ done
 cat <<DONE
 
 ✔ Done.
-  • Open the "OS Lab" tool window on the right (it should appear automatically).
+  • Open the "VeriExam" tool window on the right (it should appear automatically).
   • Log in with the code your instructor gave you.
   • The exam runs in full screen. If you leave $IDE_PRODUCT, your instructor is notified.
 
-הותקן בהצלחה. פתחו את חלון "OS Lab" מימין, התחברו עם הקוד שקיבלתם,
+הותקן בהצלחה. פתחו את חלון "VeriExam" מימין, התחברו עם הקוד שקיבלתם,
 ועבדו אך ורק בתוך $IDE_PRODUCT. יציאה מהחלון תדווח למרצה.
 DONE
 # `|| true`: when run without a TTY (EOF on stdin) read returns non-zero, which

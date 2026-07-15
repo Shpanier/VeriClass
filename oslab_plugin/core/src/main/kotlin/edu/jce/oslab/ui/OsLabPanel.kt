@@ -32,7 +32,7 @@ import javax.swing.JPanel
 import javax.swing.ScrollPaneConstants
 
 /**
- * Root of the OS Lab tool window. Owns the login → session flow: authenticate,
+ * Root of the VeriExam tool window. Owns the login → session flow: authenticate,
  * start (or resume) a session, load the variant's exercise, ask the backend
  * which behavior to run (chat vs. ide), then build the session UI and start the
  * probe poller.

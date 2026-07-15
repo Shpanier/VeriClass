@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the OS Lab exam client and assemble the ZIP a teacher hands to students.
+# Build the VeriExam exam client and assemble the ZIP a teacher hands to students.
 #
 # Run on a machine with JDK 21 (both IDEs' 2024.2 run on JBR 21). The first build
 # downloads the IDE SDK and is large; later builds are cached.

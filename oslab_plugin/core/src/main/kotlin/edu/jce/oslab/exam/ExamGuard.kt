@@ -154,7 +154,7 @@ class ExamGuard(
     private fun warnStudent(count: Int, reason: String) {
         onViolation(count, reason)
         toolWindow()?.activate(null)
-        val group = NotificationGroupManager.getInstance().getNotificationGroup("OS Lab Exam") ?: return
+        val group = NotificationGroupManager.getInstance().getNotificationGroup("VeriExam Exam") ?: return
         group.createNotification(
             "Exam mode — stay in $ide",
             "$reason This was reported to your instructor (×$count).",
@@ -204,7 +204,7 @@ class ExamGuard(
         }
     }
 
-    private fun toolWindow() = ToolWindowManager.getInstance(project).getToolWindow("OS Lab")
+    private fun toolWindow() = ToolWindowManager.getInstance(project).getToolWindow("VeriExam")
 
     override fun dispose() {
         stopped.set(true)

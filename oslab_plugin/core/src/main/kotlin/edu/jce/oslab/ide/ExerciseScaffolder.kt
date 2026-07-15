@@ -77,7 +77,7 @@ object ExerciseScaffolder {
             }
         }
         sb.append(" *\n")
-        sb.append(" * The OS Lab tutor (right-hand tool window) can help — but it will not\n")
+        sb.append(" * The VeriExam tutor (right-hand tool window) can help — but it will not\n")
         sb.append(" * hand you a finished solution.\n")
         sb.append(" */\n\n")
         sb.append("#include <stdio.h>\n")
@@ -121,7 +121,7 @@ object ExerciseScaffolder {
         sb.append("How it is run and graded: your program is fed one line on standard input\n")
         sb.append("like  prog \"<input>\"  and must print the answer as its LAST line. The\n")
         sb.append("skeleton below reads that line and hands you the quoted text as `arg`.\n\n")
-        sb.append("The OS Lab tutor (right-hand tool window) can help — but it will not\n")
+        sb.append("The VeriExam tutor (right-hand tool window) can help — but it will not\n")
         sb.append("hand you a finished solution.\n")
         sb.append("\"\"\"\n\n")
         sb.append("import re\n")

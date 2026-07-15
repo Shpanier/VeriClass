@@ -48,7 +48,7 @@ Tailor each level — each strictly more helpful than the previous:
 
 def _build_crew(system_prompt: str, transcript: str, student_question: str) -> Crew:
     agent = Agent(
-        role="OS-lab teaching assistant",
+        role="VeriExam teaching assistant",
         goal="Draft graded, bilingual help a teacher will review before it reaches the student.",
         backstory=(
             "You assist an instructor in an Operating Systems lab. You never hand "

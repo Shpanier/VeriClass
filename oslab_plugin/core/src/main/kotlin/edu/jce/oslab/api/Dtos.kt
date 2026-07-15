@@ -1,7 +1,7 @@
 package edu.jce.oslab.api
 
 /**
- * Data transfer objects mirroring the OS Lab backend JSON. Field names match
+ * Data transfer objects mirroring the VeriExam backend JSON. Field names match
  * the backend exactly (snake_case) so Gson maps them with no annotations.
  */
 
