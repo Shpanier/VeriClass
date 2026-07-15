@@ -515,5 +515,18 @@ Contributions and bug reports welcome — file an issue or PR.
 
 ## License & attribution
 
+- **Code** — [MIT License](LICENSE).
+- **Educational materials** (exercises, briefings, slides, and documentation) —
+  [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+  You are free to share and adapt them, as long as you give appropriate credit.
+
+**If you use this project or its exercises in teaching or research, please cite
+it and let me know — I'd love to hear how it's used.**
+
 Built at the *Software Engineering Seminar*, Azrieli College of Engineering
-Jerusalem (JCE). Educational and research use.
+Jerusalem (JCE).
+
+## Contact
+
+Please contact me if you want any help, have questions, ideas, or would like to
+collaborate: **spanier@gmail.com**

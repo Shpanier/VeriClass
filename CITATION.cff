@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+title: "VeriExam — Instructor-Controlled LLM for CS Education"
+message: "If you use this project or its exercises in teaching or research, please cite it and let me know."
+type: software
+authors:
+  - family-names: Spanier
+    given-names: Assaf
+    email: spanier@gmail.com
+    affiliation: "Azrieli College of Engineering Jerusalem (JCE)"
+year: 2026
+url: "https://github.com/Shpanier/AI_AGENT_EDU_2"
+repository-code: "https://github.com/Shpanier/AI_AGENT_EDU_2"
+license: MIT
