@@ -1,7 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend import db
+from backend import db, deps
 
 router = APIRouter()
 
@@ -12,7 +12,7 @@ class ModeRequest(BaseModel):
 
 
 @router.post("/mode")
-def set_mode(req: ModeRequest):
+def set_mode(req: ModeRequest, teacher: dict = Depends(deps.require_teacher)):
     if req.mode not in ("mentor", "coding_partner"):
         raise HTTPException(400, "mode must be 'mentor' or 'coding_partner'")
     with db.conn() as c:

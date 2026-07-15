@@ -1,5 +1,7 @@
 import json
 
+from backend import params as param_utils
+
 
 def student_system_prompt(exercise: dict, variant: dict, mode: str) -> str:
     rules = (
@@ -12,10 +14,13 @@ def student_system_prompt(exercise: dict, variant: dict, mode: str) -> str:
         "- You may write functions, diffs, and tests.\n"
         "- Refuse only if asked to 'solve the whole exercise' or 'do it all for me'.\n"
     )
+    brief = param_utils.substitute_brief(
+        exercise["brief_md"], variant.get("params", {}), exercise.get("param_labels", [])
+    )
     return (
         f"You are a teaching assistant for the OS course exercise "
         f"'{exercise['title_en']}'.\n\n"
-        f"EXERCISE BRIEF:\n{exercise['brief_md']}\n\n"
+        f"EXERCISE BRIEF:\n{brief}\n\n"
         f"STUDENT VARIANT: {variant['id']} with parameters "
         f"{json.dumps(variant['params'])}.\n"
         f"Test inputs the student must pass:\n"

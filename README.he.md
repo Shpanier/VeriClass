@@ -1,6 +1,6 @@
 <div dir="rtl" align="right">
 
-# מעבדת מערכות הפעלה — מודל שפה בשליטת המרצה
+# VeriExam — מודל שפה בשליטת המרצה
 
 > 🇮🇱 גרסה עברית · [English version](README.md)
 
@@ -67,7 +67,7 @@
 4. המרצה בוחר אחת. הטקסט הזה נשלח אל הסטודנט בזרימה.
 5. הרמה הנבחרת מתועדת בעמודה `messages.answer_level` לצורך מתאם עתידי עם הציון של הסטודנט.
 
-מומלץ להפעיל מצב זה במעבדות עם משקל הערכה גבוה, בבחנים, או כאשר סטודנט מסוים זקוק לתמיכה ממוקדת. המודל **לעולם** לא מחזיר פתרון מלא בשום רמה — האילוץ הזה אכוף בפרומפט הייצור (`backend/variants_gen.py`).
+מומלץ להפעיל מצב זה במעבדות עם משקל הערכה גבוה, בבחנים, או כאשר סטודנט מסוים זקוק לתמיכה ממוקדת. המודל **לעולם** לא מחזיר פתרון מלא בשום רמה — האילוץ הזה אכוף בסוכן ה־tutor (`backend/agents/tutor.py`). הטיוטות מבוססות על השיחה האמיתית של הסטודנט (מוזרמת כזיכרון), כך שהן עונות ל*סטודנט הזה* ולא חוזרות על תשובות גנריות.
 
 ---
 
@@ -77,16 +77,16 @@
 
 | # | Component        | Stack                        | Port  |
 |---|------------------|------------------------------|-------|
-| 1 | Local LLM        | Ollama + `qwen2.5-coder:3b`  | 11434 |
-| 2 | Cloud LLM        | Gemini 2.5 / OpenAI / Claude | —     |
-| 3 | Backend          | FastAPI + SQLite (WAL)       | 8000  |
-| 4 | Student app      | Chainlit                     | 8001  |
+| 1 | Agents           | CrewAI on Gemini (review drafts, probes, grading) | — |
+| 2 | Student chat     | Gemini (streaming)           | —     |
+| 3 | Backend          | FastAPI + SQLite (WAL)       | 8010  |
+| 4 | Student app      | Chainlit                     | 8011  |
 | 4b| Student app (alt)| CLion plugin (Kotlin)        | בתוך ה־IDE |
 | 5 | Instructor dash  | React + Vite + TypeScript    | 5173  |
 
 </div>
 
-לסטודנט יש **שני קליינטים מתחלפים** מול אותו צד שרת: אפליקציית הוויב של Chainlit (רכיב 4) ו**תוסף ל־CLion** (רכיב 4b) שמכניס את אותו זרם של כניסה ← תדריך ← צ׳אט ← שאלות הבנה אל תוך ה־IDE. ראו [*קליינט סטודנט חלופי: תוסף ה־CLion*](#קליינט-סטודנט-חלופי-תוסף-ה־clion) ואת [`clion_plugin/README.md`](clion_plugin/README.md).
+לסטודנט יש **שני קליינטים מתחלפים** מול אותו צד שרת: אפליקציית הוויב של Chainlit (רכיב 4) ו**תוסף ל־CLion** (רכיב 4b) שמכניס את אותו זרם של כניסה ← תדריך ← צ׳אט ← שאלות הבנה אל תוך ה־IDE. ראו [*קליינט סטודנט חלופי: תוסף ה־CLion*](#קליינט-סטודנט-חלופי-תוסף-ה־clion) ואת [`oslab_plugin/README.md`](oslab_plugin/README.md).
 
 המודל המקומי הוא הנתיב היחיד שרואה הודעות של סטודנטים. המודל הענני משמש **אך ורק** להצעות שאלות הבנה למרצה (`/api/probe/suggest`), ורק אחרי ש־`backend/sanitize.py` הסיר שמות, קודים ומידע מזהה אחר.
 
@@ -97,38 +97,85 @@
 <div dir="ltr">
 
 ```bash
-# 1. התקנת Ollama והורדת המודל (פעם אחת)
-ollama pull qwen2.5-coder:3b
-
-# 2. תלויות Python
+# 1. תלויות Python
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 3. הגדרות
+# 2. הגדרות
 cp .env.example .env
-# ערוך את .env — קבע GEMINI_API_KEY (או OPENAI_API_KEY / ANTHROPIC_API_KEY)
+# ערוך את .env — קבע GEMINI_API_KEY (המפתח היחיד שצריך)
 
-# 4. זריעת סטודנטים
-python scripts/add_students.py --names "Yossi Cohen,Shira Levi,Ahmed Alyan"
+# 4. זריעת סטודנטים — וגם לפחות מרצה אחד (ראו "כניסת מרצה" למטה)
+python scripts/add_students.py \
+  --names "Yossi Cohen,Shira Levi,Ahmed Alyan" \
+  --teachers "Dr. Cohen"
 ```
 
 </div>
 
-סטודנטי הדגמה לאחר זריעה:
+חשבונות הדגמה לאחר זריעה:
 
 <div dir="ltr">
 
-| Name         | Login code |
-|--------------|------------|
-| Yossi Cohen  | STU1-XXXX   |
-| Shira Levi   | STU2-XXXX   |
-| Ahmed Alyan  | STU3-XXXX   |
+| Name         | Login code | Role    |
+|--------------|------------|---------|
+| Instructor   | TEACH-XXXX   | teacher |
+| Yossi Cohen  | STU1-XXXX   | student |
+| Shira Levi   | STU2-XXXX   | student |
+| Ahmed Alyan  | STU3-XXXX   | student |
 
 </div>
 
-הסטודנטים פותחים את `http://localhost:8001`, המרצה את `http://localhost:5173`.
+> היכנסו ללוח הבקרה (`http://localhost:5173`) עם קוד ה**מרצה** **`TEACH-XXXX`**.
+> הקודים אצלכם יהיו שונים — סקריפט הזריעה מייצר אותם באקראי; הריצו את שאילתת
+> ה־`sqlite3` בסעיף "כניסת מרצה" כדי לראות את שלכם.
+
+הסטודנטים פותחים את `http://localhost:8011`, המרצה את `http://localhost:5173`.
 מעדיפים את ה־IDE? דלגו על הדפדפן והשתמשו בקליינט תוסף ה־CLion במקום — ראו [קליינט סטודנט חלופי: תוסף ה־CLion](#קליינט-סטודנט-חלופי-תוסף-ה־clion).
+
+### כניסת מרצה
+
+לוח הבקרה (`http://localhost:5173`) מוגן מאחורי כניסת מרצה — מסך הכניסה שלו מציג
+**"כניסת מרצה — enter your instructor code"**. מרצה נכנס עם **קוד כניסה**, בדיוק
+כמו סטודנט, רק שהחשבון שלו נושא `role=teacher`. קוד של סטודנט נדחה כאן
+(*"That code isn't an instructor account."*).
+
+צרו קודי מרצה עם אותו סקריפט זריעה, בעזרת `--teachers`:
+
+<div dir="ltr">
+
+```bash
+python scripts/add_students.py --teachers "Dr. Cohen,TA Levi"
+```
+
+</div>
+
+הסקריפט מדפיס טבלת `name → code` (בקטע נפרד **"teachers (dashboard login)"**).
+מסרו את הקוד למרצה; הוא מקליד אותו במסך הכניסה (הקודים אינם תלויי אותיות
+גדולות/קטנות). כדי להוסיף מרצה לבסיס נתונים קיים ישירות:
+
+<div dir="ltr">
+
+```bash
+sqlite3 oslab.db \
+  "INSERT INTO users(username, login_code, role) VALUES('Dr. Cohen','TEACH-01','teacher');"
+```
+
+</div>
+
+לרשימת קודי המרצה שכבר קיימים בבסיס הנתונים בכל רגע:
+
+<div dir="ltr">
+
+```bash
+sqlite3 oslab.db "SELECT username, login_code FROM users WHERE role='teacher';"
+```
+
+</div>
+
+רק חשבון עם `role=teacher` יכול לפתוח את לשונית **התרגילים** וליצור תרגילים
+חדשים, להחליף את אישיות המודל של סטודנט, או להפעיל מצב סקירה.
 
 ---
 
@@ -146,10 +193,10 @@ python scripts/add_students.py --names "Yossi Cohen,Shira Levi,Ahmed Alyan"
 
 מה הוא עושה:
 
-1. **הורג** כל מה שמאזין על הפורטים `8000`, `8001`, `5173`, וגם תהליכי `uvicorn backend.main` / `chainlit run student_app` שנשארו לבד. שימושי אחרי קריסה שבה התהליך הקודם עדיין מחזיק את הפורט.
+1. **הורג** כל מה שמאזין על הפורטים `8010`, `8011`, `5173` (וגם הישנים `8000`/`8001`), וגם תהליכי `uvicorn backend.main` / `chainlit run student_app` שנשארו לבד. שימושי אחרי קריסה שבה התהליך הקודם עדיין מחזיק את הפורט.
 2. **פותח חלון Terminal חדש עם שלוש לשוניות:**
-   - לשונית 1: `uvicorn backend.main:app --reload --port 8000`
-   - לשונית 2: `chainlit run student_app/app.py --port 8001`
+   - לשונית 1: `uvicorn backend.main:app --reload --port 8010`
+   - לשונית 2: `chainlit run student_app/app.py --port 8011`
    - לשונית 3: `cd dashboard && npm run dev`
 3. שתי הלשוניות של פייתון מבצעות `source .venv/bin/activate` אוטומטית לפני ההפעלה.
 
@@ -225,7 +272,7 @@ GROUP BY s.user_id, answer_level;
 ## קליינט סטודנט חלופי: תוסף ה־CLion
 
 הסטודנטים בקורס הזה ממילא כותבים את קוד ה־C שלהם ב־CLion. הספרייה
-[`clion_plugin/`](clion_plugin/) היא תוסף JetBrains שמטמיע את *כל* קליינט הסטודנט
+[`oslab_plugin/`](oslab_plugin/) היא תוסף JetBrains שמטמיע את *כל* קליינט הסטודנט
 בתוך חלון כלים (tool window) ב־CLion, כך שלא צריך לצאת מה־IDE כדי לדבר עם החונך.
 הוא משתמש באותם שישה endpoints של צד השרת כמו Chainlit — צד השרת ללא שינוי, פרט
 ל־endpoint קטן אחד לקריאה בלבד (`GET /api/client-config`) שחושף את מתג ההתנהגות.
@@ -242,20 +289,21 @@ GROUP BY s.user_id, answer_level;
 
 </div>
 
-בנייה והרצה (פירוט מלא ב־[`clion_plugin/README.md`](clion_plugin/README.md)):
+בנייה והרצה (פירוט מלא ב־[`oslab_plugin/README.md`](oslab_plugin/README.md)):
 
 <div dir="ltr">
 
 ```bash
-cd clion_plugin
+cd oslab_plugin
 gradle wrapper --gradle-version 8.10.2   # פעם אחת, יוצר את ה-wrapper jar
-./gradlew runIde                         # מריץ CLion ארגז-חול עם התוסף טעון
+./gradlew :clion:runIde                  # מריץ CLion ארגז-חול עם התוסף טעון
+./gradlew :pycharm:runIde                # מריץ PyCharm ארגז-חול עם התוסף טעון
 ```
 
 </div>
 
-בארגז־החול, הגדירו את כתובת צד השרת תחת **Settings → Tools → OS Lab**, פתחו את
-חלון הכלים **OS Lab**, והתחברו עם קוד קורס. אפשר להשתמש ב־Chainlit ובתוסף בו־זמנית
+בארגז־החול, הגדירו את כתובת צד השרת תחת **Settings → Tools → VeriExam**, פתחו את
+חלון הכלים **VeriExam**, והתחברו עם קוד קורס. אפשר להשתמש ב־Chainlit ובתוסף בו־זמנית
 מול אותו צד שרת.
 
 ---
@@ -299,8 +347,8 @@ variants:
 
 זהו כלי הוראה המשמש סטודנטים (חלקם מתחת לגיל 18) במוסד ציבורי, ולכן עמדת ברירת המחדל בנושא פרטיות שמרנית:
 
-- **תעבורת הצ׳אט של הסטודנט לא יוצאת מהרשת המקומית.** ברירת המחדל `STUDENT_LLM=ollama` רצה כולה על המחשב של המרצה / שרת המעבדה. `STUDENT_LLM=gemini` זוהי **קיצור־דרך מפורש לדיבוג** שכן שולח הודעות סטודנטים ל־Google — להשתמש רק במכוון.
-- **לקריאה הענית יש תפקיד אחד בלבד:** ייצור הצעות שאלות הבנה למרצה. היא מקבלת גרסה *מנוקה* של התמליל (`backend/sanitize.py` מסיר שמות, קודים, נתיבי קבצים, IPs) ולא רואה מזהי סטודנט אמיתיים.
+- **Gemini הוא ספק ה־LLM היחיד.** צ׳אט הסטודנט וסוכני CrewAI (טיוטות תשובה, שאלות הבנה, ניקוד) רצים כולם על Gemini של Google — אין נתיב Ollama מקומי ואין מנגנון גיבוי רב־ספקי. הודעות הסטודנטים מעובדות אצל Google; התאימו את ההסכמה/ההודעה בהתאם.
+- **כל מה שנשלח לסוכנים מנוקה תחילה.** `backend/sanitize.py` מסיר שמות, מספרי ת״ז, אימיילים, מספרי טלפון ונתיבי בית מהתמליל לפני שהוא מוזרם לסוכן.
 - **יומן ביקורת.** כל קריאה ענית נכתבת ל־`api_audit_log` עם הספק, המודל, ספירת טוקנים, latency, הקלט המנוקה, ועותק מוצפן AES של הקלט הגולמי. הגדירו `AUDIT_AES_KEY` ב־`.env`.
 - **שום חשבון סטודנט לא יוצא מבסיס הנתונים.** קודי הכניסה נוצרים מקומית על־ידי `scripts/add_students.py`; אין SSO, אין איסוף אימיילים, אין אימות צד שלישי.
 
@@ -313,20 +361,24 @@ variants:
 ```
 config/
   exercises/ex3-mcalc.yaml   # the demo exercise + 8 variants
-  cloud_llm.yaml             # provider: gemini | openai | anthropic
+  cloud_llm.yaml             # Gemini model + timeout for the agent layer
   instructors.yaml.example   # copy to instructors.yaml and edit
 
 backend/                     # FastAPI app
   main.py                    # entrypoint, loads .env early
   db.py                      # SQLite schema + tiny migration runner
   auth.py                    # login codes, bearer tokens, rate-limit
-  student_llm.py             # dispatcher: ollama vs gemini at startup
-  ollama_client.py           # streaming chat + grader against local LLM
-  gemini_student.py          # same, against Gemini (dev-only)
-  cloud_llm.py               # instructor-side cloud call (probe suggest)
-  sanitize.py                # PII scrub before any cloud call
+  student_llm.py             # Gemini-only streaming for the direct student chat
+  gemini_student.py          # httpx streaming + grader against Gemini
+  agents/                    # CrewAI agent layer (Gemini only)
+    llm.py                   #   single Gemini LLM factory
+    memory.py                #   conversation memory (transcript + prior probes)
+    schemas.py               #   structured-output models
+    tutor.py                 #   review-mode answer drafts (replaces variants_gen)
+    probe.py                 #   "Ask Them" probe suggestions (replaces cloud_llm)
+    grader.py                #   probe answer grading
+  sanitize.py                # PII scrub before anything leaves for Gemini
   variants.py                # deterministic student → variant assignment
-  variants_gen.py            # 3-level answer generator for review mode
   prompts.py                 # system prompts per (exercise, mode)
   exercises.py               # YAML loader and accessor
   routes/
@@ -336,7 +388,7 @@ backend/                     # FastAPI app
 student_app/
   app.py                     # Chainlit student UI (login + chat + probes)
 
-clion_plugin/                # alternative student client: a CLion/JetBrains plugin
+oslab_plugin/                # alternative student client: a CLion/JetBrains plugin
   build.gradle.kts           # IntelliJ Platform Gradle build (targets CLion)
   src/main/kotlin/edu/jce/oslab/
     api/                     # DTOs + HTTP/streaming client over the 6 endpoints
@@ -367,13 +419,9 @@ scripts/
 
 | Variable              | Purpose                                                       |
 |-----------------------|---------------------------------------------------------------|
-| `GEMINI_API_KEY`      | Cloud LLM key; used for probe suggestions and the dev-only `STUDENT_LLM=gemini` path. |
-| `OPENAI_API_KEY`      | Alternative cloud provider. Match with `config/cloud_llm.yaml`. |
-| `ANTHROPIC_API_KEY`   | Alternative cloud provider.                                   |
-| `STUDENT_LLM`         | `ollama` (default, private) or `gemini` (dev only).           |
-| `STUDENT_LLM_MODEL`   | Used when `STUDENT_LLM=gemini`. Default `gemini-2.5-flash-lite`. |
-| `OLLAMA_HOST`         | `http://127.0.0.1:11434` by default.                          |
-| `OLLAMA_MODEL`        | `qwen2.5-coder:3b` recommended for laptops; `:7b` for GPU.    |
+| `GEMINI_API_KEY`      | The only LLM key. Powers the CrewAI agents and the student chat. |
+| `AGENT_MODEL`         | Gemini model for the agents (review drafts, probes, grading). Default `gemini-2.5-pro`. |
+| `STUDENT_CHAT_MODEL`  | Gemini model for the direct student chat. Default `gemini-2.5-flash-lite`. |
 | `DB_PATH`             | `./oslab.db` by default.                                      |
 | `AUDIT_AES_KEY`       | 32-byte base64 key for encrypting raw cloud-LLM payloads.     |
 | `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only).   |
@@ -382,7 +430,7 @@ scripts/
 
 </div>
 
-`config/cloud_llm.yaml` בוחר את הספק והמודל לשימוש בהצעות צד־המרצה. שמרו על תאימות עם המפתח שהגדרתם.
+`config/cloud_llm.yaml` מגדיר את מודל ה־Gemini והזמן הקצוב לשכבת הסוכנים. הכול רץ על מפתח `GEMINI_API_KEY` היחיד.
 
 ---
 
@@ -401,7 +449,7 @@ scripts/
 
 ## רישיון וייחוס
 
-נבנה בסמינר *הנדסת תוכנה*, מכללת JCE לב.
+נבנה בסמינר *הנדסת תוכנה*, המכללה האקדמית להנדסה ירושלים ע״ש עזריאלי (JCE).
 שימוש למטרות חינוך ומחקר.
 
 </div>

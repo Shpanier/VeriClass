@@ -1,10 +1,10 @@
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from backend import auth, db, exercises, variants
+from backend import db, deps, exercises, variants
 
 router = APIRouter()
 
@@ -14,8 +14,8 @@ class StartSessionRequest(BaseModel):
 
 
 @router.post("/sessions")
-def start_session(req: StartSessionRequest, authorization: str = Header(None)):
-    user_id = _user_or_401(authorization)
+def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_user)):
+    user_id = user["id"]
     exercise = exercises.get(req.exercise_id) if req.exercise_id else exercises.active()
 
     with db.conn() as c:
@@ -57,12 +57,3 @@ def start_session(req: StartSessionRequest, authorization: str = Header(None)):
         "variant": variant_id,
         "mode": exercise["default_mode"],
     }
-
-
-def _user_or_401(authorization: Optional[str]) -> int:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Missing token")
-    user_id = auth.user_id_for_token(authorization.removeprefix("Bearer ").strip())
-    if user_id is None:
-        raise HTTPException(401, "Invalid token")
-    return user_id

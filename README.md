@@ -1,4 +1,4 @@
-# OS Lab — Instructor-Controlled LLM for CS Education
+# VeriExam — Instructor-Controlled LLM for CS Education
 
 > English version · [גרסה עברית](README.he.md)
 
@@ -110,7 +110,9 @@ Global toggle in the dashboard header. When on:
 Use this in high-stakes labs, during summative assessment, or when a
 particular student needs heavily-scaffolded support. The model **never**
 returns a full working solution at any level — that constraint is enforced
-in the variant-generation prompt (`backend/variants_gen.py`).
+in the tutor agent (`backend/agents/tutor.py`). The drafts are grounded in the
+student's actual conversation (threaded in as memory), so they answer *this*
+student rather than repeating boilerplate.
 
 ---
 
@@ -118,10 +120,10 @@ in the variant-generation prompt (`backend/variants_gen.py`).
 
 | # | Component        | Stack                      | Port  |
 |---|------------------|----------------------------|-------|
-| 1 | Local LLM        | Ollama + `qwen2.5-coder:3b`| 11434 |
-| 2 | Cloud LLM        | Gemini 2.5 / OpenAI / Claude | —   |
-| 3 | Backend          | FastAPI + SQLite (WAL)     | 8000  |
-| 4 | Student app      | Chainlit                   | 8001  |
+| 1 | Agents           | CrewAI on Gemini (review drafts, probes, grading) | — |
+| 2 | Student chat     | Gemini (streaming)         | —     |
+| 3 | Backend          | FastAPI + SQLite (WAL)     | 8010  |
+| 4 | Student app      | Chainlit                   | 8011  |
 | 4b| Student app (alt)| CLion plugin (Kotlin)      | in-IDE|
 | 5 | Instructor dash  | React + Vite + TypeScript  | 5173  |
 
@@ -129,44 +131,81 @@ The student has **two interchangeable clients** for the same backend: the
 Chainlit web app (component 4) and a **CLion plugin** (4b) that puts the same
 login → briefing → chat → probes flow inside the IDE. See
 [*Alternative student client: the CLion plugin*](#alternative-student-client-the-clion-plugin)
-and [`clion_plugin/README.md`](clion_plugin/README.md).
+and [`oslab_plugin/README.md`](oslab_plugin/README.md).
 
-The local LLM is the only path that sees student messages. The cloud LLM is
-used **only** for instructor-side probe suggestion (`/api/probe/suggest`),
-and only after `backend/sanitize.py` strips names, codes, and other PII.
+All LLM calls — the student chat and the CrewAI agents (review drafts, probe
+suggestions, grading) — run on Gemini. Anything sent to the agents is first
+passed through `backend/sanitize.py`, which strips names, codes, and other PII.
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Install Ollama and pull the model (one time)
-ollama pull qwen2.5-coder:3b
-
-# 2. Python deps
+# 1. Python deps
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 3. Configure
+# 2. Configure
 cp .env.example .env
-# edit .env — set GEMINI_API_KEY (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
+# edit .env — set GEMINI_API_KEY (the only LLM key needed)
 
-# 4. Seed students
-python scripts/add_students.py --names "Yossi Cohen,Shira Levi,Ahmed Alyan"
+# 4. Seed students — and at least one instructor (see "Instructor login" below)
+python scripts/add_students.py \
+  --names "Yossi Cohen,Shira Levi,Ahmed Alyan" \
+  --teachers "Dr. Cohen"
 ```
 
-Demo students after seeding:
+Demo accounts after seeding:
 
-| Name         | Login code |
-|--------------|------------|
-| Yossi Cohen  | STU1-XXXX   |
-| Shira Levi   | STU2-XXXX   |
-| Ahmed Alyan  | STU3-XXXX   |
+| Name         | Login code | Role       |
+|--------------|------------|------------|
+| Instructor   | TEACH-XXXX   | teacher    |
+| Yossi Cohen  | STU1-XXXX   | student    |
+| Shira Levi   | STU2-XXXX   | student    |
+| Ahmed Alyan  | STU3-XXXX   | student    |
 
-Students go to `http://localhost:8001`, instructor to `http://localhost:5173`.
+> Sign into the dashboard (`http://localhost:5173`) with the **instructor**
+> code **`TEACH-XXXX`**. Your own codes will differ — the seeding script
+> generates them randomly; run the `sqlite3` query below to list yours.
+
+Students go to `http://localhost:8011`, instructor to `http://localhost:5173`.
 Prefer the IDE? Skip the browser and use the CLion plugin client instead — see
 [Alternative student client: the CLion plugin](#alternative-student-client-the-clion-plugin).
+
+### Instructor login
+
+The dashboard (`http://localhost:5173`) is gated by an instructor login — its
+sign-in screen reads **"כניסת מרצה — enter your instructor code"**. A teacher
+signs in with a **login code**, exactly like a student, except their account
+carries `role=teacher`. A student code is rejected here (*"That code isn't an
+instructor account."*).
+
+Create instructor codes with the same seeding script, using `--teachers`:
+
+```bash
+python scripts/add_students.py --teachers "Dr. Cohen,TA Levi"
+```
+
+It prints a `name → code` table (a separate **"teachers (dashboard login)"**
+section). Distribute that code to the instructor; they type it into the login
+screen (codes are case-insensitive). To add a teacher to an existing database
+directly:
+
+```bash
+sqlite3 oslab.db \
+  "INSERT INTO users(username, login_code, role) VALUES('Dr. Cohen','TEACH-01','teacher');"
+```
+
+List the instructor codes already in your database at any time:
+
+```bash
+sqlite3 oslab.db "SELECT username, login_code FROM users WHERE role='teacher';"
+```
+
+Only a `role=teacher` account can open the **Exercises** tab and author new
+exercises, switch a student's persona, or toggle review mode.
 
 ---
 
@@ -181,12 +220,13 @@ launcher does it in one command:
 
 What it does:
 
-1. **Kills** anything bound to ports `8000`, `8001`, `5173`, plus any stray
-   `uvicorn backend.main` / `chainlit run student_app` processes. Useful
-   after a crash where the old process is still holding the port.
+1. **Kills** anything bound to ports `8010`, `8011`, `5173` (and the legacy
+   `8000`/`8001`), plus any stray `uvicorn backend.main` / `chainlit run
+   student_app` processes. Useful after a crash where the old process is still
+   holding the port.
 2. **Opens a new Terminal.app window with three tabs:**
-   - tab 1: `uvicorn backend.main:app --reload --port 8000`
-   - tab 2: `chainlit run student_app/app.py --port 8001`
+   - tab 1: `uvicorn backend.main:app --reload --port 8010`
+   - tab 2: `chainlit run student_app/app.py --port 8011`
    - tab 3: `cd dashboard && npm run dev`
 3. The two Python tabs auto-`source .venv/bin/activate` before starting.
 
@@ -277,12 +317,14 @@ shows their test inputs as a checklist.
 
 ---
 
-## Alternative student client: the CLion plugin
+## Alternative student client: the CLion & PyCharm plugin
 
-Students in this course already write their C in CLion. The
-[`clion_plugin/`](clion_plugin/) directory is a JetBrains plugin that embeds the
-*entire* student client in a CLion tool window, so they never leave the IDE to
-talk to the tutor. It uses the same six backend endpoints as Chainlit — the
+Students already work in a JetBrains IDE — CLion for C, PyCharm for Python. The
+[`oslab_plugin/`](oslab_plugin/) directory is a JetBrains plugin that embeds the
+*entire* student client in an IDE tool window, so they never leave the IDE to
+talk to the tutor. One shared source tree builds both the CLion and PyCharm
+plugins (`:clion` / `:pycharm` Gradle modules). It uses the same six backend
+endpoints as Chainlit — the
 backend is unchanged except for one tiny read-only endpoint
 (`GET /api/client-config`) that exposes the behavior switch below.
 
@@ -295,17 +337,33 @@ one place — it is *not* a per-student plugin setting):
 | `STUDENT_CLIENT_MODE=chat`   | Faithful chat port — login, briefing, streaming chat, suggestion chips, probes. Same as Chainlit, in a tool window. |
 | `STUDENT_CLIENT_MODE=ide`    | Everything in `chat`, **plus** it scaffolds the student's assigned variant as a starter `mcalc.c` in their project and shows the variant's required test inputs as a checklist. |
 
-Build & run (full details in [`clion_plugin/README.md`](clion_plugin/README.md)):
+Build & run (full details in [`oslab_plugin/README.md`](oslab_plugin/README.md)):
 
 ```bash
-cd clion_plugin
+cd oslab_plugin
 gradle wrapper --gradle-version 8.10.2   # one-time, generates the wrapper jar
-./gradlew runIde                         # launches a sandbox CLion with the plugin
+./gradlew :clion:runIde                  # sandbox CLion with the plugin
+./gradlew :pycharm:runIde                # sandbox PyCharm with the plugin
 ```
 
-In the sandbox, set the backend URL under **Settings → Tools → OS Lab**, open the
-**OS Lab** tool window, and log in with a course code. Chainlit and the plugin can
+In the sandbox, set the backend URL under **Settings → Tools → VeriExam**, open the
+**VeriExam** tool window, and log in with a course code. Chainlit and the plugin can
 be used at the same time against the same backend.
+
+**Shipping updates to students without passing files around.** When the backend
+is exposed over a tunnel (see [`deploy/README-NGROK.md`](deploy/README-NGROK.md)),
+it also distributes the plugin. Build + upload once on the JDK-21 machine
+(`cd oslab_plugin && ./publish.sh` — add `--product pycharm` for the PyCharm
+build), then each student runs a single command:
+
+```bash
+curl -fsSL https://<your-domain>.ngrok-free.dev/api/plugin/install.sh | bash
+```
+
+That installs the latest build into their matching IDE, CLion or PyCharm (they
+just restart). Full
+details in [`oslab_plugin/README.md`](oslab_plugin/README.md) →
+*Distributing updates over the tunnel*.
 
 ---
 
@@ -346,16 +404,15 @@ Design goals for a good variant set:
 ## Privacy & data sovereignty
 
 This is a teaching tool used with under-18 and adult students at a public
-institution, so the privacy posture is conservative by default:
+institution, so the privacy posture stays conservative:
 
-- **Student chat traffic never leaves the local network.** The default
-  `STUDENT_LLM=ollama` runs entirely on the instructor's laptop / lab
-  server. `STUDENT_LLM=gemini` is an **opt-in dev/debug shortcut** that
-  *does* route student messages to Google — use only when you mean it.
-- **The cloud LLM call has one job only:** generating probe suggestions
-  for the instructor. It receives a *sanitized* version of the
-  transcript (`backend/sanitize.py` strips names, codes, file paths,
-  IPs) and never sees student identifiers.
+- **Gemini is the single LLM provider.** Student chat and the CrewAI agents
+  all run on Google's Gemini — there is no local Ollama path and no
+  multi-provider fallback. Student messages are processed by Google; size
+  your consent/notice accordingly.
+- **Everything sent to the agents is sanitized first.** `backend/sanitize.py`
+  strips names, ID numbers, emails, phone numbers, and home paths from the
+  transcript before it is threaded into a probe/answer agent.
 - **Audit log.** Every cloud call is written to `api_audit_log` with
   provider, model, token counts, latency, the sanitized input, and an
   AES-encrypted copy of the raw payload. Set `AUDIT_AES_KEY` in `.env`.
@@ -370,20 +427,24 @@ institution, so the privacy posture is conservative by default:
 ```
 config/
   exercises/ex3-mcalc.yaml   # the demo exercise + 8 variants
-  cloud_llm.yaml             # provider: gemini | openai | anthropic
+  cloud_llm.yaml             # Gemini model + timeout for the agent layer
   instructors.yaml.example   # copy to instructors.yaml and edit
 
 backend/                     # FastAPI app
   main.py                    # entrypoint, loads .env early
   db.py                      # SQLite schema + tiny migration runner
   auth.py                    # login codes, bearer tokens, rate-limit
-  student_llm.py             # dispatcher: ollama vs gemini at startup
-  ollama_client.py           # streaming chat + grader against local LLM
-  gemini_student.py          # same, against Gemini (dev-only)
-  cloud_llm.py               # instructor-side cloud call (probe suggest)
-  sanitize.py                # PII scrub before any cloud call
+  student_llm.py             # Gemini-only streaming for the direct student chat
+  gemini_student.py          # httpx streaming + grader against Gemini
+  agents/                    # CrewAI agent layer (Gemini only)
+    llm.py                   #   single Gemini LLM factory
+    memory.py                #   conversation memory (transcript + prior probes)
+    schemas.py               #   structured-output models
+    tutor.py                 #   review-mode answer drafts (replaces variants_gen)
+    probe.py                 #   "Ask Them" probe suggestions (replaces cloud_llm)
+    grader.py                #   probe answer grading
+  sanitize.py                # PII scrub before anything leaves for Gemini
   variants.py                # deterministic student → variant assignment
-  variants_gen.py            # 3-level answer generator for review mode
   prompts.py                 # system prompts per (exercise, mode)
   exercises.py               # YAML loader and accessor
   routes/
@@ -393,7 +454,7 @@ backend/                     # FastAPI app
 student_app/
   app.py                     # Chainlit student UI (login + chat + probes)
 
-clion_plugin/                # alternative student client: a CLion/JetBrains plugin
+oslab_plugin/                # alternative student client: a CLion/JetBrains plugin
   build.gradle.kts           # IntelliJ Platform Gradle build (targets CLion)
   src/main/kotlin/edu/jce/oslab/
     api/                     # DTOs + HTTP/streaming client over the 6 endpoints
@@ -420,21 +481,17 @@ scripts/
 
 | Variable              | Purpose                                                       |
 |-----------------------|---------------------------------------------------------------|
-| `GEMINI_API_KEY`      | Cloud LLM key; used for probe suggestions and the dev-only `STUDENT_LLM=gemini` path. |
-| `OPENAI_API_KEY`      | Alternative cloud provider. Match with `config/cloud_llm.yaml`. |
-| `ANTHROPIC_API_KEY`   | Alternative cloud provider.                                   |
-| `STUDENT_LLM`         | `ollama` (default, private) or `gemini` (dev only).           |
-| `STUDENT_LLM_MODEL`   | Used when `STUDENT_LLM=gemini`. Default `gemini-2.5-flash-lite`. |
-| `OLLAMA_HOST`         | `http://127.0.0.1:11434` by default.                          |
-| `OLLAMA_MODEL`        | `qwen2.5-coder:3b` recommended for laptops; `:7b` for GPU.    |
+| `GEMINI_API_KEY`      | The only LLM key. Powers the CrewAI agents and the student chat. |
+| `AGENT_MODEL`         | Gemini model for the agents (review drafts, probes, grading). Default `gemini-2.5-pro`. |
+| `STUDENT_CHAT_MODEL`  | Gemini model for the direct student chat. Default `gemini-2.5-flash-lite`. |
 | `DB_PATH`             | `./oslab.db` by default.                                      |
 | `AUDIT_AES_KEY`       | 32-byte base64 key for encrypting raw cloud-LLM payloads.     |
 | `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only).   |
 | `STUDENT_CLIENT_MODE` | CLion plugin behavior: `chat` (default) or `ide`. Ignored by Chainlit. |
 | `SCAFFOLD_FILENAME`   | File the plugin's `ide` mode scaffolds into the project. Default `mcalc.c`. |
 
-`config/cloud_llm.yaml` picks the provider and model used for
-instructor-side suggestions. Keep this in sync with the API key you set.
+`config/cloud_llm.yaml` sets the Gemini model and timeout the agent layer
+uses. Everything runs on the single `GEMINI_API_KEY`.
 
 ---
 
@@ -458,5 +515,5 @@ Contributions and bug reports welcome — file an issue or PR.
 
 ## License & attribution
 
-Built at the *Software Engineering Seminar*, JCE Lev Academic Center.
-Educational and research use.
+Built at the *Software Engineering Seminar*, Azrieli College of Engineering
+Jerusalem (JCE). Educational and research use.

@@ -1,0 +1,109 @@
+exercise_id: ex4-mstat
+title_he: "mstat — סטטיסטיקה על רשימת מספרים"
+title_en: "mstat — Built-in List Statistics"
+default_mode: mentor
+
+brief_md: |
+  In this exercise you will build a built-in command called `mstat`
+  inside your mini-shell. It takes a single string argument: a list of
+  space-separated integers. It computes one statistic over the list and
+  prints the integer result to stdout.
+
+  Example:
+
+      mstat "3 1 4 1 5"
+      14
+
+  Your `mstat` computes the statistic for your assigned variant and
+  respects its limits (@op, @max_count, @allow_negative). Errors must use
+  the exact format described under `required_error_strings` — the grader
+  checks bytes, not meaning.
+
+  Rules the grader enforces:
+
+  - A token that is not a valid integer → `Error: invalid input`
+  - A negative value when negatives are not allowed → `Error: negative not allowed`
+  - More than the maximum number of values → `Error: too many values`
+
+  The statistics are: `sum`, `max`, `min`, `product`, `count` (how many
+  values), and `range` (max − min).
+
+param_labels:
+  - key: op
+    label: "Statistic to compute"
+    note: "sum | max | min | product | count | range"
+  - key: max_count
+    label: "Maximum count of values"
+  - key: allow_negative
+    label: "Negative numbers allowed"
+
+variants:
+  - id: V-B1
+    params:
+      op: sum
+      max_count: 5
+      allow_negative: false
+    test_inputs:
+      - { input: "3 1 4 1 5", expected_output: "14" }
+      - { input: "1 2 3 4 5 6", expected_output: "Error: too many values" }
+      - { input: "3 -1 2", expected_output: "Error: negative not allowed" }
+
+  - id: V-B2
+    params:
+      op: max
+      max_count: 4
+      allow_negative: true
+    test_inputs:
+      - { input: "3 -7 4 1", expected_output: "4" }
+      - { input: "9 2 5 1 0", expected_output: "Error: too many values" }
+      - { input: "3 x 5", expected_output: "Error: invalid input" }
+
+  - id: V-B3
+    params:
+      op: min
+      max_count: 6
+      allow_negative: true
+    test_inputs:
+      - { input: "8 3 -2 7", expected_output: "-2" }
+      - { input: "5 5 5", expected_output: "5" }
+      - { input: "5 5.0 5", expected_output: "Error: invalid input" }
+
+  - id: V-B4
+    params:
+      op: product
+      max_count: 4
+      allow_negative: false
+    test_inputs:
+      - { input: "2 3 4", expected_output: "24" }
+      - { input: "2 3 4 5 6", expected_output: "Error: too many values" }
+      - { input: "2 -3 4", expected_output: "Error: negative not allowed" }
+
+  - id: V-B5
+    params:
+      op: count
+      max_count: 8
+      allow_negative: true
+    test_inputs:
+      - { input: "4 5 6 7", expected_output: "4" }
+      - { input: "-1 -2 -3", expected_output: "3" }
+      - { input: "1 2 3 4 5 6 7 8 9", expected_output: "Error: too many values" }
+
+  - id: V-B6
+    params:
+      op: range
+      max_count: 5
+      allow_negative: false
+    test_inputs:
+      - { input: "3 9 1 4", expected_output: "8" }
+      - { input: "7", expected_output: "0" }
+      - { input: "3 4 -1", expected_output: "Error: negative not allowed" }
+
+welcome_suggestions:
+  - "How should I parse a space-separated list of integers?"
+  - "What's a clean way to validate that each token is an integer?"
+  - "Give me a skeleton for the main function"
+
+required_error_strings:
+  - "Error: too many values\n"
+  - "Error: negative not allowed\n"
+  - "Error: invalid input\n"
