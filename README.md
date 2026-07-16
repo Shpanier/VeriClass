@@ -512,4 +512,4 @@ Jerusalem (JCE).
 ## Contact
 
 Please contact me if you want any help, have questions, ideas, or would like to
-collaborate: **spanier@gmail.com**
+collaborate: **shpanier@gmail.com**
