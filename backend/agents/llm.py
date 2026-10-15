@@ -28,12 +28,16 @@ def _config() -> dict[str, Any]:
         return {}
 
 
+# LLM_PROVIDER=anthropic switches every agent to Claude (CLAUDE_MODEL, default Sonnet).
+PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5-5")
+
+
 def _api_key() -> str:
-    key = os.environ.get("GEMINI_API_KEY", "")
+    env = "ANTHROPIC_API_KEY" if PROVIDER == "anthropic" else "GEMINI_API_KEY"
+    key = os.environ.get(env, "")
     if not key:
-        raise RuntimeError(
-            "GEMINI_API_KEY is not set — the agent layer requires a Gemini key."
-        )
+        raise RuntimeError(f"{env} is not set — the agent layer requires it (LLM_PROVIDER={PROVIDER}).")
     return key
 
 
@@ -49,8 +53,12 @@ def gemini_llm(
     overrides the config default (useful for long generations like writing a full
     program, which can exceed the standard 30s).
     """
-    name = model or _config().get("model") or DEFAULT_MODEL
     tmo = timeout if timeout is not None else float(_config().get("timeout_sec", 30))
+    if PROVIDER == "anthropic":
+        # Current Claude models reject `temperature`, so it is not sent.
+        return LLM(model=f"anthropic/{CLAUDE_MODEL}", api_key=_api_key(),
+                   timeout=tmo, max_tokens=4096)
+    name = model or _config().get("model") or DEFAULT_MODEL
     return LLM(
         model=f"gemini/{name}",
         api_key=_api_key(),

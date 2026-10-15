@@ -14,7 +14,7 @@ _RATE_LIMIT_WINDOW = 60 * 5  # 5 min
 _RATE_LIMIT_MAX = 4
 
 
-def login_with_code(code: str, ip: str) -> Optional[dict]:
+def login_with_code(code: str, ip: str, allow_teacher: bool = True) -> Optional[dict]:
     if _is_rate_limited(ip):
         return None
     with db.conn() as c:
@@ -24,6 +24,8 @@ def login_with_code(code: str, ip: str) -> Optional[dict]:
     if not row:
         _FAILED_ATTEMPTS[ip].append(time.time())
         return None
+    if row["role"] == "teacher" and not allow_teacher:
+        return {"blocked": True}
     token = secrets.token_urlsafe(24)
     _SESSION_TOKENS[token] = {"id": row["id"], "username": row["username"], "role": row["role"]}
     return {"token": token, "user_id": row["id"], "username": row["username"], "role": row["role"]}

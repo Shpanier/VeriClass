@@ -77,12 +77,12 @@ async def ask(req: AskRequest, user: dict = Depends(deps.current_user)):
                 detail = e.response.json().get("error", "")
             except Exception:
                 detail = e.response.text[:200] if e.response is not None else ""
-            log.warning("Student LLM (gemini) HTTP %s: %s",
+            log.warning("Student LLM (%s) HTTP %s: %s", student_llm.NAME,
                         e.response.status_code if e.response else "?", detail)
-            yield f"\n\n_⚠️ Student LLM (gemini) error: {detail or e}_\n"
+            yield f"\n\n_⚠️ Student LLM ({student_llm.NAME}) error: {detail or e}_\n"
         except httpx.RequestError as e:
-            log.warning("Student LLM (gemini) unreachable: %s", e)
-            yield "\n\n_⚠️ Student LLM (gemini) unreachable. Check network / GEMINI_API_KEY._\n"
+            log.warning("Student LLM (%s) unreachable: %s", student_llm.NAME, e)
+            yield f"\n\n_⚠️ Student LLM ({student_llm.NAME}) unreachable. Check network / {student_llm.KEY_ENV}._\n"
         finally:
             reply = "".join(collected)
             with db.conn() as c:

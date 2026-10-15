@@ -13,9 +13,10 @@ Ownership is enforced in the handler (not as a pure Depends) because the
 session_id usually arrives in the request body, which a dependency can't see
 without re-reading it.
 """
+import os
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 
 from backend import auth, db
 
@@ -26,11 +27,46 @@ def _token_from_header(authorization: Optional[str]) -> str:
     return authorization.removeprefix("Bearer ").strip()
 
 
-def current_user(authorization: Optional[str] = Header(None)) -> dict:
+# Teacher accounts work only on the instructor's own machine (the dashboard on
+# localhost). Set TEACHER_LOCAL_ONLY=false to allow them over the tunnel, e.g.
+# to run oslab_plugin/publish.sh from another computer.
+TEACHER_LOCAL_ONLY = os.environ.get("TEACHER_LOCAL_ONLY", "true").strip().lower() not in ("0", "false", "no", "off")
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+# Proxies/tunnels (ngrok, Cloudflare) add these; the local Vite proxy does not.
+_FORWARD_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "cf-connecting-ip")
+
+
+def is_local_request(request: Request) -> bool:
+    """True only for a request made on this machine, not relayed by a tunnel.
+    A tunnel agent connects from 127.0.0.1 too, so the forwarding headers are
+    what tell the two apart."""
+    host = request.client.host if request.client else ""
+    if host not in _LOOPBACK:
+        return False
+    return not any(h in request.headers for h in _FORWARD_HEADERS)
+
+
+def client_ip(request: Request) -> str:
+    """The real client address when relayed by a tunnel (otherwise every
+    tunnelled student shares 127.0.0.1). The tunnel appends the address it saw,
+    so take the LAST X-Forwarded-For hop — earlier hops are client-supplied."""
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def teacher_blocked(role: str, request: Request) -> bool:
+    return TEACHER_LOCAL_ONLY and role == "teacher" and not is_local_request(request)
+
+
+def current_user(request: Request, authorization: Optional[str] = Header(None)) -> dict:
     """Any authenticated user. Returns {id, username, role}."""
     user = auth.user_for_token(_token_from_header(authorization))
     if user is None:
         raise HTTPException(401, "Invalid token")
+    if teacher_blocked(user.get("role", ""), request):
+        raise HTTPException(403, "Instructor access is only allowed from the instructor's computer.")
     return user
 
 

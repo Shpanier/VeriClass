@@ -21,6 +21,13 @@ def _envbool(name: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _envint(name: str, default: int, minimum: int) -> int:
+    try:
+        return max(minimum, int(os.environ.get(name, "").strip()))
+    except ValueError:
+        return default
+
+
 @router.get("/client-config")
 def client_config():
     """Tell a rich client (the CLion plugin) how to behave.
@@ -63,7 +70,9 @@ def client_config():
     return {
         "mode": mode,
         "scaffold_filename": scaffold_filename,
-        "poll_interval_ms": 2000,
+        # How often the plugin polls for probes. Each poll is one request, so on
+        # a metered tunnel (ngrok free: 20k req/month) raise it, e.g. 10000.
+        "poll_interval_ms": _envint("POLL_INTERVAL_MS", 2000, minimum=500),
         "exam_mode": exam_mode,
         "force_fullscreen": force_fullscreen,
         "heartbeat_ms": 30000,
