@@ -11,11 +11,14 @@ object MarkdownLite {
         val out = StringBuilder()
         val lines = md.replace("\r\n", "\n").split("\n")
         var i = 0
-        var inList = false
+        var listTag = ""   // "", "ul" or "ol"
         var inPara = false
 
         fun closeList() {
-            if (inList) { out.append("</ul>"); inList = false }
+            if (listTag.isNotEmpty()) { out.append("</").append(listTag).append(">"); listTag = "" }
+        }
+        fun openList(tag: String) {
+            if (listTag != tag) { closeList(); out.append("<").append(tag).append(">"); listTag = tag }
         }
         fun closePara() {
             if (inPara) { out.append("</p>"); inPara = false }
@@ -66,10 +69,19 @@ object MarkdownLite {
                 trimmed.startsWith("# ") -> {
                     closeList(); closePara(); out.append("<h2>").append(inline(trimmed.removePrefix("# "))).append("</h2>")
                 }
-                trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
+                trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ") -> {
                     closePara()
-                    if (!inList) { out.append("<ul>"); inList = true }
+                    openList("ul")
                     out.append("<li>").append(inline(trimmed.substring(2))).append("</li>")
+                }
+                ORDERED.matches(trimmed) -> {
+                    closePara()
+                    openList("ol")
+                    out.append("<li>").append(inline(ORDERED.find(trimmed)!!.groupValues[1])).append("</li>")
+                }
+                trimmed.startsWith("> ") -> {
+                    closeList(); closePara()
+                    out.append("<p><i>").append(inline(trimmed.removePrefix("> "))).append("</i></p>")
                 }
                 else -> {
                     closeList()
@@ -82,6 +94,8 @@ object MarkdownLite {
         closeList(); closePara()
         return out.toString()
     }
+
+    private val ORDERED = Regex("^\\d+[.)]\\s+(.*)$")
 
     /** Inline: escape, then **bold** and `code`. */
     private fun inline(raw: String): String {

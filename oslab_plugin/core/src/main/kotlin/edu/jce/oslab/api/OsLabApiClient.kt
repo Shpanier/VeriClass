@@ -105,6 +105,8 @@ class OsLabApiClient {
             .header("Authorization", "Bearer $token")
             .header("Content-Type", "application/json")
             .header(NGROK_HEADER, "true")
+            // This client renders Markdown (chat bubbles); older ones got plain text.
+            .header("X-VeriExam-Render", "markdown")
             .timeout(Duration.ofMinutes(10))
             .POST(
                 HttpRequest.BodyPublishers.ofString(

@@ -10,6 +10,7 @@ import type {
   ProbeSuggestion,
   ProctorEvent,
   SessionDetail,
+  StepChecksResponse,
   Student,
   Submission,
 } from "./types";
@@ -153,6 +154,12 @@ export const api = {
       body: JSON.stringify({ enabled }),
     }),
   pendingReviews: () => j<PendingReview[]>("/api/reviews/pending"),
+  pendingStepChecks: () => j<StepChecksResponse>("/api/step-checks/pending"),
+  decideStepCheck: (id: number, action: "approve" | "return", note: string) =>
+    j<{ ok: boolean }>(`/api/step-checks/${id}/decide`, {
+      method: "POST",
+      body: JSON.stringify({ action, note }),
+    }),
   selectReview: (id: number, chosen: AnswerLevel, lang: Lang, text?: string) =>
     j<{ ok: boolean }>(`/api/reviews/${id}/select`, {
       method: "POST",

@@ -9,6 +9,7 @@ import { ProctorBanner } from "./components/ProctorBanner";
 import { ProctorLogModal } from "./components/ProctorLogModal";
 import { SubmissionsModal } from "./components/SubmissionsModal";
 import { ReviewQueue } from "./components/ReviewQueue";
+import { StepChecks } from "./components/StepChecks";
 import { LoginGate } from "./components/LoginGate";
 import { ExercisesPanel } from "./components/ExercisesPanel";
 import { alertBeep, primeAudio } from "./proctor";
@@ -113,6 +114,7 @@ export function App() {
         <>
           {exercise && <ExerciseHeader exercise={exercise} studentCount={students.length} />}
           <ProctorBanner students={students} onInspect={setProctorSessionId} />
+          <StepChecks />
           <ReviewQueue />
           <StudentGrid
             students={students}

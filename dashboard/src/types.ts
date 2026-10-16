@@ -186,3 +186,20 @@ export interface PendingReview {
   variant_more_he: string | null;
   created_at: string;
 }
+
+export interface StepCheck {
+  id: number;
+  session_id: string;
+  username: string;
+  step: number;
+  total: number;
+  title: string;
+  answer: string;
+  expected: string;
+  created_at: string;
+}
+
+export interface StepChecksResponse {
+  has_steps: boolean;
+  items: StepCheck[];
+}

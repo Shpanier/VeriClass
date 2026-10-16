@@ -67,6 +67,10 @@ def _row_to_exercise(row: Any) -> dict[str, Any]:
         "required_error_strings": extra.get("required_error_strings", []),
         "param_labels": extra.get("param_labels", []),
         "scaffold_filename": extra.get("scaffold_filename"),
+        "course_name": extra.get("course_name"),
+        "language": extra.get("language"),
+        "tutor_notes": extra.get("tutor_notes"),
+        "steps": extra.get("steps"),
         # An edit of a built-in keeps the 'yaml' source but is flagged edited so
         # the dashboard can show "built-in (edited)".
         "source": "yaml" if is_yaml else "console",
@@ -131,10 +135,11 @@ def update(exercise_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     # Preserve fields the editor UI may not send. The dashboard form has no
     # scaffold_filename input, so a plain edit would otherwise wipe it (and with
     # it the exercise's language) — keep the current value when none is given.
-    if not payload.get("scaffold_filename"):
-        existing = _LOADED.get(exercise_id, {}).get("scaffold_filename")
-        if existing:
-            payload["scaffold_filename"] = existing
+    for key in ("scaffold_filename", "course_name", "language", "tutor_notes", "steps"):
+        if not payload.get(key):
+            existing = _LOADED.get(exercise_id, {}).get(key)
+            if existing:
+                payload[key] = existing
     _validate(payload, "update")
     return _upsert(payload)
 
@@ -151,6 +156,10 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
         "required_error_strings": payload.get("required_error_strings", []),
         "param_labels": payload.get("param_labels", []),
         "scaffold_filename": payload.get("scaffold_filename"),
+        "course_name": payload.get("course_name"),
+        "language": payload.get("language"),
+        "tutor_notes": payload.get("tutor_notes"),
+        "steps": payload.get("steps"),
     }
     with db.conn() as c:
         c.execute(
@@ -183,6 +192,10 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
         "required_error_strings": data["required_error_strings"],
         "param_labels": data["param_labels"],
         "scaffold_filename": data["scaffold_filename"],
+        "course_name": data["course_name"],
+        "language": data["language"],
+        "tutor_notes": data["tutor_notes"],
+        "steps": data["steps"],
         "source": "yaml" if is_yaml else "console",
         "edited": is_yaml,
     }

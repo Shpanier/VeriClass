@@ -3,7 +3,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from backend import deps, exercises
+from backend import deps, exercises, steps
 from backend import params as param_utils
 
 router = APIRouter()
@@ -42,6 +42,12 @@ def active_exercise(variant: Optional[str] = None, user: dict = Depends(deps.cur
     response["brief_md"] = param_utils.substitute_brief(
         response["brief_md"], v.get("params", {}), ex.get("param_labels", [])
     )
+    # Step-by-step labs: append only the step this student is on (step 1 for a
+    # new pair; later steps after a re-login). Teacher-only `expected` never leaves.
+    if steps.steps_of(ex):
+        n = steps.current_step_for_user(user["id"], ex["exercise_id"])
+        if n <= len(steps.steps_of(ex)):
+            response["brief_md"] += "\n\n" + steps.step_markdown(ex, n)
     return response
 
 

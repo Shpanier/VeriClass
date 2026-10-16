@@ -3,10 +3,8 @@ package edu.jce.oslab.ui
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
-import com.intellij.ui.JBSplitter
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.JBColor
-import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
 import edu.jce.oslab.api.ClientConfig
@@ -23,13 +21,10 @@ import edu.jce.oslab.ide.SubmissionCollector
 import edu.jce.oslab.probe.ProbePoller
 import edu.jce.oslab.settings.OsLabSettings
 import java.awt.BorderLayout
-import java.awt.Component
 import java.awt.FlowLayout
 import javax.swing.BorderFactory
-import javax.swing.Box
 import javax.swing.JButton
 import javax.swing.JPanel
-import javax.swing.ScrollPaneConstants
 
 /**
  * Root of the VeriExam tool window. Owns the login → session flow: authenticate,
@@ -133,31 +128,16 @@ class OsLabPanel(
         }
         add(north, BorderLayout.NORTH)
 
+        // One scrolling conversation: the exercise brief is the first message;
+        // students scroll up to read it again.
         val chat = ChatPanel(api, login.token, session.session_id, sessionScope)
-
-        val column = ScrollableColumn().apply {
-            add(BriefingPanel(exercise, session.variant, session.mode).apply {
-                alignmentX = Component.LEFT_ALIGNMENT
-            })
-            if (config.isIdeMode && exercise.variant != null) {
-                add(TestChecklistPanel(exercise.variant).apply { alignmentX = Component.LEFT_ALIGNMENT })
-            }
-            if (exercise.welcome_suggestions.isNotEmpty()) {
-                add(suggestionChips(exercise.welcome_suggestions, chat))
-            }
-            add(Box.createVerticalGlue())
+        chat.addMessage(ChatPanel.Role.EXERCISE, Briefing.markdown(exercise, session.variant))
+        if (config.isIdeMode && exercise.variant != null) {
+            chat.addComponent(TestChecklistPanel(exercise.variant))
         }
-        val topScroll = ScrollPaneFactory.createScrollPane(
-            column,
-            ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-            ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
-        )
-
-        val splitter = JBSplitter(true, "oslab.split.proportion", 0.45f).apply {
-            firstComponent = topScroll
-            secondComponent = chat
-        }
-        add(splitter, BorderLayout.CENTER)
+        chat.setSuggestions(exercise.welcome_suggestions)
+        chat.scrollToTop()
+        add(chat, BorderLayout.CENTER)
 
         if (config.isIdeMode) {
             ExerciseScaffolder.scaffold(project, config.scaffold_filename, exercise)
@@ -260,22 +240,6 @@ class OsLabPanel(
                 button.isEnabled = true
             }
         }
-    }
-
-    private fun suggestionChips(suggestions: List<String>, chat: ChatPanel): JPanel {
-        val panel = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), JBUI.scale(4))).apply {
-            alignmentX = Component.LEFT_ALIGNMENT
-            border = JBUI.Borders.empty(0, 6, 8, 6)
-        }
-        for (s in suggestions) {
-            panel.add(
-                JButton(s).apply {
-                    toolTipText = "Ask: $s"
-                    addActionListener { chat.submit(s) }
-                },
-            )
-        }
-        return panel
     }
 
     private fun esc(s: String): String =

@@ -2,13 +2,13 @@ import asyncio
 import logging
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend import db, deps, exercises, student_llm
+from backend import db, deps, exercises, steps, student_llm
 from backend.agents import tutor
-from backend.prompts import student_system_prompt
+from backend.prompts import course_name, student_system_prompt
 from backend.routes import review as review_mod
 
 REVIEW_TIMEOUT_SECONDS = 600  # how long the student request waits for the teacher
@@ -32,7 +32,7 @@ _DENYLIST_PHRASES = [
 
 
 @router.post("/ask")
-async def ask(req: AskRequest, user: dict = Depends(deps.current_user)):
+async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.current_user)):
     # 404 unknown / 403 someone else's session — before we touch the LLM.
     s = deps.require_owns_session(req.session_id, user)
     if any(p in req.message.lower() for p in _DENYLIST_PHRASES):
@@ -49,6 +49,12 @@ async def ask(req: AskRequest, user: dict = Depends(deps.current_user)):
     ex = exercises.get(s["exercise"])
     variant = exercises.variant(s["exercise"], s["variant"])
     sys_prompt = student_system_prompt(ex, variant, s["mode"])
+    # Older IDE plugins (Java HTTP client) showed replies as plain text; newer ones
+    # announce Markdown support with X-VeriExam-Render.
+    plain = ("java" in request.headers.get("user-agent", "").lower()
+             and request.headers.get("x-veriexam-render", "").lower() != "markdown")
+    if steps.steps_of(ex):
+        sys_prompt += "\n\n" + steps.tutor_context(ex, req.session_id, plain)
     msgs = [{"role": h["role"], "body": h["body"]} for h in reversed(history)]
     msgs = [{"role": m["role"], "content": m["body"]} for m in msgs]
     msgs.append({"role": "user", "content": req.message})
@@ -58,6 +64,13 @@ async def ask(req: AskRequest, user: dict = Depends(deps.current_user)):
             "INSERT INTO messages (session_id, role, body, mode_at_time) VALUES (?, ?, ?, ?)",
             (req.session_id, "user", req.message, s["mode"]),
         )
+
+    # Step-by-step labs: "Done with step N" goes to the teacher, not the LLM; a
+    # decision the students haven't seen yet is delivered before anything else.
+    if steps.steps_of(ex) and (
+        steps.undelivered_decision(req.session_id) or steps.parse_done(req.message) is not None
+    ):
+        return StreamingResponse(_gen_step(req, s, ex, plain), media_type="text/plain")
 
     if review_mod.review_mode_enabled():
         return StreamingResponse(
@@ -110,7 +123,10 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict]):
     yield "🧑‍🏫 _Your teacher is reviewing your question — one moment…_\n\n"
 
     try:
-        variants = await tutor.generate_variants(sys_prompt, req.session_id, req.message)
+        variants = await tutor.generate_variants(
+            sys_prompt, req.session_id, req.message,
+            course=course_name(exercises.get(s["exercise"])),
+        )
     except Exception as e:
         log.exception("variant generation failed")
         yield f"_⚠️ Could not generate review options: {e}_\n"
@@ -172,3 +188,77 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict]):
             )
     finally:
         review_mod.drop_event(review_id)
+
+
+STEP_WAIT_SECONDS = 540  # under the plugin's 10-minute read timeout
+
+
+def _save_reply(session_id: str, mode: str, text: str) -> None:
+    with db.conn() as c:
+        c.execute(
+            "INSERT INTO messages (session_id, role, body, mode_at_time) VALUES (?, ?, ?, ?)",
+            (session_id, "assistant", text, mode),
+        )
+        c.execute(
+            "UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,)
+        )
+
+
+async def _stream(text: str):
+    for word in text.split(" "):
+        yield word + " "
+        await asyncio.sleep(0.005)
+
+
+async def _gen_step(req: "AskRequest", s, ex, plain: bool = False):
+    """Hand a finished step to the teacher and wait for the decision."""
+    sid = req.session_id
+    pending = steps.undelivered_decision(sid)
+    if pending:
+        text = steps.decision_message(ex, pending, plain)
+        steps.mark_delivered(pending["id"])
+        _save_reply(sid, s["mode"], text)
+        async for chunk in _stream(text):
+            yield chunk
+        return
+
+    total = len(steps.steps_of(ex))
+    cur = steps.current_step(sid)
+    said = steps.parse_done(req.message) or cur
+    if cur > total:
+        text = "You already finished all the steps of this lab. 🎉"
+    elif said < cur:
+        text = f"Step {said} is already approved. You are now on step {cur}."
+    elif said > cur:
+        text = (f"You are still on step {cur}. Finish it first, then write "
+                f"\"Done with step {cur}\" and your answers.")
+    else:
+        text = None
+    if text:
+        _save_reply(sid, s["mode"], text)
+        async for chunk in _stream(text):
+            yield chunk
+        return
+
+    check_id = steps.submit(sid, cur, req.message)
+    yield (f"📋 Sent to your teacher. Please wait: step {cur + 1 if cur < total else cur} "
+           "will appear right here when your teacher approves step "
+           f"{cur}. (You can keep working on your code meanwhile.)\n\n")
+    try:
+        await asyncio.wait_for(steps.event_for(check_id).wait(), timeout=STEP_WAIT_SECONDS)
+    except asyncio.TimeoutError:
+        text = (f"⏳ Your teacher has not checked step {cur} yet. Keep working, and "
+                f"write \"Done with step {cur}\" again in a minute or two.")
+        _save_reply(sid, s["mode"], text)
+        yield text
+        return
+    finally:
+        steps.drop_event(check_id)
+
+    check = steps.get(check_id)
+    if check and not check["delivered"]:
+        text = steps.decision_message(ex, check, plain)
+        steps.mark_delivered(check_id)
+        _save_reply(sid, s["mode"], text)
+        async for chunk in _stream(text):
+            yield chunk

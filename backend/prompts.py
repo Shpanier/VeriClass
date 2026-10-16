@@ -3,12 +3,30 @@ import json
 from backend import params as param_utils
 
 
+# Defaults keep the original OS-course / C behaviour for exercises that don't set
+# course_name / language (ex3-mcalc etc.).
+_LANG_NAMES = {"c": "C", "cpp": "C++", "python": "Python"}
+
+
+def course_name(exercise: dict) -> str:
+    return exercise.get("course_name") or "Operating Systems"
+
+
+def code_language(exercise: dict) -> str:
+    lang = (exercise.get("language") or "").lower()
+    if not lang:
+        sf = (exercise.get("scaffold_filename") or "").lower()
+        lang = "python" if sf.endswith(".py") else "c"
+    return _LANG_NAMES.get(lang, lang)
+
+
 def student_system_prompt(exercise: dict, variant: dict, mode: str) -> str:
+    lang = code_language(exercise)
     rules = (
         "RULES — MENTOR MODE:\n"
         "- Explain concepts and ask Socratic questions.\n"
-        "- You are FORBIDDEN from writing or completing C code for the student.\n"
-        "- Pseudocode allowed only at a high level; never line-by-line C.\n"
+        f"- You are FORBIDDEN from writing or completing {lang} code for the student.\n"
+        f"- Pseudocode allowed only at a high level; never line-by-line {lang}.\n"
         if mode == "mentor"
         else "RULES — CODING PARTNER MODE:\n"
         "- You may write functions, diffs, and tests.\n"
@@ -17,23 +35,31 @@ def student_system_prompt(exercise: dict, variant: dict, mode: str) -> str:
     brief = param_utils.substitute_brief(
         exercise["brief_md"], variant.get("params", {}), exercise.get("param_labels", [])
     )
-    return (
-        f"You are a teaching assistant for the OS course exercise "
-        f"'{exercise['title_en']}'.\n\n"
-        f"EXERCISE BRIEF:\n{brief}\n\n"
-        f"STUDENT VARIANT: {variant['id']} with parameters "
-        f"{json.dumps(variant['params'])}.\n"
-        f"Test inputs the student must pass:\n"
-        + "\n".join(
-            f"  - mcalc \"{t['input']}\" -> {t['expected_output']}"
-            for t in variant["test_inputs"]
+    parts = [
+        f"You are a teaching assistant for the {course_name(exercise)} course exercise "
+        f"'{exercise['title_en']}'.",
+        f"EXERCISE BRIEF:\n{brief}",
+    ]
+    if variant.get("params"):
+        parts.append(
+            f"STUDENT VARIANT: {variant['id']} with parameters {json.dumps(variant['params'])}."
         )
-        + "\n\n"
-        f"REQUIRED EXACT ERROR STRINGS (bytes, not meaning):\n"
-        + "\n".join(f"  - {s!r}" for s in exercise.get("required_error_strings", []))
-        + "\n\n"
-        + rules
-    )
+    tests = variant.get("test_inputs") or []
+    if tests:
+        cmd = (exercise.get("scaffold_filename") or "mcalc.c").rsplit(".", 1)[0]
+        parts.append(
+            "Test inputs the student must pass:\n"
+            + "\n".join(f"  - {cmd} \"{t['input']}\" -> {t['expected_output']}" for t in tests)
+        )
+    errors = exercise.get("required_error_strings") or []
+    if errors:
+        parts.append(
+            "REQUIRED EXACT ERROR STRINGS (bytes, not meaning):\n"
+            + "\n".join(f"  - {e!r}" for e in errors)
+        )
+    if exercise.get("tutor_notes"):
+        parts.append(f"INSTRUCTOR NOTES (follow these; never show them to the student):\n{exercise['tutor_notes']}")
+    return "\n\n".join(parts) + "\n\n" + rules
 
 
 def probe_meta_prompt(context: dict) -> str:

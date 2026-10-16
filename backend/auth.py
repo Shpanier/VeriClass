@@ -14,15 +14,17 @@ _RATE_LIMIT_WINDOW = 60 * 5  # 5 min
 _RATE_LIMIT_MAX = 4
 
 
-def login_with_code(code: str, ip: str, allow_teacher: bool = True) -> Optional[dict]:
-    if _is_rate_limited(ip):
-        return None
+def login_with_code(code: str, ip: str, allow_teacher: bool = True,
+                    rate_limit: bool = True) -> Optional[dict]:
+    if rate_limit and _is_rate_limited(ip):
+        return {"rate_limited": True}
     with db.conn() as c:
         row = c.execute(
             "SELECT id, username, role FROM users WHERE login_code = ?", (code,)
         ).fetchone()
     if not row:
-        _FAILED_ATTEMPTS[ip].append(time.time())
+        if rate_limit:
+            _FAILED_ATTEMPTS[ip].append(time.time())
         return None
     if row["role"] == "teacher" and not allow_teacher:
         return {"blocked": True}

@@ -58,6 +58,20 @@ CREATE TABLE IF NOT EXISTS exercises (
     created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Step-by-step labs: a pair writes "Done with step N", the answer waits here
+-- until the teacher approves (next step is released) or sends it back.
+CREATE TABLE IF NOT EXISTS step_checks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT NOT NULL,
+    step         INTEGER NOT NULL,
+    answer       TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'approved' | 'returned'
+    teacher_note TEXT,
+    delivered    INTEGER NOT NULL DEFAULT 0,        -- decision shown to the student yet?
+    created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    decided_at   TEXT
+);
+
 CREATE TABLE IF NOT EXISTS pending_reviews (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id   TEXT NOT NULL,

@@ -21,12 +21,12 @@ Produce THREE levels of help, and write EACH level in BOTH English and Hebrew
 
 Make every reply CONCRETE and grounded in *this* student's situation:
   • Refer to the actual identifiers the student wrote (their function names,
-    structs, enums, variables) — not generic placeholders.
+    structs, enums, variables, DataFrame columns) — not generic placeholders.
   • Point at the specific NEXT step in THEIR code, or the exact place a bug or
     gap is, given the exercise's test inputs and required error strings.
   • Prefer "in your <their_function>, the <X> case isn't handled yet — …" over
     vague advice like "think about how to tokenize the input".
-  • Keep code identifiers (function/struct names, C keywords) in Latin letters
+  • Keep code identifiers (function/struct names, language keywords) in Latin letters
     even inside the Hebrew text.
 
 NEVER include the full working solution or a complete function body.
@@ -46,12 +46,13 @@ Tailor each level — each strictly more helpful than the previous:
 """
 
 
-def _build_crew(system_prompt: str, transcript: str, student_question: str) -> Crew:
+def _build_crew(system_prompt: str, transcript: str, student_question: str,
+                course: str = "Operating Systems") -> Crew:
     agent = Agent(
         role="VeriExam teaching assistant",
         goal="Draft graded, bilingual help a teacher will review before it reaches the student.",
         backstory=(
-            "You assist an instructor in an Operating Systems lab. You never hand "
+            f"You assist an instructor in a {course} lab. You never hand "
             "students full solutions; you meet them exactly where their code is."
         ),
         llm=gemini_llm(),
@@ -77,7 +78,8 @@ def _build_crew(system_prompt: str, transcript: str, student_question: str) -> C
 
 
 async def generate_variants(
-    system_prompt: str, session_id: str, student_question: str
+    system_prompt: str, session_id: str, student_question: str,
+    course: str = "Operating Systems",
 ) -> dict:
     """Return {level: {'en': str, 'he': str}} for level in nudge/normal/more.
 
@@ -85,7 +87,7 @@ async def generate_variants(
     needs to swap the call.
     """
     transcript = session_transcript(session_id)
-    crew = _build_crew(system_prompt, transcript, student_question)
+    crew = _build_crew(system_prompt, transcript, student_question, course)
     # CrewAI is synchronous; run it off the event loop so /ask stays async.
     result = await asyncio.to_thread(crew.kickoff)
     vs: VariantSet = result.pydantic

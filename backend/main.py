@@ -16,6 +16,7 @@ from backend.routes import (
     ask,
     client_config,
     exercises as ex_routes,
+    files,
     grade,
     login,
     mode,
@@ -24,6 +25,7 @@ from backend.routes import (
     proctor,
     review,
     sessions,
+    steps as step_routes,
     students,
     submissions,
 )
@@ -75,6 +77,8 @@ app.include_router(proctor.router, prefix="/api")
 app.include_router(submissions.router, prefix="/api")
 app.include_router(plugin.router, prefix="/api")
 app.include_router(grade.router, prefix="/api")
+app.include_router(files.router, prefix="/api")
+app.include_router(step_routes.router, prefix="/api")
 
 
 @app.get("/healthz")
