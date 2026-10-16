@@ -13,8 +13,8 @@
 #    ./update_plugin.sh --product pycharm         # only the PyCharm plugin
 #    ./update_plugin.sh --product clion           # only the CLion plugin
 #
-#  Server URL:  positional argument, else $OSLAB_SERVER, else the default below.
-#  Product:     --product, else $OSLAB_PRODUCT, else DEFAULT_PRODUCT (blank = auto:
+#  Server URL:  positional argument, else $VERIEXAM_SERVER, else the default below.
+#  Product:     --product, else $VERIEXAM_PRODUCT, else DEFAULT_PRODUCT (blank = auto:
 #               take whatever was published last and install into the matching IDE).
 #  Override the JetBrains config base for testing with $JETBRAINS_DIR.
 # ─────────────────────────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ NG_HDR='ngrok-skip-browser-warning: true'   # skip ngrok-free's interstitial pag
 
 # Parse an optional server URL (positional) and optional --product.
 SERVER=""
-PRODUCT="${OSLAB_PRODUCT:-$DEFAULT_PRODUCT}"
+PRODUCT="${VERIEXAM_PRODUCT:-$DEFAULT_PRODUCT}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --product)   PRODUCT="${2:-}"; shift 2 ;;
@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
     *)           SERVER="$1"; shift ;;
   esac
 done
-SERVER="${SERVER:-${OSLAB_SERVER:-$DEFAULT_SERVER}}"
+SERVER="${SERVER:-${VERIEXAM_SERVER:-$DEFAULT_SERVER}}"
 SERVER="${SERVER%/}"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -59,15 +59,15 @@ say "Published version: ${VER:-unknown}${PRODUCT:+  (product: $PRODUCT)}"
 # --- download ----------------------------------------------------------------
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-ZIP="$TMP/oslab-plugin.zip"
+ZIP="$TMP/veriexam-plugin.zip"
 say "Downloading…"
 curl -fsS -H "$NG_HDR" "$SERVER/api/plugin/latest$Q" -o "$ZIP" || die "Download failed."
 # A valid zip starts with 'PK'. If ngrok served an HTML page instead, catch it.
 [[ "$(head -c2 "$ZIP")" == "PK" ]] || die "Downloaded file is not a zip (got a web page?). Check the server URL."
 
 # --- which product is this? --------------------------------------------------
-# The zip's top-level folder is the plugin name: oslab-clion-plugin/ or
-# oslab-pycharm-plugin/. Use it to (a) target the right IDE family and (b)
+# The zip's top-level folder is the plugin name: veriexam-clion-plugin/ or
+# veriexam-pycharm-plugin/. Use it to (a) target the right IDE family and (b)
 # know the exact folder to replace — never hardcode a product here.
 TOP="$(unzip -Z1 "$ZIP" 2>/dev/null | awk -F/ 'NF{print $1}' | sort -u | head -1)"
 [[ -n "$TOP" ]] || die "Couldn't read the plugin folder name from the zip."

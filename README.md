@@ -131,7 +131,7 @@ The student has **two interchangeable clients** for the same backend: the
 Chainlit web app (component 4) and a **CLion plugin** (4b) that puts the same
 login → briefing → chat → probes flow inside the IDE. See
 [*Alternative student client: the CLion plugin*](#alternative-student-client-the-clion-plugin)
-and [`oslab_plugin/README.md`](oslab_plugin/README.md).
+and [`veriexam_plugin/README.md`](veriexam_plugin/README.md).
 
 All LLM calls — the student chat and the CrewAI agents (review drafts, probe
 suggestions, grading) — run on Gemini. Anything sent to the agents is first
@@ -194,14 +194,14 @@ screen (codes are case-insensitive). To add a teacher to an existing database
 directly:
 
 ```bash
-sqlite3 oslab.db \
+sqlite3 veriexam.db \
   "INSERT INTO users(username, login_code, role) VALUES('Dr. Cohen','TEACH-01','teacher');"
 ```
 
 List the instructor codes already in your database at any time:
 
 ```bash
-sqlite3 oslab.db "SELECT username, login_code FROM users WHERE role='teacher';"
+sqlite3 veriexam.db "SELECT username, login_code FROM users WHERE role='teacher';"
 ```
 
 Only a `role=teacher` account can open the **Exercises** tab and author new
@@ -271,7 +271,7 @@ A 90-minute lab session, end to end:
   your queue.
 
 **After class**
-- All transcripts and probe results are in `oslab.db`.
+- All transcripts and probe results are in `veriexam.db`.
 
 ---
 
@@ -303,7 +303,7 @@ shows their test inputs as a checklist.
 ## Alternative student client: the CLion & PyCharm plugin
 
 Students already work in a JetBrains IDE — CLion for C, PyCharm for Python. The
-[`oslab_plugin/`](oslab_plugin/) directory is a JetBrains plugin that embeds the
+[`veriexam_plugin/`](veriexam_plugin/) directory is a JetBrains plugin that embeds the
 *entire* student client in an IDE tool window, so they never leave the IDE to
 talk to the tutor. One shared source tree builds both the CLion and PyCharm
 plugins (`:clion` / `:pycharm` Gradle modules). It uses the same six backend
@@ -320,10 +320,10 @@ one place — it is *not* a per-student plugin setting):
 | `STUDENT_CLIENT_MODE=chat`   | Faithful chat port — login, briefing, streaming chat, suggestion chips, probes. Same as Chainlit, in a tool window. |
 | `STUDENT_CLIENT_MODE=ide`    | Everything in `chat`, **plus** it scaffolds the student's assigned variant as a starter `mcalc.c` in their project and shows the variant's required test inputs as a checklist. |
 
-Build & run (full details in [`oslab_plugin/README.md`](oslab_plugin/README.md)):
+Build & run (full details in [`veriexam_plugin/README.md`](veriexam_plugin/README.md)):
 
 ```bash
-cd oslab_plugin
+cd veriexam_plugin
 gradle wrapper --gradle-version 8.10.2   # one-time, generates the wrapper jar
 ./gradlew :clion:runIde                  # sandbox CLion with the plugin
 ./gradlew :pycharm:runIde                # sandbox PyCharm with the plugin
@@ -336,7 +336,7 @@ be used at the same time against the same backend.
 **Shipping updates to students without passing files around.** When the backend
 is exposed over a tunnel (see [`deploy/README-NGROK.md`](deploy/README-NGROK.md)),
 it also distributes the plugin. Build + upload once on the JDK-21 machine
-(`cd oslab_plugin && ./publish.sh` — add `--product pycharm` for the PyCharm
+(`cd veriexam_plugin && ./publish.sh` — add `--product pycharm` for the PyCharm
 build), then each student runs a single command:
 
 ```bash
@@ -345,7 +345,7 @@ curl -fsSL https://<your-domain>.ngrok-free.dev/api/plugin/install.sh | bash
 
 That installs the latest build into their matching IDE, CLion or PyCharm (they
 just restart). Full
-details in [`oslab_plugin/README.md`](oslab_plugin/README.md) →
+details in [`veriexam_plugin/README.md`](veriexam_plugin/README.md) →
 *Distributing updates over the tunnel*.
 
 ---
@@ -437,9 +437,9 @@ backend/                     # FastAPI app
 student_app/
   app.py                     # Chainlit student UI (login + chat + probes)
 
-oslab_plugin/                # alternative student client: a CLion/JetBrains plugin
+veriexam_plugin/                # alternative student client: a CLion/JetBrains plugin
   build.gradle.kts           # IntelliJ Platform Gradle build (targets CLion)
-  src/main/kotlin/edu/jce/oslab/
+  src/main/kotlin/edu/jce/veriexam/
     api/                     # DTOs + HTTP/streaming client over the 6 endpoints
     ui/                      # tool window, login, briefing, chat, checklist
     probe/                   # 2s probe poller + answer dialog
@@ -467,7 +467,7 @@ scripts/
 | `GEMINI_API_KEY`      | The only LLM key. Powers the CrewAI agents and the student chat. |
 | `AGENT_MODEL`         | Gemini model for the agents (review drafts, probes, grading). Default `gemini-2.5-pro`. |
 | `STUDENT_CHAT_MODEL`  | Gemini model for the direct student chat. Default `gemini-2.5-flash-lite`. |
-| `DB_PATH`             | `./oslab.db` by default.                                      |
+| `DB_PATH`             | `./veriexam.db` by default.                                      |
 | `AUDIT_AES_KEY`       | 32-byte base64 key for encrypting raw cloud-LLM payloads.     |
 | `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only).   |
 | `STUDENT_CLIENT_MODE` | CLion plugin behavior: `chat` (default) or `ide`. Ignored by Chainlit. |

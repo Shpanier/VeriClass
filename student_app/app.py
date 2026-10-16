@@ -14,7 +14,7 @@ BACKEND = os.environ.get("BACKEND_URL", "http://127.0.0.1:8010")
 for noisy in ("httpx", "httpcore", "socketio", "engineio", "asyncio", "watchfiles", "uvicorn.access"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 
-log = logging.getLogger("oslab.student")
+log = logging.getLogger("veriexam.student")
 
 
 @cl.on_chat_start

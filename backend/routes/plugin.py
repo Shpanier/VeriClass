@@ -86,7 +86,7 @@ async def publish_plugin(
         raise HTTPException(422, "Body is not a .zip (missing PK signature).")
 
     version = _SAFE.sub("_", version.strip()) or "0"
-    stored_name = f"oslab-{product}-plugin-{version}.zip"
+    stored_name = f"veriexam-{product}-plugin-{version}.zip"
     DIST_DIR.mkdir(parents=True, exist_ok=True)
     (DIST_DIR / stored_name).write_bytes(data)
 

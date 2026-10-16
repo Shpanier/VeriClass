@@ -86,7 +86,7 @@
 
 </div>
 
-לסטודנט יש **שני קליינטים מתחלפים** מול אותו צד שרת: אפליקציית הוויב של Chainlit (רכיב 4) ו**תוסף ל־CLion** (רכיב 4b) שמכניס את אותו זרם של כניסה ← תדריך ← צ׳אט ← שאלות הבנה אל תוך ה־IDE. ראו [*קליינט סטודנט חלופי: תוסף ה־CLion*](#קליינט-סטודנט-חלופי-תוסף-ה־clion) ואת [`oslab_plugin/README.md`](oslab_plugin/README.md).
+לסטודנט יש **שני קליינטים מתחלפים** מול אותו צד שרת: אפליקציית הוויב של Chainlit (רכיב 4) ו**תוסף ל־CLion** (רכיב 4b) שמכניס את אותו זרם של כניסה ← תדריך ← צ׳אט ← שאלות הבנה אל תוך ה־IDE. ראו [*קליינט סטודנט חלופי: תוסף ה־CLion*](#קליינט-סטודנט-חלופי-תוסף-ה־clion) ואת [`veriexam_plugin/README.md`](veriexam_plugin/README.md).
 
 המודל המקומי הוא הנתיב היחיד שרואה הודעות של סטודנטים. המודל הענני משמש **אך ורק** להצעות שאלות הבנה למרצה (`/api/probe/suggest`), ורק אחרי ש־`backend/sanitize.py` הסיר שמות, קודים ומידע מזהה אחר.
 
@@ -158,7 +158,7 @@ python scripts/add_students.py --teachers "Dr. Cohen,TA Levi"
 <div dir="ltr">
 
 ```bash
-sqlite3 oslab.db \
+sqlite3 veriexam.db \
   "INSERT INTO users(username, login_code, role) VALUES('Dr. Cohen','TEACH-01','teacher');"
 ```
 
@@ -169,7 +169,7 @@ sqlite3 oslab.db \
 <div dir="ltr">
 
 ```bash
-sqlite3 oslab.db "SELECT username, login_code FROM users WHERE role='teacher';"
+sqlite3 veriexam.db "SELECT username, login_code FROM users WHERE role='teacher';"
 ```
 
 </div>
@@ -228,7 +228,7 @@ sqlite3 oslab.db "SELECT username, login_code FROM users WHERE role='teacher';"
 - אם סטודנט רץ מהר מדי / נשען על המודל יותר מדי, הפעילו את מצב הסקירה. השאלה הבאה שלו תגיע לתור שלכם.
 
 **אחרי השיעור**
-- כל התמלילים ותוצאות שאלות ההבנה נמצאים ב־`oslab.db`. שאילתות שימושיות:
+- כל התמלילים ותוצאות שאלות ההבנה נמצאים ב־`veriexam.db`. שאילתות שימושיות:
 
 <div dir="ltr">
 
@@ -272,7 +272,7 @@ GROUP BY s.user_id, answer_level;
 ## קליינט סטודנט חלופי: תוסף ה־CLion
 
 הסטודנטים בקורס הזה ממילא כותבים את קוד ה־C שלהם ב־CLion. הספרייה
-[`oslab_plugin/`](oslab_plugin/) היא תוסף JetBrains שמטמיע את *כל* קליינט הסטודנט
+[`veriexam_plugin/`](veriexam_plugin/) היא תוסף JetBrains שמטמיע את *כל* קליינט הסטודנט
 בתוך חלון כלים (tool window) ב־CLion, כך שלא צריך לצאת מה־IDE כדי לדבר עם החונך.
 הוא משתמש באותם שישה endpoints של צד השרת כמו Chainlit — צד השרת ללא שינוי, פרט
 ל־endpoint קטן אחד לקריאה בלבד (`GET /api/client-config`) שחושף את מתג ההתנהגות.
@@ -289,12 +289,12 @@ GROUP BY s.user_id, answer_level;
 
 </div>
 
-בנייה והרצה (פירוט מלא ב־[`oslab_plugin/README.md`](oslab_plugin/README.md)):
+בנייה והרצה (פירוט מלא ב־[`veriexam_plugin/README.md`](veriexam_plugin/README.md)):
 
 <div dir="ltr">
 
 ```bash
-cd oslab_plugin
+cd veriexam_plugin
 gradle wrapper --gradle-version 8.10.2   # פעם אחת, יוצר את ה-wrapper jar
 ./gradlew :clion:runIde                  # מריץ CLion ארגז-חול עם התוסף טעון
 ./gradlew :pycharm:runIde                # מריץ PyCharm ארגז-חול עם התוסף טעון
@@ -388,9 +388,9 @@ backend/                     # FastAPI app
 student_app/
   app.py                     # Chainlit student UI (login + chat + probes)
 
-oslab_plugin/                # alternative student client: a CLion/JetBrains plugin
+veriexam_plugin/                # alternative student client: a CLion/JetBrains plugin
   build.gradle.kts           # IntelliJ Platform Gradle build (targets CLion)
-  src/main/kotlin/edu/jce/oslab/
+  src/main/kotlin/edu/jce/veriexam/
     api/                     # DTOs + HTTP/streaming client over the 6 endpoints
     ui/                      # tool window, login, briefing, chat, checklist
     probe/                   # 2s probe poller + answer dialog
@@ -422,7 +422,7 @@ scripts/
 | `GEMINI_API_KEY`      | The only LLM key. Powers the CrewAI agents and the student chat. |
 | `AGENT_MODEL`         | Gemini model for the agents (review drafts, probes, grading). Default `gemini-2.5-pro`. |
 | `STUDENT_CHAT_MODEL`  | Gemini model for the direct student chat. Default `gemini-2.5-flash-lite`. |
-| `DB_PATH`             | `./oslab.db` by default.                                      |
+| `DB_PATH`             | `./veriexam.db` by default.                                      |
 | `AUDIT_AES_KEY`       | 32-byte base64 key for encrypting raw cloud-LLM payloads.     |
 | `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only).   |
 | `STUDENT_CLIENT_MODE` | CLion plugin behavior: `chat` (default) or `ide`. Ignored by Chainlit. |

@@ -13,7 +13,7 @@ from backend.routes import review as review_mod
 
 REVIEW_TIMEOUT_SECONDS = 600  # how long the student request waits for the teacher
 
-log = logging.getLogger("oslab.ask")
+log = logging.getLogger("veriexam.ask")
 
 router = APIRouter()
 

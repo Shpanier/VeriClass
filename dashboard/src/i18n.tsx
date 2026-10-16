@@ -364,7 +364,7 @@ interface LangCtx {
 
 const Ctx = createContext<LangCtx | null>(null);
 
-const STORAGE_KEY = "oslab.lang";
+const STORAGE_KEY = "veriexam.lang";
 
 function initialLang(): Lang {
   const saved = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;

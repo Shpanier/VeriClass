@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(os.environ.get("DB_PATH", "./oslab.db"))
+DB_PATH = Path(os.environ.get("DB_PATH", "./veriexam.db"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (

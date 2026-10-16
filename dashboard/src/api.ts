@@ -15,7 +15,7 @@ import type {
   Submission,
 } from "./types";
 
-const TOKEN_KEY = "oslab.teacher.token";
+const TOKEN_KEY = "veriexam.teacher.token";
 
 export const auth = {
   get: () => localStorage.getItem(TOKEN_KEY),

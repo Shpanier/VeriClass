@@ -35,21 +35,21 @@ Requires a domain whose nameservers point to Cloudflare (free Cloudflare account
 cloudflared tunnel login
 
 # 2. Create a named tunnel (stores credentials locally)
-cloudflared tunnel create oslab-exam
+cloudflared tunnel create veriexam-exam
 
 # 3. Route a hostname on your domain to that tunnel
-cloudflared tunnel route dns oslab-exam exam.yourdomain.com
+cloudflared tunnel route dns veriexam-exam exam.yourdomain.com
 ```
 
 Point the config at it — edit `deploy/tunnel.conf`:
 ```ini
 PROVIDER=cloudflare
-CF_TUNNEL_NAME=oslab-exam
+CF_TUNNEL_NAME=veriexam-exam
 ```
 
 Build the student package once (JDK-21 machine) with the **routed hostname**:
 ```bash
-cd oslab_plugin
+cd veriexam_plugin
 ./packaging/make_exam_package.sh --backend-url https://exam.yourdomain.com
 ```
 
@@ -71,8 +71,8 @@ It prints a random `https://<words>.trycloudflare.com` URL.
 ⚠️ **The URL changes every run.** Each time you must re-stamp it into the plugin
 package and students must reinstall:
 ```bash
-# edit oslab_plugin/dist/OsLabExam/exam.conf → BACKEND_URL=https://<new>.trycloudflare.com
-cd oslab_plugin/dist && rm -f OsLabExam.zip && zip -rqX OsLabExam.zip OsLabExam
+# edit veriexam_plugin/dist/VeriExamInstaller/exam.conf → BACKEND_URL=https://<new>.trycloudflare.com
+cd veriexam_plugin/dist && rm -f VeriExamInstaller.zip && zip -rqX VeriExamInstaller.zip VeriExamInstaller
 ```
 Avoid this mode for real exams — use a named tunnel.
 
@@ -81,6 +81,6 @@ Avoid this mode for real exams — use a named tunnel.
 ## Switching from ngrok to Cloudflare mid-course
 1. Set up a **named tunnel** (Mode A) so the URL is stable.
 2. Re-stamp the plugin package with the new hostname (edit `exam.conf` + re-zip —
-   no JDK needed) and resend `OsLabExam.zip` to students **once**.
+   no JDK needed) and resend `VeriExamInstaller.zip` to students **once**.
 3. Flip `PROVIDER=cloudflare` in `deploy/tunnel.conf`. Done — `tunnel.sh` now
    uses Cloudflare every session.
