@@ -10,7 +10,11 @@ router = APIRouter()
 
 # Events that mean the student left the IDE (or its full screen). The dashboard
 # counts these as violations. Kept here as the single source of truth.
-ALERT_KINDS = ("focus_lost", "minimized", "fullscreen_exited")
+ALERT_KINDS = ("focus_lost", "minimized", "fullscreen_exited",
+               # Windows: the OS has another app in front (GetForegroundWindow).
+               "other_app_in_front",
+               # The window was made smaller than maximized ("restore down").
+               "window_unmaximized")
 
 # Terminal violations: a refused command in the VeriExam terminal (written by
 # routes/terminal.py, never by the client directly) and an attempt to open the
@@ -24,7 +28,8 @@ IDE_ALERT_KINDS = ("tool_window_opened", "other_window_opened", "paste_external"
 
 # The events that decide whether a student is in the IDE / in full screen right
 # now (the last one of these wins). Everything else is a one-off.
-FOCUS_STATE_KINDS = ALERT_KINDS + ("exam_started", "focus_regained", "window_restored", "fullscreen_restored")
+FOCUS_STATE_KINDS = ALERT_KINDS + ("exam_started", "focus_regained", "window_restored", "fullscreen_restored",
+                                   "window_maximized")
 
 # Every kind the exam client is allowed to report. Anything else is rejected so
 # a bug in the client can't pollute the proctor trail.

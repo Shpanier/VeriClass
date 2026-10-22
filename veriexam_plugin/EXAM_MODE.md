@@ -71,6 +71,7 @@ First build downloads the CLion SDK and is large; later builds are cached.
 STUDENT_CLIENT_MODE=ide
 EXAM_MODE=true        # optional — defaults ON whenever mode is "ide"
 FULLSCREEN=true       # optional — defaults to whatever EXAM_MODE is
+EXAM_MAXIMIZED=true   # optional — defaults to whatever EXAM_MODE is (plugin 0.4.1+)
 ```
 
 Restart the backend. `GET /api/client-config` now returns `exam_mode: true`, and
@@ -90,6 +91,37 @@ every exam client picks it up at login. To end the exam for everyone, set
      (every leave/return with timestamps and how long they were away).
 
 ---
+
+## The window stays maximized (and Windows: no other app in front)
+
+From plugin 0.4.1, exam mode keeps the IDE window filling the screen on every
+OS, with or without full screen:
+
+- At exam start the window is **maximized** (then put in full screen if
+  `FULLSCREEN` is on).
+- If the student makes it smaller ("restore down", dragging it smaller, a system
+  shortcut), you get **`window_unmaximized`**, the student gets the red warning,
+  and the window is maximized again within about a second (**`window_maximized`**).
+  This needs no focus change, which is why "restore down" on Windows used to go
+  unnoticed.
+- **Windows:** every 2 seconds the plugin asks Windows which window is in front
+  (`GetForegroundWindow`). If it belongs to another program, you get
+  **`other_app_in_front`** with the program and its window title, e.g.
+  `chrome.exe — "ChatGPT - Google Chrome"`. A program the student ran from the IDE
+  doesn't count. This doesn't rely on Java focus events, which can be missed.
+- **Every OS:** if no IDE window has had focus for two checks in a row (4 s),
+  that also counts as leaving (`focus_lost`), in case a focus event was missed.
+
+The dashboard shows **NOT MAXIMIZED** on the student's card while the window is
+smaller. Turn this off with `EXAM_MAXIMIZED=false`.
+
+Other apps can't be stopped from running: VeriExam reports, it doesn't lock the
+computer. What it does is report every moment another app is in front, with its
+name.
+
+Tested on macOS (restore-down alarm and re-maximize, leaving and returning). The
+Windows foreground check has unit tests only: try it once on a Windows machine
+before a graded exam.
 
 ## What the student experiences
 
@@ -189,6 +221,9 @@ while the session runs.
 | `focus_lost` | switched to another application |
 | `minimized` | minimized CLion |
 | `fullscreen_exited` | left full screen |
+| `other_app_in_front` | Windows: another program's window is in front. Detail: program and window title |
+| `window_unmaximized` | made the window smaller than maximized; it was maximized again |
+| `window_maximized` | the window fills the screen again (not an alert) |
 | `focus_regained` / `window_restored` | returned to CLion |
 | `blocked_command` | entered a command the exercise doesn't allow in the VeriExam Terminal (it didn't run) |
 | `fullscreen_restored` | back in full screen |
@@ -198,7 +233,8 @@ while the session runs.
 | `file_opened` | opened an editor tab (not an alert) |
 | `paste_external` / `paste_internal` | pasted text from outside / from inside the IDE or the tutor |
 
-`focus_alerts` on the dashboard counts the three leave kinds. The two terminal
+`focus_alerts` on the dashboard counts the five leave kinds (`focus_lost`,
+`minimized`, `fullscreen_exited`, `other_app_in_front`, `window_unmaximized`). The two terminal
 kinds are counted as `terminal_alerts` (see [TERMINAL.md](TERMINAL.md));
 `tool_window_opened`, `other_window_opened` and `paste_external` as `ide_alerts`.
 Times are when it happened on the student's machine; a report that waited in

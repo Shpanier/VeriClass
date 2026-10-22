@@ -38,6 +38,7 @@ def exam_state(last_focus_kind: Optional[str], live: Optional[dict], live_age_s:
       away            outside the IDE (another app, minimized)
       other_window    a dialog, another project window, or a panel that isn't allowed
       not_fullscreen  in the IDE but out of full screen
+      not_maximized   in the IDE but its window isn't maximized
       ok              in the IDE, full screen, only the allowed panels
       None            this student isn't running the exam client
 
@@ -55,13 +56,17 @@ def exam_state(last_focus_kind: Optional[str], live: Optional[dict], live_age_s:
             return "other_window", ", ".join(others + panels)
         if live.get("fullscreen") is False and live.get("fullscreen_supported", True):
             return "not_fullscreen", "not in full screen"
+        if live.get("maximized") is False:
+            return "not_maximized", "window not maximized"
         return "ok", None
     if last_focus_kind is None:
         return None, None
-    if last_focus_kind in ("focus_lost", "minimized"):
+    if last_focus_kind in ("focus_lost", "minimized", "other_app_in_front"):
         return "away", "outside the IDE"
     if last_focus_kind == "fullscreen_exited":
         return "not_fullscreen", "not in full screen"
+    if last_focus_kind == "window_unmaximized":
+        return "not_maximized", "window not maximized"
     return "ok", None
 
 

@@ -64,6 +64,9 @@ def client_config(exercise_id: Optional[str] = None):
 
     exam_mode = _envbool("EXAM_MODE", default=(mode == "ide"))
     force_fullscreen = _envbool("FULLSCREEN", default=exam_mode)
+    # Keep the IDE maximized during the exam and report a smaller window. Works
+    # on Windows even where full screen doesn't engage.
+    exam_maximized = _envbool("EXAM_MAXIMIZED", default=exam_mode)
 
     # The active exercise's scaffold_filename wins (so activating a Python
     # exercise scaffolds pycalc.py without any .env change); fall back to the
@@ -84,6 +87,7 @@ def client_config(exercise_id: Optional[str] = None):
         "poll_interval_ms": _envint("POLL_INTERVAL_MS", 2000, minimum=500),
         "exam_mode": exam_mode,
         "force_fullscreen": force_fullscreen,
+        "exam_maximized": exam_maximized,
         "heartbeat_ms": _envint("HEARTBEAT_MS", 10000, minimum=5000),
         "exam_allowed_tool_windows": [
             w.strip() for w in os.environ.get("EXAM_ALLOWED_TOOL_WINDOWS", "").split(",") if w.strip()

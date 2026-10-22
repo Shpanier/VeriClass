@@ -12,6 +12,7 @@ const TRANSLATED_KINDS = new Set([
   "blocked_command", "stock_terminal_opened",
   "fullscreen_restored", "tool_window_opened", "other_window_opened", "other_window_closed",
   "file_opened", "paste_external", "paste_internal",
+  "other_app_in_front", "window_unmaximized", "window_maximized",
 ]);
 
 /**

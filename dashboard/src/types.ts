@@ -37,7 +37,7 @@ export interface Student {
   last_alert_at?: string | null;
 }
 
-export type ExamState = "ok" | "away" | "other_window" | "not_fullscreen" | "no_signal";
+export type ExamState = "ok" | "away" | "other_window" | "not_fullscreen" | "not_maximized" | "no_signal";
 
 // What the exam client sends with every heartbeat and on every change.
 export interface LiveStatus {

@@ -104,6 +104,8 @@ data class ClientConfig(
     val exam_mode: Boolean = false,
     /** Put the IDE in full screen at exam start and re-assert it on return. */
     val force_fullscreen: Boolean = false,
+    /** Keep the IDE window maximized; a smaller window is reported. Null from older backends. */
+    val exam_maximized: Boolean? = null,
     /** How often to send the live status (also sent on every change). */
     val heartbeat_ms: Int = 10000,
     /** Exam: panels allowed besides the VeriExam chat and terminal (tool window ids, e.g. "Run"). */
@@ -114,4 +116,6 @@ data class ClientConfig(
 ) {
     val isIdeMode: Boolean get() = mode.equals("ide", ignoreCase = true)
     val isExamMode: Boolean get() = exam_mode
+    /** Older backends don't send exam_maximized: keep the window maximized whenever exam mode is on. */
+    val isMaximizedMode: Boolean get() = exam_mode && (exam_maximized ?: true)
 }

@@ -66,13 +66,16 @@ const KIND_LABEL: Record<string, string> = {
   file_opened: "opened an editor tab",
   paste_external: "pasted text from outside the IDE",
   paste_internal: "pasted text copied inside the IDE",
+  other_app_in_front: "another app in front of the IDE",
+  window_unmaximized: "made the IDE window smaller",
+  window_maximized: "window maximized again",
 };
 
 export function kindLabel(kind: string): string {
   return KIND_LABEL[kind] ?? kind;
 }
 
-const LEAVE_KINDS = new Set(["focus_lost", "minimized", "fullscreen_exited"]);
+const LEAVE_KINDS = new Set(["focus_lost", "minimized", "fullscreen_exited", "other_app_in_front", "window_unmaximized"]);
 
 export function isLeaveKind(kind: string | null): boolean {
   return kind != null && LEAVE_KINDS.has(kind);
@@ -107,6 +110,7 @@ export const STATE_STYLE: Record<ExamState, { icon: string; color: string; bg: s
   away: { icon: "🔴", color: "#b91c1c", bg: "#fef2f2" },
   other_window: { icon: "🟠", color: "#c2410c", bg: "#fff7ed" },
   not_fullscreen: { icon: "🟡", color: "#a16207", bg: "#fefce8" },
+  not_maximized: { icon: "🟡", color: "#a16207", bg: "#fefce8" },
   no_signal: { icon: "⚫", color: "#374151", bg: "#f3f4f6" },
 };
 

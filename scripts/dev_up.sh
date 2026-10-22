@@ -26,7 +26,9 @@ WIN_TAG="VERIEXAM-DEV"
 kill_port() {
   local port=$1
   local pids
-  pids=$(lsof -ti tcp:"$port" 2>/dev/null || true)
+  # Only the process LISTENING on the port: a client connected to it (the ngrok
+  # tunnel forwarding to the backend) must survive the restart.
+  pids=$(lsof -ti tcp:"$port" -sTCP:LISTEN 2>/dev/null || true)
   if [[ -n "$pids" ]]; then
     echo "  port $port: killing $pids"
     kill -9 $pids 2>/dev/null || true

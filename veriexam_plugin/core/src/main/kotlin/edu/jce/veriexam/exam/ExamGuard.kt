@@ -69,6 +69,9 @@ import javax.swing.Timer
  *    another app, minimizes, or exits full screen — reports that to the backend
  *    (which surfaces it on the teacher dashboard), warns the student, and
  *    re-asserts full screen / brings the IDE back to the front when they return;
+ *  - keeps the window maximized: a smaller window ("restore down") is reported
+ *    and undone, and on Windows the OS is asked which app is in front, so a
+ *    switch is caught even without a focus event ([ExamWindowLock]);
  *  - allows only the editor, the VeriExam chat and the VeriExam Terminal: any
  *    other panel is closed and reported ([ExamPanelLock]), and so is any other
  *    window — a dialog, another project, a search popup — with how it was
@@ -118,6 +121,10 @@ class ExamGuard(
     private val sawFullscreen = AtomicBoolean(false)
     /** Until when a full-screen animation may be running (no focus judgments before). */
     @Volatile private var transitionUntilMs = 0L
+    // So "made the window smaller" is reported once until it's maximized again.
+    private val unmaximizedReported = AtomicBoolean(false)
+    // Watchdog ticks in a row with no IDE window focused: a leave whose focus event was lost.
+    private var nowhereTicks = 0
 
     private val scheduler = AppExecutorUtil.getAppScheduledExecutorService()
     private var heartbeatFuture: ScheduledFuture<*>? = null
@@ -162,6 +169,13 @@ class ExamGuard(
     private val stateListener = object : WindowAdapter() {
         override fun windowIconified(e: WindowEvent) = onLeft("minimized", "You minimized $ide.")
         override fun windowDeiconified(e: WindowEvent) = onReturned("window_restored")
+
+        // "Restore down" keeps the IDE focused, so no focus event fires: watch the state.
+        override fun windowStateChanged(e: WindowEvent) {
+            if (config.isMaximizedMode && ExamWindowLock.isUnmaximize(e.oldState, e.newState)) {
+                checkUnmaximizedAfter(LEAVE_SETTLE_MS)
+            }
+        }
     }
 
     private val windowWatcher = AWTEventListener { e ->
@@ -184,6 +198,7 @@ class ExamGuard(
             if (stopped.get() || project.isDisposed) return@invokeLater
             // Land the student in the tutor tool window, full screen, listening.
             toolWindow()?.activate(null)
+            if (config.isMaximizedMode) WindowManager.getInstance().getFrame(project)?.let(ExamWindowLock::maximize)
             if (config.force_fullscreen) enterFullScreen()
             attachListeners()
             // Only the editor, the VeriExam chat and the VeriExam Terminal (checked + logged).
@@ -197,10 +212,7 @@ class ExamGuard(
         val hb = config.heartbeat_ms.toLong().coerceAtLeast(5_000L)
         heartbeatFuture = scheduler.scheduleWithFixedDelay(::sendStatus, hb, hb, TimeUnit.MILLISECONDS)
 
-        if (config.force_fullscreen) {
-            watchdogFuture =
-                scheduler.scheduleWithFixedDelay(::fullscreenWatchdog, 2_000L, 2_000L, TimeUnit.MILLISECONDS)
-        }
+        watchdogFuture = scheduler.scheduleWithFixedDelay(::watchdog, WATCHDOG_MS, WATCHDOG_MS, TimeUnit.MILLISECONDS)
     }
 
     /** EDT. */
@@ -209,6 +221,7 @@ class ExamGuard(
             frame = f
             f.addWindowFocusListener(focusListener)
             f.addWindowListener(stateListener)
+            f.addWindowStateListener(stateListener)
         }
         Toolkit.getDefaultToolkit().addAWTEventListener(windowWatcher, AWTEvent.WINDOW_EVENT_MASK)
 
@@ -413,11 +426,69 @@ class ExamGuard(
         }.apply { isRepeats = false; start() }
     }
 
-    /** EDT. Marked away, but one of the IDE's windows has focus: a return we didn't get an event for. */
+    /**
+     * EDT. Marked away, but one of the IDE's windows has focus (and, on Windows,
+     * no other app is in front): a return we didn't get an event for.
+     */
     private fun reconcileFocus() {
-        if (away.get() && KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null) {
+        if (away.get() && KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null &&
+            ExamWindowLock.otherAppInFront() == null
+        ) {
             onReturned("focus_regained")
         }
+    }
+
+    /**
+     * EDT. Did the student leave without a focus event telling us? On Windows,
+     * ask the OS which app is in front. Everywhere, two watchdog ticks in a row
+     * with no IDE window focused count as leaving too.
+     */
+    private fun checkForeground() {
+        if (System.currentTimeMillis() < transitionUntilMs) return
+        val other = ExamWindowLock.otherAppInFront()
+        if (other != null) {
+            nowhereTicks = 0
+            if (!away.get()) onLeft("other_app_in_front", "Another app is in front of $ide: ${other.describe()}")
+            return
+        }
+        val nowhere = KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow == null
+        nowhereTicks = if (nowhere && !away.get()) nowhereTicks + 1 else 0
+        if (nowhereTicks >= 2) {
+            nowhereTicks = 0
+            onLeft("focus_lost", "You switched away from $ide.")
+        }
+    }
+
+    /** EDT. Look again once a state change (or the full-screen animation) has settled. */
+    private fun checkUnmaximizedAfter(delayMs: Int) {
+        Timer(delayMs) {
+            val transition = transitionUntilMs - System.currentTimeMillis()
+            when {
+                stopped.get() || away.get() -> {}
+                transition > 0 -> checkUnmaximizedAfter(transition.toInt() + LEAVE_SETTLE_MS)
+                else -> checkMaximized()
+            }
+        }.apply { isRepeats = false; start() }
+    }
+
+    /** EDT. The window must fill the screen (maximized or full screen); re-maximize it if not. */
+    private fun checkMaximized() {
+        val f = frame ?: return
+        if (System.currentTimeMillis() < transitionUntilMs) return
+        if (ExamWindowLock.isLocked(f, ExamFullScreen.isFullScreen(project))) {
+            if (unmaximizedReported.compareAndSet(true, false)) {
+                report("window_maximized", detail = "maximized again", awayMs = null)
+                sendStatusSoon()
+            }
+            return
+        }
+        if (unmaximizedReported.compareAndSet(false, true)) {
+            violation("window_unmaximized",
+                "made the window smaller (not maximized) — ${how("not through $ide (the window's restore button, a drag, or a system shortcut)")}",
+                "You made $ide smaller. It has to stay maximized.")
+            sendStatusSoon()
+        }
+        ExamWindowLock.maximize(f)
     }
 
     /** EDT. Full screen on, and no "left the IDE" while macOS animates it. */
@@ -448,7 +519,8 @@ class ExamGuard(
         clipboardText()?.let { if (it != clipboardAtLeave) PasteSources.noteOutside(it) }
         // Re-assert exam constraints now that they're back.
         toolWindow()?.activate(null)
-        // The watchdog reports fullscreen_restored once it's back.
+        // The watchdog reports fullscreen_restored / window_maximized once it's back.
+        if (config.isMaximizedMode) frame?.let(ExamWindowLock::maximize)
         if (config.force_fullscreen) enterFullScreen()
         frame?.toFront()
         sendStatusSoon()
@@ -487,6 +559,10 @@ class ExamGuard(
         return mapOf(
             "focused" to !away.get(),
             "fullscreen" to fullscreen,
+            // Maximized or full screen. Null when exam mode doesn't ask for it.
+            "maximized" to frame?.takeIf { config.isMaximizedMode }?.let { ExamWindowLock.isLocked(it, fullscreen) },
+            // Windows: the app the OS has in front, when it isn't the IDE.
+            "app_in_front" to ExamWindowLock.otherAppInFront()?.describe(),
             // Don't flag "not full screen" where it was never asked for or never engaged.
             "fullscreen_supported" to (config.force_fullscreen && sawFullscreen.get()),
             "tool_windows" to twm.toolWindowIds.filter { twm.getToolWindow(it)?.isVisible == true },
@@ -519,35 +595,44 @@ class ExamGuard(
     }
 
     /**
-     * Catches a full-screen exit that doesn't move focus (e.g. the macOS green
-     * button or Esc) and restores it. Skipped while the student is away in
-     * another app — that's handled on their return, so we don't fight the OS.
+     * Every [WATCHDOG_MS] during the exam: another app in front (Windows) or a
+     * lost focus event, a window that is no longer maximized, and a full-screen
+     * exit that doesn't move focus (the macOS green button, Esc). The window is
+     * put back each time. Skipped while the student is away in another app —
+     * that's handled on their return, so we don't fight the OS.
      */
-    private fun fullscreenWatchdog() {
-        if (stopped.get() || !config.force_fullscreen) return
+    private fun watchdog() {
+        if (stopped.get()) return
         evenWhenModal {
             if (stopped.get() || project.isDisposed) return@evenWhenModal
+            checkForeground()
             reconcileFocus()
             if (away.get()) return@evenWhenModal
-            if (ExamFullScreen.isFullScreen(project)) {
-                sawFullscreen.set(true)
-                if (fullscreenExitReported.compareAndSet(true, false)) {
-                    report("fullscreen_restored", detail = "back in full screen", awayMs = null)
-                    sendStatusSoon()
-                }
-                return@evenWhenModal
-            }
-            // Not full screen. Only a violation if we'd previously gone full
-            // screen — otherwise the platform just doesn't support it, or the
-            // initial transition hasn't completed yet; keep trying quietly.
-            if (sawFullscreen.get() && fullscreenExitReported.compareAndSet(false, true)) {
-                violation("fullscreen_exited",
-                    "left full screen — ${how("not through $ide (the window's green button, or a system shortcut)")}",
-                    "You left full screen.")
+            if (config.isMaximizedMode) checkMaximized()
+            if (config.force_fullscreen) checkFullScreen()
+        }
+    }
+
+    /** EDT. Report a full-screen exit once, and go back to full screen. */
+    private fun checkFullScreen() {
+        if (ExamFullScreen.isFullScreen(project)) {
+            sawFullscreen.set(true)
+            if (fullscreenExitReported.compareAndSet(true, false)) {
+                report("fullscreen_restored", detail = "back in full screen", awayMs = null)
                 sendStatusSoon()
             }
-            enterFullScreen()
+            return
         }
+        // Not full screen. Only a violation if we'd previously gone full
+        // screen — otherwise the platform just doesn't support it, or the
+        // initial transition hasn't completed yet; keep trying quietly.
+        if (sawFullscreen.get() && fullscreenExitReported.compareAndSet(false, true)) {
+            violation("fullscreen_exited",
+                "left full screen — ${how("not through $ide (the window's green button, or a system shortcut)")}",
+                "You left full screen.")
+            sendStatusSoon()
+        }
+        enterFullScreen()
     }
 
     // --- helpers ----------------------------------------------------------
@@ -586,6 +671,7 @@ class ExamGuard(
         frame?.let {
             it.removeWindowFocusListener(focusListener)
             it.removeWindowListener(stateListener)
+            it.removeWindowStateListener(stateListener)
         }
         frame = null
     }
@@ -594,6 +680,7 @@ class ExamGuard(
         /** How long focus may sit nowhere before "left the IDE" (it passes through nowhere between our own windows). */
         private const val LEAVE_SETTLE_MS = 400
         private const val FULLSCREEN_TRANSITION_MS = 3_000L
+        private const val WATCHDOG_MS = 2_000L
 
         private val PASTE_ACTIONS = setOf("\$Paste", "EditorPaste", "EditorPasteSimple", "\$PasteSimple", "EditorPasteFromX11")
         private val HISTORY_PASTE_ACTIONS = setOf("PasteMultiple")
