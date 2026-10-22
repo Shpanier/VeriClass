@@ -94,12 +94,14 @@ def resolve(user: dict, course_id: Optional[str], exercise_id: Optional[str]) ->
             if course is None:
                 raise CourseError(404, f"Unknown course '{course_id}'.")
             return course_id, _exercise(course["default_exercise"])
-        return None, exercises.active()
+        return None, exercises.active() or exercises.first()
 
     mine = for_user(user["id"], "student")
     if not mine:
         # No courses set up for this student: the global active exercise, as before.
         active = exercises.active()
+        if active is None:
+            raise CourseError(403, "No exercise is open right now. Ask your teacher.")
         if exercise_id and exercise_id != active["exercise_id"]:
             raise CourseError(403, "That exercise isn't open for you.")
         return None, active

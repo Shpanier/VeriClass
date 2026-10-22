@@ -71,7 +71,7 @@ def pending_reviews(teacher: dict = Depends(deps.require_teacher)):
     with db.conn() as c:
         rows = c.execute(
             """
-            SELECT r.id, r.session_id, u.username, r.question,
+            SELECT r.id, r.session_id, u.username, s.exercise AS exercise_id, r.question,
                    r.variant_nudge, r.variant_normal, r.variant_more,
                    r.variant_nudge_he, r.variant_normal_he, r.variant_more_he,
                    r.created_at

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, auth, setUnauthorizedHandler } from "./api";
-import type { ActiveExercise, Student } from "./types";
+import type { ExerciseSummary, FullExercise, Student } from "./types";
 import { ExerciseHeader } from "./components/ExerciseHeader";
 import { StudentGrid } from "./components/StudentGrid";
 import { AskThemModal } from "./components/AskThemModal";
@@ -20,11 +20,20 @@ import { LanguageToggle, useLang } from "./i18n";
 
 type Tab = "monitor" | "exercises" | "courses";
 
+// The exercise the live view follows, remembered across reloads.
+const LIVE_KEY = "veriexam.liveExercise";
+
+function savedLiveId(): string | null {
+  try { return localStorage.getItem(LIVE_KEY); } catch { return null; }
+}
+
 export function App() {
   const { t } = useLang();
   const [authed, setAuthed] = useState<boolean>(() => !!auth.get());
   const [tab, setTab] = useState<Tab>("monitor");
-  const [exercise, setExercise] = useState<ActiveExercise | null>(null);
+  const [exerciseList, setExerciseList] = useState<ExerciseSummary[]>([]);
+  const [liveId, setLiveId] = useState<string | null>(savedLiveId);
+  const [liveExercise, setLiveExercise] = useState<FullExercise | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [askingSessionId, setAskingSessionId] = useState<string | null>(null);
   const [viewingSessionId, setViewingSessionId] = useState<string | null>(null);
@@ -33,8 +42,8 @@ export function App() {
   const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
 
-  const refreshActiveExercise = () =>
-    api.activeExercise().then(setExercise).catch(console.error);
+  const refreshExercises = () =>
+    api.exercises().then(setExerciseList).catch(console.error);
 
   // Any 401/403 from the API bounces us back to the login screen.
   useEffect(() => {
@@ -43,7 +52,7 @@ export function App() {
 
   useEffect(() => {
     if (!authed) return;
-    refreshActiveExercise();
+    refreshExercises();
   }, [authed]);
 
   useEffect(() => {
@@ -53,6 +62,40 @@ export function App() {
     const id = setInterval(tick, 3000);
     return () => clearInterval(id);
   }, [authed]);
+
+  // Live sessions per exercise, for the picker.
+  const liveCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of students) m.set(s.exercise, (m.get(s.exercise) ?? 0) + 1);
+    return m;
+  }, [students]);
+
+  // Nothing chosen yet (or the choice was deleted): follow the exercise with the
+  // most students now, else the active one, else the first.
+  useEffect(() => {
+    if (exerciseList.length === 0) return;
+    if (liveId && exerciseList.some((e) => e.exercise_id === liveId)) return;
+    const busiest = [...liveCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const pick = busiest ?? exerciseList.find((e) => e.is_active)?.exercise_id
+      ?? exerciseList[0].exercise_id;
+    setLiveId(pick);
+  }, [exerciseList, liveCounts, liveId]);
+
+  useEffect(() => {
+    if (!liveId) return;
+    try { localStorage.setItem(LIVE_KEY, liveId); } catch { /* ignore */ }
+    let stale = false;
+    api.exercise(liveId)
+      .then((ex) => { if (!stale) setLiveExercise(ex); })
+      .catch(console.error);
+    return () => { stale = true; };
+  }, [liveId]);
+
+  // Only the followed exercise's students: grid, proctor banner and alerts.
+  const visible = useMemo(
+    () => students.filter((s) => s.exercise === liveId),
+    [students, liveId],
+  );
 
   // Browsers block audio until a user gesture; unlock the alert tone on the
   // teacher's first interaction with the page.
@@ -70,10 +113,11 @@ export function App() {
   // terminal command, another panel/window, a paste from outside) rises between
   // polls, or their live state turns bad (e.g. no signal, which isn't an event).
   // Seeded on the first load so pre-existing alerts don't beep on open.
+  // Only the followed exercise's students count.
   const prevAlerts = useRef<Map<string, { n: number; bad: boolean }> | null>(null);
   useEffect(() => {
     const current = new Map(
-      students.map((s) => [s.session_id, { n: alertTotal(s), bad: needsAttention(s) }]),
+      visible.map((s) => [s.session_id, { n: alertTotal(s), bad: needsAttention(s) }]),
     );
     const prev = prevAlerts.current;
     if (prev) {
@@ -86,7 +130,7 @@ export function App() {
       }
     }
     prevAlerts.current = current;
-  }, [students]);
+  }, [visible]);
 
   const askingTarget = students.find((s) => s.session_id === askingSessionId) ?? null;
   const viewingTarget = students.find((s) => s.session_id === viewingSessionId) ?? null;
@@ -130,13 +174,20 @@ export function App() {
 
       {tab === "monitor" && (
         <>
-          {exercise && <ExerciseHeader exercise={exercise} studentCount={students.length} />}
-          <ProctorBanner students={students} onInspect={setProctorSessionId} />
-          <StepChecks />
-          <ReviewQueue />
+          <ExerciseHeader
+            exercises={exerciseList}
+            liveCounts={liveCounts}
+            selectedId={liveId}
+            onSelect={(id) => { setLiveExercise(null); setLiveId(id); }}
+            exercise={liveExercise}
+            studentCount={visible.length}
+          />
+          <ProctorBanner students={visible} onInspect={setProctorSessionId} />
+          <StepChecks exerciseId={liveId} />
+          <ReviewQueue exerciseId={liveId} />
           <StudentGrid
-            students={students}
-            paramLabels={exercise?.param_labels}
+            students={visible}
+            paramLabels={liveExercise?.param_labels}
             onModeChange={async (id, mode) => {
               await api.setMode(id, mode);
               api.students().then(setStudents);
@@ -150,7 +201,7 @@ export function App() {
         </>
       )}
 
-      {tab === "exercises" && <ExercisesPanel onActiveChanged={refreshActiveExercise} />}
+      {tab === "exercises" && <ExercisesPanel onActiveChanged={refreshExercises} />}
       {tab === "courses" && <CoursesPanel />}
 
       {askingTarget && (
@@ -166,7 +217,7 @@ export function App() {
       {viewingTarget && (
         <ChatViewModal
           student={viewingTarget}
-          paramLabels={exercise?.param_labels}
+          paramLabels={liveExercise?.param_labels}
           onClose={() => setViewingSessionId(null)}
         />
       )}

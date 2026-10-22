@@ -5,10 +5,13 @@ import { useLang } from "../i18n";
 
 /** Step-by-step labs: each pair's "Done with step N" answer, next to the
  *  expected values. Approve releases the next step into their chat. */
-export function StepChecks() {
+export function StepChecks({ exerciseId }: { exerciseId: string | null }) {
   const { t } = useLang();
   const [hasSteps, setHasSteps] = useState(false);
-  const [items, setItems] = useState<StepCheck[]>([]);
+  const [allItems, setItems] = useState<StepCheck[]>([]);
+  // Only the exercise the live view follows; the rest are counted, not shown.
+  const items = allItems.filter((c) => c.exercise_id === exerciseId);
+  const elsewhere = allItems.length - items.length;
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [busyId, setBusyId] = useState<number | null>(null);
 
@@ -35,7 +38,7 @@ export function StepChecks() {
     }
   };
 
-  if (!hasSteps && items.length === 0) return null;
+  if (!hasSteps && allItems.length === 0) return null;
 
   const box = { padding: 10, borderRadius: 6, whiteSpace: "pre-wrap" as const, fontSize: 13, lineHeight: 1.5 };
 
@@ -47,6 +50,11 @@ export function StepChecks() {
       <header style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <strong>📋 {t("stepChecks")}{items.length ? ` (${items.length})` : ""}</strong>
         <span style={{ color: "#6b7280", fontSize: 13 }}>{t("stepChecksHint")}</span>
+        {elsewhere > 0 && (
+          <span style={{ color: "#b45309", fontSize: 13, fontWeight: 600 }}>
+            {t("otherExercisesWaiting", { n: elsewhere })}
+          </span>
+        )}
       </header>
 
       <div style={{ marginTop: 12 }}>

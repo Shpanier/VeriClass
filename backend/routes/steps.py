@@ -27,6 +27,7 @@ def pending_step_checks(teacher: dict = Depends(deps.require_teacher)):
             "id": r["id"],
             "session_id": r["session_id"],
             "username": r["username"],
+            "exercise_id": r["exercise"],
             "step": r["step"],
             "total": len(st),
             "title": step.get("title", ""),
@@ -43,7 +44,8 @@ def pending_step_checks(teacher: dict = Depends(deps.require_teacher)):
 
 
 def _offered() -> list[dict]:
-    rows = [{"exercise_id": exercises.active_id()}] if exercises.all() else []
+    aid = exercises.active_id() if exercises.all() else None
+    rows = [{"exercise_id": aid}] if aid else []
     with db.conn() as c:
         rows += [dict(r) for r in c.execute("SELECT DISTINCT exercise_id FROM course_exercises")]
     return rows

@@ -179,6 +179,23 @@ def test_no_course_means_the_global_active_exercise(client):
     assert client.post("/api/sessions", json={"exercise_id": other}, headers=h).status_code == 403
 
 
+def test_disabling_the_active_exercise(client):
+    teacher = _auth(client, TEACHER)
+    active = exercises.active_id()
+    try:
+        assert client.delete("/api/exercises/active", headers=teacher).json() == {"exercise_id": None}
+        assert not any(e["is_active"] for e in client.get("/api/exercises", headers=teacher).json())
+        assert client.get("/api/exercises/active", headers=teacher).status_code == 404
+        # A student outside every course gets no exercise; course students are unaffected.
+        r = client.post("/api/sessions", json={}, headers=_auth(client, NONE))
+        assert r.status_code == 403 and "No exercise is open" in r.json()["detail"]
+        _setup_courses(client)
+        assert client.post("/api/sessions", json={}, headers=_auth(client, ONE)).status_code == 200
+    finally:
+        client.post("/api/exercises/active", json={"exercise_id": active}, headers=teacher)
+    assert exercises.active_id() == active
+
+
 def test_client_config_follows_the_chosen_exercise(client):
     assert client.get("/api/client-config?exercise_id=ex5-pycalc").json()["scaffold_filename"] == "pycalc.py"
 

@@ -17,10 +17,13 @@ function variantText(r: PendingReview, level: AnswerLevel, lang: Lang): string {
   return r[`variant_${level}` as const];
 }
 
-export function ReviewQueue() {
+export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
   const { t, lang } = useLang();
   const [enabled, setEnabled] = useState(false);
-  const [pending, setPending] = useState<PendingReview[]>([]);
+  const [allPending, setPending] = useState<PendingReview[]>([]);
+  // Only the exercise the live view follows.
+  const pending = allPending.filter((r) => r.exercise_id === exerciseId);
+  const elsewhere = allPending.length - pending.length;
   const [busyId, setBusyId] = useState<number | null>(null);
   // Teacher edits, keyed by `${reviewId}:${level}:${lang}` so each language's
   // box edits independently. Separate state so the 2s poll never clobbers them.
@@ -93,6 +96,11 @@ export function ReviewQueue() {
 
       {enabled && (
         <div style={{ marginTop: 12 }}>
+          {elsewhere > 0 && (
+            <div style={{ color: "#b45309", fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+              {t("otherExercisesWaiting", { n: elsewhere })}
+            </div>
+          )}
           {pending.length === 0 ? (
             <div style={{ color: "#6b7280", fontStyle: "italic" }}>
               {t("noQuestions")}

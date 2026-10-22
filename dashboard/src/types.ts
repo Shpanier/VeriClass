@@ -284,6 +284,7 @@ export interface PendingReview {
   id: number;
   session_id: string;
   username: string;
+  exercise_id?: string;
   question: string;
   // English variants.
   variant_nudge: string;
@@ -300,6 +301,7 @@ export interface StepCheck {
   id: number;
   session_id: string;
   username: string;
+  exercise_id?: string;
   step: number;
   total: number;
   title: string;
