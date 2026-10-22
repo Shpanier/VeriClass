@@ -66,6 +66,8 @@ def _summary(ex: dict[str, Any], active_id: str) -> dict[str, Any]:
         "source": ex.get("source", "yaml"),
         "edited": ex.get("edited", False),
         "is_active": ex["exercise_id"] == active_id,
+        # Terminal commands that break on Windows or macOS (see os_warnings).
+        "os_errors": sum(w["level"] == "error" for w in ex.get("os_warnings", [])),
     }
 
 
@@ -85,6 +87,8 @@ def _full(ex: dict[str, Any]) -> dict[str, Any]:
         "terminal": ex.get("terminal"),
         "source": ex.get("source", "yaml"),
         "edited": ex.get("edited", False),
+        # Terminal commands that behave differently on Windows and macOS.
+        "os_warnings": ex.get("os_warnings", []),
     }
 
 

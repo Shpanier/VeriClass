@@ -94,6 +94,15 @@ class VeriExamTtyConnectorTest {
     }
 
     @Test
+    fun `backslashes reach the shell unchanged and the record names the shell`() {
+        // The line goes through a file, not an environment variable: busybox-w32
+        // turned every \ in VE_CMD into / (awk "\n", sed "\." broke on Windows).
+        val r = run("printf '%s' 'a\\.b\\\"c\\n'")
+        assertEquals("a\\.b\\\"c\\n", r.outputTail!!.trim())
+        assertEquals("bash (test)", r.shell)
+    }
+
+    @Test
     fun `exit codes come back`() {
         assertEquals(1, run("grep -q nothing logs/access.log").exitCode)
     }

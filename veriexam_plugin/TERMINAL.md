@@ -69,6 +69,85 @@ Linux. macOS always uses `/bin/bash`: BusyBox has no macOS build, so Mac tools
 (BSD `sed`, `date`) differ slightly. To try a specific shell, set
 `VERIEXAM_TERMINAL_SHELL=/path/to/busybox` before starting the IDE.
 
+## Same results on every OS
+
+Students run the same exercise on Windows, macOS and Linux, and the terminal
+uses different tools on each (BusyBox, or bash with the macOS tools). Three
+things keep the results the same:
+
+**1. Check every exercise before class.** `scripts/check_exercise_os.py` runs
+an exercise's commands on this machine and in BusyBox (Docker), and shows every
+command whose output differs:
+
+```bash
+python scripts/check_exercise_os.py config/exercises/lab1-linux-git.yaml
+```
+
+It runs, in order, every command in the steps' code blocks, then each step's
+teacher-only `os_check:` lines. Put the reference solutions of a step's tasks
+there, so the check covers them too (students never see them):
+
+```yaml
+steps:
+  - title: "Searching with grep"
+    text: |
+      ...
+    expected: |
+      ...
+    os_check:
+      - "grep -c 'ERROR' app.log"
+```
+
+It compares three runs: `local` (on a Mac: the macOS tools), `busybox` (the
+Windows and Linux tools) and `win-030` (BusyBox as plugin 0.3.0 ran it on
+Windows, see below). Spaces before numbers, Git hashes, dates and temp paths are
+ignored. Exit code 1 when something differs.
+
+**2. The same rules run on every load.** `backend/portability.py` checks every
+command of every exercise when it loads. "error" means the command breaks on one
+OS; "note" means only the output text differs. The teacher sees them in
+`GET /api/exercises/{id}` (`os_warnings`), and the Exercises tab shows a badge
+with the number of errors. The rules:
+
+| Rule | Level | What differs | Write instead |
+|---|---|---|---|
+| `\` in a command | error | plugin 0.3.0 on Windows turns it into `/` | `[.]` or `[0-9.]*` for `\.`; in awk `printf "%c"` with 10 (newline) or 34 (`"`) |
+| `sed -i` | error | macOS needs `sed -i ''` | write a new file with `>` |
+| `grep -P` | error | missing in BusyBox and macOS | `grep -E` |
+| `date -d` / `date -v` | error | GNU/BusyBox vs macOS options | avoid |
+| `stat -c` / `stat -f` | error | BusyBox vs macOS options | `ls -l`, `wc -c` |
+| `head -n -1` | error | GNU only | combine `head` and `tail` |
+| gawk functions (`strftime`, `gensub`, …) | error | missing in BusyBox and macOS awk | plain awk |
+| `find -printf` | error | GNU only | avoid |
+| `tac`, `md5sum`, `sha256sum` | error | may be missing on macOS | avoid |
+| `ls -l` | note | owner, group and date format | check names or sizes |
+| `uniq -c`, `wc` | note | spaces before the number | compare the numbers |
+| `git add`, `git commit -a` | note | Git for Windows may print `LF will be replaced by CRLF` | harmless |
+
+**3. The dashboard shows each line's OS.** From plugin 0.3.1 every terminal line
+carries the student's OS and the shell that ran it (`client_os`, `shell` in
+`terminal_commands`); the terminal log shows the OS next to the time, and the
+shell on hover.
+
+### Backslashes on Windows (fixed in 0.3.1)
+
+Up to plugin 0.3.0, every `\` in a command became `/` on Windows: the line
+reached BusyBox in the `VE_CMD` environment variable, and busybox-w32 converts
+backslashes in it. The dashboard log showed the original line, so the change was
+easy to miss. Seen in class on 2026-10-22 (lab1-linux-git, most students on
+Windows):
+
+| Command contains | macOS / Linux | Windows, plugin 0.3.0 |
+|---|---|---|
+| `\"` inside an awk string | works | `awk: cmd. line:1: Division by zero` (the string ends early) |
+| `\n` in awk `printf` | works | runs, but prints `/n`: the whole output is one line |
+| `\.` in `sed` or `grep` | works | `sed: bad option in substitution expression`, or wrong matches |
+
+From 0.3.1 the line goes through a file (`VE_CMD_FILE`, see `ShellRunner.kt`
+and `terminal-runner.sh`), so backslashes arrive unchanged. While students
+may still have 0.3.0 installed, keep exercise commands free of `\`: the check
+above reports it as an error.
+
 ## Exam mode
 
 With `EXAM_MODE` on, the IDE's own **Terminal** tool window is hidden, so the

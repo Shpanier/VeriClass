@@ -86,6 +86,7 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
                 <code style={{ fontSize: 13 }}>{ex.exercise_id}</code>
                 {ex.is_active && <Pill bg="#10b981">{t("activeBadge")}</Pill>}
+                {!!ex.os_errors && <Pill bg="#b45309">{t("osErrorsBadge", { n: ex.os_errors })}</Pill>}
                 <Pill bg={ex.source === "console" ? "#3b82f6" : "#6b7280"}>
                   {ex.source === "console" ? t("sourceConsole") : ex.edited ? t("sourceYamlEdited") : t("sourceYaml")}
                 </Pill>

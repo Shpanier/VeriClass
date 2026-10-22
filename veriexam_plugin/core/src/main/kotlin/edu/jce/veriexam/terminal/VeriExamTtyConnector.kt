@@ -26,6 +26,8 @@ data class TerminalRecord(
     val syntaxError: Boolean = false,
     /** Everything it printed (stdout and stderr share the pty), ANSI codes stripped, up to ~4 MB. */
     val output: String? = outputTail,
+    /** The shell that ran it, e.g. "BusyBox (bundled)"; null when no shell was found. */
+    val shell: String? = null,
 )
 
 /**
@@ -324,6 +326,7 @@ class VeriExamTtyConnector(
             outputTail = output?.takeIf { it.isNotBlank() },
             syntaxError = verdict.syntaxError,
             output = full?.takeIf { it.isNotBlank() },
+            shell = shell?.label,
         )
         runCatching { onRecord(rec) }
     }

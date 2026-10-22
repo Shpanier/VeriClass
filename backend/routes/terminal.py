@@ -41,6 +41,10 @@ class TerminalCommandRequest(BaseModel):
     client_at: Optional[str] = None
     output_chars: Optional[int] = None
     output_chunks: Optional[int] = None
+    # Plugin 0.3.1+: the student's OS ("Windows 11 amd64") and the shell that
+    # ran the line ("BusyBox (bundled)"). The same line can behave differently.
+    client_os: Optional[str] = None
+    shell: Optional[str] = None
 
 
 class TerminalOutputRequest(BaseModel):
@@ -64,8 +68,8 @@ def insert_command(c, req: TerminalCommandRequest, via: str = "live") -> tuple[O
         "INSERT OR IGNORE INTO terminal_commands "
         "(session_id, line, cwd, allowed, reason, commands, syntax_error, "
         " exit_code, duration_ms, output_tail, client_id, client_at, "
-        " output_chars, output_chunks, via) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " output_chars, output_chunks, via, client_os, shell) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             req.session_id,
             line,
@@ -82,6 +86,8 @@ def insert_command(c, req: TerminalCommandRequest, via: str = "live") -> tuple[O
             req.output_chars if (req.output_chars or 0) > 0 else None,
             min(req.output_chunks, _CHUNKS_MAX) if (req.output_chunks or 0) > 0 else None,
             via,
+            _clip(req.client_os, 80),
+            _clip(req.shell, 80),
         ),
     )
     if not cur.rowcount:
@@ -180,7 +186,7 @@ def list_commands(
         rows = c.execute(
             "SELECT id, session_id, line, cwd, allowed, reason, commands, syntax_error, "
             "       exit_code, duration_ms, output_tail, output_chars, output_chunks, "
-            "       client_at, via, created_at "
+            "       client_at, via, created_at, client_os, shell "
             "FROM terminal_commands WHERE session_id = ? ORDER BY id DESC LIMIT ?",
             (session_id, limit),
         ).fetchall()

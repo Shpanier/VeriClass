@@ -2,14 +2,19 @@
 # state (exported variables + working directory) for the next line.
 #
 # The plugin has already checked the line against the exercise's rules. It
-# arrives in VE_CMD, so no quoting is involved. Works in BusyBox sh, bash and
+# arrives in the file named by VE_CMD_FILE, so no quoting is involved, and
+# backslashes survive (busybox-w32 rewrites \ to / in environment variables). Works in BusyBox sh, bash and
 # Git Bash. Shell functions, aliases and `set -o` options don't carry over.
 
-__ve_cmd=$VE_CMD
+if [ -n "$VE_CMD_FILE" ]; then
+    IFS= read -r __ve_cmd < "$VE_CMD_FILE"
+else
+    __ve_cmd=$VE_CMD
+fi
 __ve_state=$VE_STATE
 __ve_cwd=$VE_CWD
 __ve_cwd_out=$VE_CWD_OUT
-unset VE_CMD VE_STATE VE_CWD VE_CWD_OUT
+unset VE_CMD VE_CMD_FILE VE_STATE VE_CWD VE_CWD_OUT
 
 __ve_save() {
     export -p > "$__ve_state.tmp" 2>/dev/null && mv -f "$__ve_state.tmp" "$__ve_state"

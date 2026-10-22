@@ -116,6 +116,10 @@ class ShellRunner(private val shell: ShellSpec, private val stateDir: File) {
     private val runner = File(stateDir, "runner.sh")
     private val stateFile = File(stateDir, "state.sh")
     private val cwdFile = File(stateDir, "cwd.txt")
+    // The line goes to the shell in a file, not in an environment variable:
+    // busybox-w32 turns every \ in imported variables into /, which broke
+    // awk "\n", "\"" and sed "\." on Windows (TERMINAL.md, "Same results on every OS").
+    private val cmdFile = File(stateDir, "cmd.txt")
 
     init {
         stateDir.mkdirs()
@@ -126,6 +130,7 @@ class ShellRunner(private val shell: ShellSpec, private val stateDir: File) {
 
     fun start(line: String, cwd: File, columns: Int, rows: Int): PtyProcess {
         cwdFile.delete()
+        cmdFile.writeText(line + "\n", Charsets.UTF_8)
         val command = (shell.command + slash(runner)).toTypedArray()
         return PtyProcessBuilder(command)
             .setEnvironment(environment(line, cwd))
@@ -163,7 +168,7 @@ class ShellRunner(private val shell: ShellSpec, private val stateDir: File) {
         env["LC_COLLATE"] = "C"
         if (!ShellLocator.isWindows && env["LANG"].isNullOrBlank()) env["LANG"] = "en_US.UTF-8"
         shell.pathPrefix?.let { env["PATH"] = it + File.pathSeparator + env["PATH"].orEmpty() }
-        env["VE_CMD"] = line
+        env["VE_CMD_FILE"] = slash(cmdFile)
         env["VE_STATE"] = slash(stateFile)
         env["VE_CWD"] = slash(cwd)
         env["VE_CWD_OUT"] = slash(cwdFile)

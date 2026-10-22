@@ -70,6 +70,9 @@ class SessionTrace(
             "output_chunks" to pieces.size.takeIf { it > 0 },
             "client_id" to id,
             "client_at" to TraceJournal.UTC.format(at),
+            // Which OS and shell ran it: the same line can behave differently on each.
+            "client_os" to CLIENT_OS,
+            "shell" to rec.shell,
         )
         journal.append("terminal", id, gson.toJson(body + ("output" to output)), at)
         remaining[id] = AtomicInteger(1 + pieces.size)
@@ -154,6 +157,9 @@ class SessionTrace(
 
         /** ~/.veriexam/trace — one journal per session. */
         val TRACE_DIR = File(System.getProperty("user.home"), ".veriexam/trace")
+
+        /** e.g. "Windows 11 amd64", "Mac OS X aarch64". */
+        val CLIENT_OS = "${System.getProperty("os.name")} ${System.getProperty("os.arch")}"
 
         private fun newId() = UUID.randomUUID().toString()
     }

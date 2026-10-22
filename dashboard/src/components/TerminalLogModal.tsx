@@ -126,6 +126,7 @@ function CommandRow({ r }: { r: TerminalCommand }) {
           {eventTime(r)}
           {arrivedLate(r) && <span style={{ color: "#a16207" }} title={r.created_at}> · {t("arrivedLate")}</span>}
           {r.via === "export" && <span style={{ color: "#7c3aed" }}> · {t("fromExport")}</span>}
+          {r.client_os && <span title={r.shell ?? undefined}> · {r.client_os.split(" ")[0]}</span>}
         </span>
       </div>
       {r.reason && (

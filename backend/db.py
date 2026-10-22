@@ -319,6 +319,8 @@ def init_schema() -> None:
         _add_missing_columns(c, "terminal_commands", {
             "output_chars": "INTEGER",   # length of the full output
             "output_chunks": "INTEGER",  # how many terminal_output pieces it was sent in
+            "client_os": "TEXT",         # e.g. "Windows 11 amd64" (plugin 0.3.1+)
+            "shell": "TEXT",             # e.g. "BusyBox (bundled)"
         })
         # Need the columns above, so not in SCHEMA. Partial: old rows have no client_id.
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_terminal_client "

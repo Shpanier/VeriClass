@@ -172,6 +172,9 @@ export interface TerminalCommand {
   client_at?: string | null;
   via?: "live" | "export";
   created_at: string;
+  // Plugin 0.3.1+: which OS and shell ran the line (it can behave differently on each).
+  client_os?: string | null;
+  shell?: string | null;
 }
 
 export interface TerminalFullOutput {
@@ -210,6 +213,8 @@ export interface ExerciseSummary {
   source: "yaml" | "console";
   edited: boolean; // a built-in (yaml) exercise that a teacher has overridden
   is_active: boolean;
+  // Terminal commands that break on Windows or macOS (backend/portability.py).
+  os_errors?: number;
 }
 
 // The full exercise (GET /api/exercises/{id}) — used to prefill edit/duplicate.

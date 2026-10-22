@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from backend import db, terminal
+from backend import db, portability, terminal
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ def load_all(directory: Path) -> dict[str, dict[str, Any]]:
         data["edited"] = False
         data.setdefault("param_labels", [])
         data.setdefault("scaffold_filename", None)
+        _check_os(data)
         _LOADED[data["exercise_id"]] = data
         _YAML_IDS.add(data["exercise_id"])
     return _LOADED
@@ -50,7 +51,9 @@ def load_from_db() -> None:
             "FROM exercises"
         ).fetchall()
     for row in rows:
-        _LOADED[row["exercise_id"]] = _row_to_exercise(row)
+        ex = _row_to_exercise(row)
+        _check_os(ex)
+        _LOADED[row["exercise_id"]] = ex
 
 
 def _row_to_exercise(row: Any) -> dict[str, Any]:
@@ -77,6 +80,16 @@ def _row_to_exercise(row: Any) -> dict[str, Any]:
         "source": "yaml" if is_yaml else "console",
         "edited": is_yaml,
     }
+
+
+def _check_os(ex: dict[str, Any]) -> None:
+    """Attach the Windows/macOS differences of the exercise's terminal commands
+    (backend/portability.py) as ex["os_warnings"], and log the ones that break."""
+    allow = set(terminal.policy_for(ex)["allow"])
+    ex["os_warnings"] = portability.lint_exercise(ex, allow)
+    for w in ex["os_warnings"]:
+        if w["level"] == "error":
+            logger.warning("%s step %s: %s — %s", ex["exercise_id"], w["step"], w["line"], w["message"])
 
 
 def get(exercise_id: str) -> dict[str, Any]:
@@ -202,6 +215,7 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
         "source": "yaml" if is_yaml else "console",
         "edited": is_yaml,
     }
+    _check_os(stored)
     _LOADED[exercise_id] = stored
     return stored
 
