@@ -1,9 +1,11 @@
 import type { Student } from "../types";
-import { useLang } from "../i18n";
+import { alertTotal, needsAttention, STATE_STYLE } from "../proctor";
+import { useLang, type StringKey } from "../i18n";
 
 /**
  * Loud, sticky red bar that appears at the top of the dashboard whenever a
- * student is currently outside CLion, or has left it at least once this session.
+ * student needs attention right now (outside the IDE, another window open, not
+ * full screen, no signal), or has raised an alert at least once this session.
  * Each name is a button that opens that student's proctor log. The accompanying
  * alert sound is driven by App (so it fires once per new violation, not on
  * every render).
@@ -16,11 +18,13 @@ export function ProctorBanner({
   onInspect: (sessionId: string) => void;
 }) {
   const { t } = useLang();
-  const away = students.filter((s) => s.away);
-  const everLeft = students.filter((s) => s.focus_alerts > 0);
+  const away = students.filter(needsAttention);
+  const everLeft = students.filter((s) => alertTotal(s) > 0);
   if (away.length === 0 && everLeft.length === 0) return null;
 
   const totalAlerts = students.reduce((n, s) => n + s.focus_alerts, 0);
+  const totalBlocked = students.reduce((n, s) => n + (s.terminal_alerts ?? 0), 0);
+  const totalIde = students.reduce((n, s) => n + (s.ide_alerts ?? 0), 0);
 
   return (
     <div
@@ -43,11 +47,13 @@ export function ProctorBanner({
         </span>
         <strong style={{ fontSize: 16 }}>
           {away.length > 0
-            ? t("bannerOutside", { n: away.length })
+            ? t("bannerAttention", { n: away.length })
             : t("bannerViolations")}
         </strong>
         <span style={{ opacity: 0.9, fontSize: 13 }}>
           {t("bannerSummary", { leaves: totalAlerts, students: everLeft.length })}
+          {totalBlocked > 0 && <> {t("bannerBlocked", { n: totalBlocked })}</>}
+          {totalIde > 0 && <> {t("bannerIde", { n: totalIde })}</>}
         </span>
       </div>
 
@@ -67,7 +73,8 @@ export function ProctorBanner({
               cursor: "pointer",
             }}
           >
-            {s.away ? "🔴" : "⚠️"} {s.username} ({s.focus_alerts})
+            {needsAttention(s) && s.exam_state ? STATE_STYLE[s.exam_state].icon : "⚠️"} {s.username}
+            {needsAttention(s) && s.exam_state && <> · {t(`state_${s.exam_state}` as StringKey)}</>} ({alertTotal(s)})
           </button>
         ))}
       </div>

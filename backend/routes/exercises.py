@@ -3,7 +3,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from backend import deps, exercises, steps
+from backend import deps, exercises, steps, terminal
 from backend import params as param_utils
 
 router = APIRouter()
@@ -21,6 +21,8 @@ def active_exercise(variant: Optional[str] = None, user: dict = Depends(deps.cur
         "welcome_suggestions": ex.get("welcome_suggestions", []),
         "required_error_strings": ex.get("required_error_strings", []),
         "param_labels": ex.get("param_labels", []),
+        # What the plugin's VeriExam terminal lets this exercise run.
+        "terminal": terminal.policy_for(ex),
     }
     if deps.is_teacher(user):
         # The dashboard needs the whole variant set (or one, if asked).
@@ -80,6 +82,7 @@ def _full(ex: dict[str, Any]) -> dict[str, Any]:
         "required_error_strings": ex.get("required_error_strings", []),
         "param_labels": ex.get("param_labels", []),
         "scaffold_filename": ex.get("scaffold_filename"),
+        "terminal": ex.get("terminal"),
         "source": ex.get("source", "yaml"),
         "edited": ex.get("edited", False),
     }
@@ -127,6 +130,8 @@ class ExercisePayload(BaseModel):
     required_error_strings: list[str] = Field(default_factory=list)
     param_labels: list[ParamLabel] = Field(default_factory=list)
     scaffold_filename: Optional[str] = None
+    # Optional VeriExam-terminal rules (see backend/terminal.py).
+    terminal: Optional[dict[str, Any]] = None
 
 
 @router.post("/exercises")

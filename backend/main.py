@@ -28,6 +28,8 @@ from backend.routes import (
     steps as step_routes,
     students,
     submissions,
+    terminal as terminal_routes,
+    trace as trace_routes,
 )
 
 # Silence the noisy per-request access log (polling hits /api/students and
@@ -79,6 +81,8 @@ app.include_router(plugin.router, prefix="/api")
 app.include_router(grade.router, prefix="/api")
 app.include_router(files.router, prefix="/api")
 app.include_router(step_routes.router, prefix="/api")
+app.include_router(terminal_routes.router, prefix="/api")
+app.include_router(trace_routes.router, prefix="/api")
 
 
 @app.get("/healthz")

@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from backend import db
+from backend import db, terminal
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,7 @@ def _row_to_exercise(row: Any) -> dict[str, Any]:
         "language": extra.get("language"),
         "tutor_notes": extra.get("tutor_notes"),
         "steps": extra.get("steps"),
+        "terminal": extra.get("terminal"),
         # An edit of a built-in keeps the 'yaml' source but is flagged edited so
         # the dashboard can show "built-in (edited)".
         "source": "yaml" if is_yaml else "console",
@@ -135,7 +136,7 @@ def update(exercise_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     # Preserve fields the editor UI may not send. The dashboard form has no
     # scaffold_filename input, so a plain edit would otherwise wipe it (and with
     # it the exercise's language) — keep the current value when none is given.
-    for key in ("scaffold_filename", "course_name", "language", "tutor_notes", "steps"):
+    for key in ("scaffold_filename", "course_name", "language", "tutor_notes", "steps", "terminal"):
         if not payload.get(key):
             existing = _LOADED.get(exercise_id, {}).get(key)
             if existing:
@@ -160,6 +161,7 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
         "language": payload.get("language"),
         "tutor_notes": payload.get("tutor_notes"),
         "steps": payload.get("steps"),
+        "terminal": payload.get("terminal"),
     }
     with db.conn() as c:
         c.execute(
@@ -196,6 +198,7 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
         "language": data["language"],
         "tutor_notes": data["tutor_notes"],
         "steps": data["steps"],
+        "terminal": data["terminal"],
         "source": "yaml" if is_yaml else "console",
         "edited": is_yaml,
     }
@@ -273,6 +276,8 @@ def _validate(data: dict[str, Any], where: str) -> None:
 
     # scaffold_filename is optional; if given it selects the starter file (and,
     # via its extension, the language) the IDE plugin scaffolds for this exercise.
+    terminal.validate(data.get("terminal"), where)
+
     sf = data.get("scaffold_filename")
     if sf is not None:
         if not isinstance(sf, str) or not sf.strip() or "." not in sf:

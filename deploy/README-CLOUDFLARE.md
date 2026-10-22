@@ -4,7 +4,7 @@ Best **fallback when you cross ngrok's limits** — Cloudflare Tunnel has **no
 request or bandwidth cap**, so it handles 5–10+ polling students fine for free.
 
 ```
-student CLion plugin ──https──► your tunnel hostname ──► your laptop :8000
+student CLion plugin ──https──► your tunnel hostname ──► your laptop :8010 (BACKEND_PORT)
 ```
 
 Two modes — pick by whether you own a domain:

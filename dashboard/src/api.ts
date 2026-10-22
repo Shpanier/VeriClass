@@ -6,6 +6,7 @@ import type {
   GradeRecommendation,
   Lang,
   NewExercise,
+  Paste,
   PendingReview,
   ProbeSuggestion,
   ProctorEvent,
@@ -13,6 +14,9 @@ import type {
   StepChecksResponse,
   Student,
   Submission,
+  TerminalCommand,
+  TerminalFullOutput,
+  TraceVerifyResult,
 } from "./types";
 
 const TOKEN_KEY = "veriexam.teacher.token";
@@ -117,6 +121,17 @@ export const api = {
     j<SessionDetail>(`/api/students/${sessionId}/messages`),
   proctorEvents: (sessionId: string) =>
     j<ProctorEvent[]>(`/api/proctor/events?session_id=${encodeURIComponent(sessionId)}`),
+  terminalCommands: (sessionId: string) =>
+    j<TerminalCommand[]>(`/api/terminal/commands?session_id=${encodeURIComponent(sessionId)}`),
+  terminalOutput: (commandId: number) =>
+    j<TerminalFullOutput>(`/api/terminal/commands/${commandId}/output`),
+  pastes: (sessionId: string) =>
+    j<Paste[]>(`/api/proctor/pastes?session_id=${encodeURIComponent(sessionId)}`),
+  verifyTrace: (csv: string, importMissing: boolean) =>
+    j<TraceVerifyResult>("/api/trace/verify", {
+      method: "POST",
+      body: JSON.stringify({ csv, import_missing: importMissing }),
+    }),
   submissions: (sessionId: string) =>
     j<Submission[]>(`/api/submissions?session_id=${encodeURIComponent(sessionId)}`),
   // Recommended grade: fetch the current one, (re)compute, or override.

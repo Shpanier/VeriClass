@@ -14,6 +14,14 @@ CREATE TABLE IF NOT EXISTS users (
     created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Login tokens (bearer), kept so a backend restart doesn't log everyone out.
+CREATE TABLE IF NOT EXISTS auth_tokens (
+    token       TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
     id              TEXT PRIMARY KEY,
     user_id         INTEGER NOT NULL,
@@ -124,6 +132,17 @@ CREATE TABLE IF NOT EXISTS api_audit_log (
 -- possible cheating. 'kind' is one of:
 --   exam_started | focus_lost | minimized | fullscreen_exited
 --   | focus_regained | window_restored
+--   | blocked_command (a refused VeriExam-terminal line; written by the backend)
+--   | stock_terminal_opened (tried to open the IDE's own Terminal in exam mode)
+--   | fullscreen_restored
+--   | tool_window_opened (a panel outside the exam allowlist; already re-hidden)
+--   | other_window_opened | other_window_closed (a dialog or another project window)
+--   | file_opened (an editor tab; information, not an alert)
+--   | paste_external | paste_internal (written by the backend from POST /proctor/paste)
+-- client_id/client_at come from the plugin: client_id makes a retried report
+-- idempotent, client_at is when it happened on the student's machine (a report
+-- that waited in the plugin's outbox arrives later than created_at suggests).
+-- via is 'live', or 'export' for rows imported from a student's signed export.
 CREATE TABLE IF NOT EXISTS proctor_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id  TEXT NOT NULL,
@@ -154,11 +173,71 @@ CREATE TABLE IF NOT EXISTS submissions (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
+-- VeriExam terminal log: every line a student enters in the plugin's checked
+-- terminal, whether it ran or was refused. A refused line (allowed = 0, not a
+-- syntax error) is also written to proctor_events as 'blocked_command'.
+CREATE TABLE IF NOT EXISTS terminal_commands (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT NOT NULL,
+    line         TEXT NOT NULL,
+    cwd          TEXT,
+    allowed      INTEGER NOT NULL,  -- 1 ran, 0 refused by the plugin
+    reason       TEXT,              -- why it was refused
+    commands     TEXT,              -- JSON list of program names found in the line
+    syntax_error INTEGER NOT NULL DEFAULT 0,
+    exit_code    INTEGER,           -- NULL when it never ran
+    duration_ms  INTEGER,
+    output_tail  TEXT,              -- last few KB of output, ANSI codes stripped
+    created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
 -- Recommended grade for a session: one current recommendation per session,
 -- upserted when a teacher clicks "Recommend grade" on the dashboard. The blend
 -- is 0.3*correctness + 0.7*wise_use (correctness is deterministic from the
 -- submission's run_report; wise_use is the LLM judge of how well the student
 -- used the tutor). `override_grade` lets the teacher set the final number.
+-- Full output of a terminal command, in the pieces the plugin sent it in
+-- (terminal_commands.output_tail only keeps the end). Keyed by the command's
+-- client_id so a retried piece is stored once.
+CREATE TABLE IF NOT EXISTS terminal_output (
+    session_id  TEXT NOT NULL,
+    client_id   TEXT NOT NULL,
+    seq         INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (session_id, client_id, seq)
+);
+
+-- Every paste the exam client saw (editor, VeriExam terminal, chat box), with
+-- the text. source: 'outside' (the clipboard came from another app), 'ide'
+-- (copied inside the IDE), 'tutor' (a code block's Copy button in the chat).
+CREATE TABLE IF NOT EXISTS pastes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL,
+    client_id   TEXT,
+    target      TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    chars       INTEGER NOT NULL,
+    lines       INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    file        TEXT,
+    client_at   TEXT,
+    via         TEXT NOT NULL DEFAULT 'live',
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+-- The exam client's latest snapshot (sent with every heartbeat and on every
+-- change): focused, full screen, which panels / windows / editor tabs are open.
+-- One row per session; drives the live state on the dashboard grid.
+CREATE TABLE IF NOT EXISTS live_status (
+    session_id  TEXT PRIMARY KEY,
+    data        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
 CREATE TABLE IF NOT EXISTS grade_recommendations (
     session_id     TEXT PRIMARY KEY,
     submission_id  INTEGER,
@@ -180,6 +259,8 @@ CREATE INDEX IF NOT EXISTS idx_probes_session ON probes(session_id, status);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, last_active_at);
 CREATE INDEX IF NOT EXISTS idx_pending_reviews_status ON pending_reviews(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_proctor_session ON proctor_events(session_id, id);
+CREATE INDEX IF NOT EXISTS idx_terminal_session ON terminal_commands(session_id, id);
+CREATE INDEX IF NOT EXISTS idx_pastes_session ON pastes(session_id, id);
 """
 
 
@@ -210,7 +291,10 @@ def init_schema() -> None:
         c.executescript(SCHEMA)
         # Tiny migrations: CREATE IF NOT EXISTS won't add columns to a table
         # that already exists, so back-fill them on pre-existing DBs.
-        _add_missing_columns(c, "messages", {"answer_level": "TEXT"})
+        _add_missing_columns(c, "messages", {
+            "answer_level": "TEXT",
+            "via": "TEXT NOT NULL DEFAULT 'live'",  # 'export': imported from a student's signed export
+        })
         _add_missing_columns(c, "pending_reviews", {
             "variant_nudge_he": "TEXT",
             "variant_normal_he": "TEXT",
@@ -224,3 +308,22 @@ def init_schema() -> None:
             "compile_output": "TEXT",
             "run_report": "TEXT",
         })
+        # Per-session key the plugin signs its local trace with (student export).
+        _add_missing_columns(c, "sessions", {"trace_key": "TEXT"})
+        for table in ("terminal_commands", "proctor_events"):
+            _add_missing_columns(c, table, {
+                "client_id": "TEXT",
+                "client_at": "TEXT",
+                "via": "TEXT NOT NULL DEFAULT 'live'",
+            })
+        _add_missing_columns(c, "terminal_commands", {
+            "output_chars": "INTEGER",   # length of the full output
+            "output_chunks": "INTEGER",  # how many terminal_output pieces it was sent in
+        })
+        # Need the columns above, so not in SCHEMA. Partial: old rows have no client_id.
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_terminal_client "
+                  "ON terminal_commands(session_id, client_id) WHERE client_id IS NOT NULL")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_proctor_client "
+                  "ON proctor_events(session_id, client_id) WHERE client_id IS NOT NULL")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_pastes_client "
+                  "ON pastes(session_id, client_id) WHERE client_id IS NOT NULL")

@@ -11,16 +11,21 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import edu.jce.veriexam.api.VeriExamApiClient
 import edu.jce.veriexam.api.VeriExamApiException
+import edu.jce.veriexam.exam.PasteSources
+import edu.jce.veriexam.trace.SessionTrace
 import edu.jce.veriexam.util.MarkdownLite
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
+import java.awt.ComponentOrientation
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
+import java.awt.font.TextAttribute
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.AbstractAction
 import javax.swing.BorderFactory
@@ -47,6 +52,10 @@ class ChatPanel(
     private val token: String,
     private val sessionId: String,
     parent: Disposable,
+    /** The local journal (student export) gets every turn. */
+    private val trace: SessionTrace? = null,
+    /** Exam mode: called with the text of every paste into the input box. */
+    private val onPaste: ((String) -> Unit)? = null,
 ) : JPanel(BorderLayout()), Disposable {
 
     enum class Role(val label: String) { EXERCISE("📘 Exercise"), USER("You"), TUTOR("Tutor") }
@@ -61,7 +70,15 @@ class ChatPanel(
         isOpaque = false
         isVisible = false
     }
-    private val input = JBTextArea(3, 0).apply {
+    private val input = object : JBTextArea(3, 0) {
+        override fun paste() {
+            onPaste?.let { report ->
+                runCatching { CopyPasteManager.getInstance().getContents<String>(DataFlavor.stringFlavor) }
+                    .getOrNull()?.takeIf { it.isNotEmpty() }?.let(report)
+            }
+            super.paste()
+        }
+    }.apply {
         lineWrap = true
         wrapStyleWord = true
         border = JBUI.Borders.empty(4)
@@ -160,6 +177,7 @@ class ChatPanel(
         setBusy(true)
 
         val buffer = StringBuilder()
+        var failed = false
         // Re-render at most every 80 ms while tokens stream in.
         val render = Timer(80) { reply.setMarkdown(buffer.toString().ifBlank { "…" }); scrollToBottom() }
             .apply { isRepeats = false }
@@ -173,8 +191,10 @@ class ChatPanel(
                     }
                 }
             } catch (e: VeriExamApiException) {
+                failed = true
                 ApplicationManager.getApplication().invokeLater { buffer.append("\n\n⚠️ ${e.message}") }
             } catch (e: Exception) {
+                failed = true
                 ApplicationManager.getApplication().invokeLater {
                     buffer.append("\n\n⚠️ Could not reach the tutor. Is the backend running? (${e.message})")
                 }
@@ -184,6 +204,13 @@ class ChatPanel(
                     reply.setMarkdown(buffer.toString().ifBlank { "⚠️ No reply." })
                     scrollToBottom()
                     setBusy(false)
+                    trace?.let { t ->
+                        val answer = buffer.toString()
+                        ApplicationManager.getApplication().executeOnPooledThread {
+                            t.chat(fromStudent = true, text = text, delivered = !failed)
+                            if (answer.isNotBlank()) t.chat(fromStudent = false, text = answer, delivered = !failed)
+                        }
+                    }
                 }
             }
         }
@@ -276,8 +303,25 @@ class ChatPanel(
             putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, true)
             font = UIUtil.getLabelFont()
             val f = UIUtil.getLabelFont()
-            text = "<html><body style=\"font-family:${f.family};font-size:${f.size}pt;margin:0;\">" +
+            // Hebrew replies need a right-to-left base direction; otherwise the
+            // embedded English terms (df.shape, AttributeError) start each line
+            // and the Hebrew words around them come out in the wrong order.
+            val rtl = isMostlyHebrew(md)
+            if (rtl) {
+                componentOrientation = ComponentOrientation.RIGHT_TO_LEFT
+                document.putProperty(TextAttribute.RUN_DIRECTION, TextAttribute.RUN_DIRECTION_RTL)
+            }
+            val align = if (rtl) "text-align:right;" else ""
+            text = "<html><body style=\"font-family:${f.family};font-size:${f.size}pt;margin:0;$align\">" +
                 MarkdownLite.toHtml(md) + "</body></html>"
+        }
+
+        /** True when Hebrew letters dominate, ignoring `inline code` (identifiers are Latin). */
+        private fun isMostlyHebrew(md: String): Boolean {
+            val prose = md.replace(Regex("`[^`]*`"), "")
+            val hebrew = prose.count { it in '\u0590'..'\u05FF' }
+            val latin = prose.count { it in 'A'..'Z' || it in 'a'..'z' }
+            return hebrew > 0 && hebrew * 2 >= latin
         }
     }
 
@@ -300,6 +344,7 @@ class ChatPanel(
             val copy = JButton("Copy").apply {
                 toolTipText = "Copy this code"
                 addActionListener {
+                    PasteSources.noteCopy(code, "tutor")
                     CopyPasteManager.getInstance().setContents(StringSelection(code))
                     text = "Copied ✓"
                     Timer(1500) { text = "Copy" }.apply { isRepeats = false }.start()

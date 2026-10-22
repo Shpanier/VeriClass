@@ -12,7 +12,7 @@ caps you at **20,000 requests / month + 1 GB / month**. The plugin polls every
 If you outgrow it, switch to `deploy/README-CLOUDFLARE.md` (unmetered).
 
 ```
-student CLion plugin ──https──► your-domain.ngrok-free.app ──► your laptop :8000
+student CLion plugin ──https──► your-domain.ngrok-free.app ──► your laptop :8010 (BACKEND_PORT)
 ```
 
 ---

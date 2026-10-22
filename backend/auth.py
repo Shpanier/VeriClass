@@ -7,7 +7,9 @@ from backend import db
 
 # token -> {"id": int, "username": str, "role": str}. Role is cached on the
 # token so every authorized request avoids a DB round-trip; a role change needs
-# a re-login, which is fine for a lab-session tool.
+# a re-login, which is fine for a lab-session tool. Tokens are also stored in
+# auth_tokens, so restarting the backend mid-exam doesn't log every student out
+# (their queued reports, heartbeats and chat keep working).
 _SESSION_TOKENS: dict[str, dict] = {}
 _FAILED_ATTEMPTS: dict[str, list[float]] = defaultdict(list)  # ip -> [timestamps]
 _RATE_LIMIT_WINDOW = 60 * 5  # 5 min
@@ -29,17 +31,30 @@ def login_with_code(code: str, ip: str, allow_teacher: bool = True,
     if row["role"] == "teacher" and not allow_teacher:
         return {"blocked": True}
     token = secrets.token_urlsafe(24)
+    with db.conn() as c:
+        c.execute("INSERT INTO auth_tokens (token, user_id) VALUES (?, ?)", (token, row["id"]))
     _SESSION_TOKENS[token] = {"id": row["id"], "username": row["username"], "role": row["role"]}
     return {"token": token, "user_id": row["id"], "username": row["username"], "role": row["role"]}
 
 
 def user_for_token(token: str) -> Optional[dict]:
     """Full user record ({id, username, role}) for a bearer token, or None."""
-    return _SESSION_TOKENS.get(token)
+    rec = _SESSION_TOKENS.get(token)
+    if rec is None and token:
+        # Issued before a restart: load it once from the database.
+        with db.conn() as c:
+            row = c.execute(
+                "SELECT u.id, u.username, u.role FROM auth_tokens t JOIN users u ON u.id = t.user_id "
+                "WHERE t.token = ?",
+                (token,),
+            ).fetchone()
+        if row:
+            rec = _SESSION_TOKENS[token] = {"id": row["id"], "username": row["username"], "role": row["role"]}
+    return rec
 
 
 def user_id_for_token(token: str) -> Optional[int]:
-    rec = _SESSION_TOKENS.get(token)
+    rec = user_for_token(token)
     return rec["id"] if rec else None
 
 

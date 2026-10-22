@@ -17,6 +17,8 @@ data class SessionResponse(
     val exercise_id: String = "",
     val variant: String = "",
     val mode: String = "",
+    /** Signs this session's local trace (the student's export). Empty from older backends. */
+    val trace_key: String = "",
 )
 
 data class TestInput(
@@ -49,6 +51,14 @@ data class Exercise(
     val param_labels: List<ParamLabel> = emptyList(),
     /** Present when the active-exercise call is made with a ?variant= query. */
     val variant: Variant? = null,
+    /** What the VeriExam terminal allows for this exercise. Null from a backend without terminal support. */
+    val terminal: TerminalPolicyDto? = null,
+)
+
+/** The exercise's terminal rules: which programs may run, and whether student scripts may. */
+data class TerminalPolicyDto(
+    val allow: List<String> = emptyList(),
+    val scripts: Boolean = true,
 )
 
 data class Probe(
@@ -76,8 +86,10 @@ data class ClientConfig(
     val exam_mode: Boolean = false,
     /** Put the IDE in full screen at exam start and re-assert it on return. */
     val force_fullscreen: Boolean = false,
-    /** How often to ping the backend so a quiet exam student stays on the grid. */
-    val heartbeat_ms: Int = 30000,
+    /** How often to send the live status (also sent on every change). */
+    val heartbeat_ms: Int = 10000,
+    /** Exam: panels allowed besides the VeriExam chat and terminal (tool window ids, e.g. "Run"). */
+    val exam_allowed_tool_windows: List<String> = emptyList(),
     /** Dev-only: if the backend has DEV_AUTO_LOGIN_CODE set, the plugin auto-logs
      *  in with this. Empty in exam/production. Mirrors the Chainlit student app. */
     val dev_auto_login_code: String = "",

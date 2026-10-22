@@ -28,6 +28,8 @@ class ExamStartupActivity : ProjectActivity {
             if (project.isDisposed) return@invokeLater
             ToolWindowManager.getInstance(project).getToolWindow("VeriExam")?.activate(null)
             if (config.force_fullscreen) ExamFullScreen.enter(project)
+            // Only the exam panels before login too; reporting starts with the guard.
+            ExamPanelLock.hideAll(project, ExamPanelLock.allowedIds(config))
         }
     }
 }

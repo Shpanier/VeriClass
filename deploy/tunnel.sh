@@ -19,6 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONF="$SCRIPT_DIR/tunnel.conf"
 
+# Homebrew installs ngrok/cloudflared into /usr/local/bin (Intel) or
+# /opt/homebrew/bin (Apple Silicon); some shells don't have these on PATH.
+export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+
 WITH_BACKEND=0
 PROVIDER_OVERRIDE=""
 
@@ -41,7 +45,8 @@ say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m✖\033[0m %s\n' "$*" >&2; exit 1; }
 
 need() {
-  command -v "$1" >/dev/null 2>&1 || die "'$1' not installed. See deploy/README-${2}.md"
+  command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH ($PATH).
+   Install it (brew install $1) — see deploy/README-${2}.md"
 }
 
 # ── optionally start the backend ───────────────────────────────────────────
@@ -81,6 +86,8 @@ fi
 case "$PROVIDER" in
   ngrok)
     need ngrok NGROK
+    NGROK_DOMAIN="${NGROK_DOMAIN#https://}"; NGROK_DOMAIN="${NGROK_DOMAIN#http://}"
+    NGROK_DOMAIN="${NGROK_DOMAIN%/}"
     [[ "$NGROK_DOMAIN" == CHANGEME* ]] && die "Set NGROK_DOMAIN in deploy/tunnel.conf first."
     say "ngrok → https://$NGROK_DOMAIN  (forwarding to :$BACKEND_PORT)"
     say "Students' plugin must be packaged with: https://$NGROK_DOMAIN"

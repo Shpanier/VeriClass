@@ -17,7 +17,8 @@
 #  Server URL resolution (first hit wins):
 #    1) first non-flag argument
 #    2) $VERIEXAM_SERVER
-#    3) NGROK_DOMAIN from ../deploy/tunnel.conf
+#    3) the local backend (BACKEND_PORT in ../deploy/tunnel.conf), if running
+#    4) NGROK_DOMAIN from ../deploy/tunnel.conf
 #  Teacher code:  $VERIEXAM_TEACHER_CODE, else you're prompted (input hidden).
 # ─────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -44,10 +45,19 @@ esac
 if [[ -z "$SERVER" ]]; then
   SERVER="${VERIEXAM_SERVER:-}"
 fi
+# Teacher login is local-only by default (TEACHER_LOCAL_ONLY), so when the
+# backend runs on this machine, publish to it directly rather than through
+# the tunnel — the tunnel serves the same backend, so students see it anyway.
 if [[ -z "$SERVER" && -f ../deploy/tunnel.conf ]]; then
-  SERVER="$(sed -n 's/^NGROK_DOMAIN=//p' ../deploy/tunnel.conf | tr -d '[:space:]')"
+  PORT="$(sed -n 's/^BACKEND_PORT=//p' ../deploy/tunnel.conf | tr -d '[:space:]')"
+  if lsof -ti "tcp:${PORT:-8010}" >/dev/null 2>&1; then
+    SERVER="http://127.0.0.1:${PORT:-8010}"
+  else
+    SERVER="$(sed -n 's/^NGROK_DOMAIN=//p' ../deploy/tunnel.conf | tr -d '[:space:]')"
+  fi
 fi
 [[ -n "$SERVER" ]] || { echo "✖ No server URL. Pass one, set VERIEXAM_SERVER, or set NGROK_DOMAIN in deploy/tunnel.conf." >&2; exit 1; }
+[[ "$SERVER" == http*://* ]] || SERVER="https://$SERVER"  # tunnel.conf holds a bare host
 SERVER="${SERVER%/}"  # strip trailing slash
 
 # Build (bump version + gradle) unless told not to.
@@ -67,10 +77,11 @@ if [[ -z "$CODE" ]]; then
   read -r -s -p "Teacher login code: " CODE; echo
 fi
 NG_HDR='ngrok-skip-browser-warning: true'   # skip ngrok-free's interstitial page
-TOKEN="$(curl -s -X POST "$SERVER/api/login" \
+LOGIN="$(curl -s -X POST "$SERVER/api/login" \
   -H 'Content-Type: application/json' -H "$NG_HDR" \
-  -d "{\"code\":\"$CODE\"}" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
-[[ -n "$TOKEN" ]] || { echo "✖ Login failed — check the teacher code and server URL." >&2; exit 1; }
+  -d "{\"code\":\"$CODE\"}")"
+TOKEN="$(printf '%s' "$LOGIN" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+[[ -n "$TOKEN" ]] || { echo "✖ Login failed — check the teacher code and server URL. Server said: ${LOGIN:-<no response>}" >&2; exit 1; }
 
 RESP="$(curl -s -X POST \
   "$SERVER/api/plugin/publish?version=$VERSION&product=$PRODUCT&filename=$(basename "$ZIP")" \

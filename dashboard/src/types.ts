@@ -20,6 +20,76 @@ export interface Student {
   last_focus_kind: string | null;
   last_focus_at: string | null;
   away: boolean;
+  // VeriExam terminal: refused commands + attempts to open the IDE's own
+  // Terminal, and how many lines the student entered in total.
+  terminal_alerts?: number;
+  terminal_count?: number;
+  // Inside-the-IDE alerts: panels/windows that aren't allowed + pastes from outside.
+  ide_alerts?: number;
+  paste_count?: number;
+  // Live state from the exam client's status snapshot (see backend students.exam_state).
+  exam_state?: ExamState | null;
+  exam_state_detail?: string | null;
+  live?: LiveStatus | null;
+  live_age_s?: number | null;
+  last_alert_kind?: string | null;
+  last_alert_detail?: string | null;
+  last_alert_at?: string | null;
+}
+
+export type ExamState = "ok" | "away" | "other_window" | "not_fullscreen" | "no_signal";
+
+// What the exam client sends with every heartbeat and on every change.
+export interface LiveStatus {
+  focused?: boolean;
+  fullscreen?: boolean;
+  fullscreen_supported?: boolean;
+  tool_windows?: string[];
+  forbidden_tool_windows?: string[];
+  other_windows?: string[];
+  open_files?: string[];
+  active_file?: string | null;
+  violations?: number;
+  unsent_reports?: number;
+}
+
+// One paste the exam client saw (GET /api/proctor/pastes).
+export interface Paste {
+  id: number;
+  target: "editor" | "terminal" | "chat" | "other";
+  source: "outside" | "ide" | "tutor";
+  chars: number;
+  lines: number;
+  text: string;
+  file: string | null;
+  client_at: string | null;
+  via: "live" | "export";
+  created_at: string;
+}
+
+// POST /api/trace/verify: a student's exported log, checked.
+export interface TraceVerifyRow {
+  seq: number | null;
+  kind: string;
+  client_id: string;
+  at_utc: string;
+  valid: boolean;
+  on_server: boolean | null;
+  imported: boolean;
+  summary: string;
+}
+
+export interface TraceVerifyResult {
+  ok: boolean;
+  error: string | null;
+  session_id?: string;
+  student?: string | null;
+  complete?: boolean;
+  valid_rows?: number;
+  first_bad_seq?: number | null;
+  missing_on_server?: number;
+  imported?: number;
+  rows: TraceVerifyRow[];
 }
 
 // Exercise-level label for a variant param key (connects it to the exercise).
@@ -75,7 +145,41 @@ export interface ProctorEvent {
   kind: string;
   detail: string | null;
   away_ms: number | null;
+  // When it happened on the student's machine (a report can arrive late).
+  client_at?: string | null;
+  via?: "live" | "export";
   created_at: string;
+}
+
+// One line from a student's VeriExam terminal (GET /api/terminal/commands).
+export interface TerminalCommand {
+  id: number;
+  session_id: string;
+  line: string;
+  cwd: string | null;
+  // false = the plugin refused it; it never ran.
+  allowed: boolean;
+  reason: string | null;
+  commands: string[];
+  // Refused only because it didn't parse (unclosed quote) — not a violation.
+  syntax_error: boolean;
+  exit_code: number | null;
+  duration_ms: number | null;
+  output_tail: string | null;
+  // Full output, sent in pieces (GET /api/terminal/commands/{id}/output).
+  output_chars?: number | null;
+  output_chunks?: number | null;
+  client_at?: string | null;
+  via?: "live" | "export";
+  created_at: string;
+}
+
+export interface TerminalFullOutput {
+  output: string;
+  complete: boolean;
+  chunks: number;
+  expected_chunks: number;
+  chars: number | null;
 }
 
 export interface ActiveExercise {

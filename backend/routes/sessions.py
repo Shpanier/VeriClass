@@ -1,3 +1,4 @@
+import secrets
 import uuid
 from typing import Optional
 
@@ -11,6 +12,18 @@ router = APIRouter()
 
 class StartSessionRequest(BaseModel):
     exercise_id: Optional[str] = None  # defaults to the active exercise
+
+
+def _trace_key(c, session_id: str) -> str:
+    """The key the plugin signs this session's local trace with, so a student's
+    exported trace can be checked for edits (see backend/trace.py). Made on
+    first use, so sessions from before this column existed get one too."""
+    row = c.execute("SELECT trace_key FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    if row and row["trace_key"]:
+        return row["trace_key"]
+    key = secrets.token_hex(32)
+    c.execute("UPDATE sessions SET trace_key = ? WHERE id = ?", (key, session_id))
+    return key
 
 
 @router.post("/sessions")
@@ -42,13 +55,15 @@ def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_us
                 "exercise_id": exercise["exercise_id"],
                 "variant": existing["variant"],
                 "mode": existing["mode"],
+                "trace_key": _trace_key(c, existing["id"]),
             }
 
         session_id = str(uuid.uuid4())
         variant_id = variants.assign(exercise["exercise_id"])
+        trace_key = secrets.token_hex(32)
         c.execute(
-            "INSERT INTO sessions (id, user_id, exercise, mode, variant) VALUES (?, ?, ?, ?, ?)",
-            (session_id, user_id, exercise["exercise_id"], exercise["default_mode"], variant_id),
+            "INSERT INTO sessions (id, user_id, exercise, mode, variant, trace_key) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, user_id, exercise["exercise_id"], exercise["default_mode"], variant_id, trace_key),
         )
 
     return {
@@ -56,4 +71,5 @@ def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_us
         "exercise_id": exercise["exercise_id"],
         "variant": variant_id,
         "mode": exercise["default_mode"],
+        "trace_key": trace_key,
     }

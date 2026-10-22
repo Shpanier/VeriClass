@@ -17,7 +17,10 @@
         </ul>
         With <code>EXAM_MODE</code> on, the plugin also runs a proctored exam: CLion opens in full
         screen and any time you leave it (minimize, switch app, exit full screen) your instructor is
-        notified and you are warned to return.
+        notified and you are warned to return. Only the editor, the VeriExam chat and the
+        VeriExam Terminal are open; other panels and windows, and pastes from outside the IDE, are
+        reported too. "Export my log" saves a signed copy of everything sent, to hand in if the
+        network failed.
     ]]></description>
 
     <!-- CLion is built on the IntelliJ Platform; the plugin uses only platform + VFS APIs. -->
@@ -28,6 +31,13 @@
                     anchor="right"
                     icon="AllIcons.Toolwindows.ToolWindowMessages"
                     factoryClass="edu.jce.veriexam.ui.VeriExamToolWindowFactory"/>
+
+        <!-- The VeriExam terminal: every command is checked against the exercise's
+             rules and logged for the teacher. Bottom, where Terminal and Run live. -->
+        <toolWindow id="VeriExam Terminal"
+                    anchor="bottom"
+                    icon="AllIcons.Nodes.Console"
+                    factoryClass="edu.jce.veriexam.terminal.VeriExamTerminalToolWindowFactory"/>
 
         <applicationService serviceImplementation="edu.jce.veriexam.settings.VeriExamSettings"/>
 

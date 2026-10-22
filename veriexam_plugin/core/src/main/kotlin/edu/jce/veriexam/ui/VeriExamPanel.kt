@@ -20,11 +20,17 @@ import edu.jce.veriexam.ide.RunReporter
 import edu.jce.veriexam.ide.SubmissionCollector
 import edu.jce.veriexam.probe.ProbePoller
 import edu.jce.veriexam.settings.VeriExamSettings
+import edu.jce.veriexam.terminal.VeriExamSessionService
+import edu.jce.veriexam.trace.SessionTrace
+import com.intellij.openapi.fileChooser.FileChooserFactory
+import com.intellij.openapi.fileChooser.FileSaverDescriptor
+import com.intellij.openapi.vfs.VirtualFile
 import java.awt.BorderLayout
 import java.awt.FlowLayout
 import javax.swing.BorderFactory
 import javax.swing.JButton
 import javax.swing.JPanel
+import javax.swing.Timer
 
 /**
  * Root of the VeriExam tool window. Owns the login → session flow: authenticate,
@@ -119,18 +125,26 @@ class VeriExamPanel(
         Disposer.register(parent, sessionScope)
         sessionDisposable = sessionScope
 
+        // Journal + outbox for everything this session reports (terminal, exam
+        // events, pastes, chat), so the student can export it if it didn't arrive.
+        val trace = SessionTrace(api, login.token, session.session_id, login.username, session.trace_key, sessionScope)
+
         // North stack: an (initially hidden) exam warning banner above the header.
         // BorderLayout stretches both to the full tool-window width.
         val banner = ExamBanner()
         val north = JPanel(BorderLayout()).apply {
             add(banner, BorderLayout.NORTH)
-            add(header(login, session, config, exercise), BorderLayout.CENTER)
+            add(header(login, session, config, exercise, trace, sessionScope), BorderLayout.CENTER)
         }
         add(north, BorderLayout.NORTH)
 
+        // Pastes into the chat / terminal go to the exam guard, which exists only in exam mode.
+        var guard: ExamGuard? = null
+        val onPaste: (String, String) -> Unit = { target, text -> guard?.onPaste(target, text, null) }
+
         // One scrolling conversation: the exercise brief is the first message;
         // students scroll up to read it again.
-        val chat = ChatPanel(api, login.token, session.session_id, sessionScope)
+        val chat = ChatPanel(api, login.token, session.session_id, sessionScope, trace) { onPaste("chat", it) }
         chat.addMessage(ChatPanel.Role.EXERCISE, Briefing.markdown(exercise, session.variant))
         if (config.isIdeMode && exercise.variant != null) {
             chat.addComponent(TestChecklistPanel(exercise.variant))
@@ -145,12 +159,18 @@ class VeriExamPanel(
 
         ProbePoller(api, session.session_id, login.token, config.poll_interval_ms.toLong(), sessionScope)
 
+        // Start the VeriExam Terminal (bottom tool window) for this session; it
+        // shuts down with the session (re-login, project close).
+        val sessions = VeriExamSessionService.getInstance(project)
+        sessions.publish(VeriExamSessionService.Active(api, login.token, session.session_id, exercise, config, trace, onPaste))
+        Disposer.register(sessionScope) { if (!project.isDisposed) sessions.publish(null) }
+
         // Exam mode: arm the proctor (full screen + leave-the-IDE detection).
         // Scoped to sessionScope, so a re-login disposes it before re-arming —
         // no double-attached window listeners or duplicate full-screen watchdogs.
         if (config.isExamMode) {
-            ExamGuard(
-                project, api, session.session_id, login.token, config,
+            guard = ExamGuard(
+                project, api, trace, login.token, config,
                 onViolation = { count, reason -> banner.show(count, reason) },
                 parent = sessionScope,
             )
@@ -160,7 +180,14 @@ class VeriExamPanel(
         repaint()
     }
 
-    private fun header(login: LoginResponse, session: SessionResponse, config: ClientConfig, exercise: Exercise): JPanel {
+    private fun header(
+        login: LoginResponse,
+        session: SessionResponse,
+        config: ClientConfig,
+        exercise: Exercise,
+        trace: SessionTrace,
+        scope: Disposable,
+    ): JPanel {
         val modeTag = if (config.isIdeMode) "ide" else "chat"
         val label = JBLabel(
             "<html>👤 <b>${esc(login.username)}</b> &middot; variant <b>${esc(session.variant)}</b>" +
@@ -172,12 +199,18 @@ class VeriExamPanel(
                 JBUI.Borders.empty(6, 10),
             )
             add(label, BorderLayout.WEST)
-            add(submitControls(login, session, exercise), BorderLayout.EAST)
+            add(submitControls(login, session, exercise, trace, scope), BorderLayout.EAST)
         }
     }
 
-    /** "Send to teacher" button + a small status label, right-aligned in the header. */
-    private fun submitControls(login: LoginResponse, session: SessionResponse, exercise: Exercise): JPanel {
+    /** "Send to teacher" and "Export my log" buttons + a small status label, right-aligned in the header. */
+    private fun submitControls(
+        login: LoginResponse,
+        session: SessionResponse,
+        exercise: Exercise,
+        trace: SessionTrace,
+        scope: Disposable,
+    ): JPanel {
         val status = JBLabel("").apply {
             border = JBUI.Borders.emptyRight(8)
             foreground = JBColor.GRAY
@@ -189,10 +222,48 @@ class VeriExamPanel(
         button.addActionListener {
             sendToTeacher(login.token, session.session_id, testInputs, button, status)
         }
+        val export = JButton("💾 Export my log").apply {
+            toolTipText = "Save your terminal, chat and exam log as a CSV file to hand in if something didn't reach the teacher"
+            addActionListener { exportLog(trace, login.username, status) }
+        }
+        // Reports waiting for the server (network or tunnel down): tell the student, so they export.
+        val unsent = JBLabel("").apply { foreground = JBColor.ORANGE }
+        val timer = Timer(3_000) {
+            val n = trace.pending
+            unsent.text = if (n > 0) "⏳ $n not sent yet" else ""
+            unsent.toolTipText = if (n > 0) "No connection to the teacher's server. Keep working; it is retried. " +
+                "If it stays, use “Export my log” and hand in the file." else null
+        }.apply { start() }
+        Disposer.register(scope) { timer.stop() }
         return JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(4), 0)).apply {
             isOpaque = false
+            add(unsent)
             add(status)
+            add(export)
             add(button)
+        }
+    }
+
+    /** Save this session's journal as CSV wherever the student chooses. */
+    private fun exportLog(trace: SessionTrace, username: String, status: JBLabel) {
+        val day = java.time.LocalDate.now()
+        val name = "veriexam-log-${username.replace(Regex("[^\\p{L}\\p{N}_-]+"), "_")}-$day.csv"
+        val descriptor = FileSaverDescriptor("VeriExam — Export My Log", "Save your log as a CSV file to hand in", "csv")
+        val target = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, project)
+            .save(null as VirtualFile?, name)?.file ?: return
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val result = try {
+                target.outputStream().bufferedWriter(Charsets.UTF_8).use { trace.exportCsv(it) }
+                true to "✓ Saved ${target.name} (${trace.journal.rowCount()} rows)"
+            } catch (e: Exception) {
+                false to "⚠ Couldn't save: ${e.message}"
+            }
+            ApplicationManager.getApplication().invokeLater {
+                if (project.isDisposed) return@invokeLater
+                status.foreground = if (result.first) JBColor.namedColor("Label.successForeground", JBColor.GREEN) else JBColor.RED
+                status.text = result.second
+                status.toolTipText = target.absolutePath
+            }
         }
     }
 

@@ -33,6 +33,20 @@ PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5-5")
 
 
+class _ClaudeLLM(LLM):
+    """Claude LLM whose structured output skips forced tool calls.
+
+    With function calling on, CrewAI turns `output_pydantic` into an instructor
+    call that sends `tool_choice: {"type": "tool"}`, which current Claude models
+    (Sonnet 5.5, Opus 5.5) reject with a 400. Reporting no function calling makes
+    CrewAI ask for plain JSON and parse it instead. The agents here use no tools,
+    so nothing else changes.
+    """
+
+    def supports_function_calling(self) -> bool:
+        return False
+
+
 def _api_key() -> str:
     env = "ANTHROPIC_API_KEY" if PROVIDER == "anthropic" else "GEMINI_API_KEY"
     key = os.environ.get(env, "")
@@ -56,8 +70,8 @@ def gemini_llm(
     tmo = timeout if timeout is not None else float(_config().get("timeout_sec", 30))
     if PROVIDER == "anthropic":
         # Current Claude models reject `temperature`, so it is not sent.
-        return LLM(model=f"anthropic/{CLAUDE_MODEL}", api_key=_api_key(),
-                   timeout=tmo, max_tokens=4096)
+        return _ClaudeLLM(model=f"anthropic/{CLAUDE_MODEL}", api_key=_api_key(),
+                          timeout=tmo, max_tokens=4096)
     name = model or _config().get("model") or DEFAULT_MODEL
     return LLM(
         model=f"gemini/{name}",

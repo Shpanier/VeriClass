@@ -197,31 +197,23 @@ class VeriExamApiClient {
     // --- exam / proctor ---------------------------------------------------
 
     /**
-     * Fire-and-forget report that the student left (or returned to) the IDE.
-     * Deliberately swallows every error: exam telemetry must never break the
-     * student's session or surface a dialog. Call off the EDT.
+     * POST one queued report (proctor event, terminal line or output piece,
+     * paste) and return the HTTP status. Throws on a network failure, so the
+     * outbox ([edu.jce.veriexam.trace.ReportOutbox]) knows to retry. Call off the EDT.
      */
-    fun reportProctorEvent(
-        sessionId: String,
-        kind: String,
-        token: String,
-        detail: String? = null,
-        awayMs: Long? = null,
-    ) {
-        try {
-            val body = mutableMapOf<String, Any>("session_id" to sessionId, "kind" to kind)
-            if (!detail.isNullOrBlank()) body["detail"] = detail
-            if (awayMs != null) body["away_ms"] = awayMs
-            sendJson("POST", "/api/proctor/event", body = body, token = token)
-        } catch (e: Exception) {
-            thisLogger().debug("proctor event report failed", e)
-        }
-    }
+    fun postReport(path: String, body: Map<String, Any?>, token: String): Int =
+        sendJson("POST", path, body = body.filterValues { it != null }, token = token).statusCode()
 
-    /** Cheap keep-alive so a quiet exam student stays on the live grid. */
-    fun proctorHeartbeat(sessionId: String, token: String) {
+    /**
+     * Keep-alive carrying the exam client's live status (focused, full screen,
+     * open panels / windows / tabs) for the dashboard grid. Fire-and-forget: a
+     * missed one only shows as "no signal" until the next. Call off the EDT.
+     */
+    fun proctorHeartbeat(sessionId: String, token: String, status: Map<String, Any?>? = null) {
         try {
-            sendJson("POST", "/api/proctor/heartbeat", body = mapOf("session_id" to sessionId), token = token)
+            val body = mutableMapOf<String, Any>("session_id" to sessionId)
+            if (status != null) body["status"] = status
+            sendJson("POST", "/api/proctor/heartbeat", body = body, token = token)
         } catch (e: Exception) {
             thisLogger().debug("proctor heartbeat failed", e)
         }

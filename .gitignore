@@ -33,3 +33,10 @@ tests/test_grading.py
 # Private: not for the public repo
 crewaiagentsmemory.bundle
 OS_Lab_HE.pptx
+
+# VeriExam terminal: BusyBox binaries fetched by veriexam_plugin/packaging/fetch_busybox.sh
+veriexam_plugin/busybox/
+
+# Local secrets backups and tunnel logs
+.env.backup*
+deploy/logs/

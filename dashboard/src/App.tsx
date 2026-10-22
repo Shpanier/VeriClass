@@ -8,11 +8,13 @@ import { ChatViewModal } from "./components/ChatViewModal";
 import { ProctorBanner } from "./components/ProctorBanner";
 import { ProctorLogModal } from "./components/ProctorLogModal";
 import { SubmissionsModal } from "./components/SubmissionsModal";
+import { TerminalLogModal } from "./components/TerminalLogModal";
+import { VerifyTraceModal } from "./components/VerifyTraceModal";
 import { ReviewQueue } from "./components/ReviewQueue";
 import { StepChecks } from "./components/StepChecks";
 import { LoginGate } from "./components/LoginGate";
 import { ExercisesPanel } from "./components/ExercisesPanel";
-import { alertBeep, primeAudio } from "./proctor";
+import { alertBeep, alertTotal, needsAttention, primeAudio } from "./proctor";
 import { LanguageToggle, useLang } from "./i18n";
 
 type Tab = "monitor" | "exercises";
@@ -27,6 +29,8 @@ export function App() {
   const [viewingSessionId, setViewingSessionId] = useState<string | null>(null);
   const [proctorSessionId, setProctorSessionId] = useState<string | null>(null);
   const [submissionsSessionId, setSubmissionsSessionId] = useState<string | null>(null);
+  const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
 
   const refreshActiveExercise = () =>
     api.activeExercise().then(setExercise).catch(console.error);
@@ -61,15 +65,20 @@ export function App() {
     };
   }, []);
 
-  // Sound the alarm when any student's leave-count rises between polls. Seeded
-  // on the first load so pre-existing alerts don't beep on open.
-  const prevAlerts = useRef<Map<string, number> | null>(null);
+  // Sound the alarm when any student's alert count (leaving the IDE, a refused
+  // terminal command, another panel/window, a paste from outside) rises between
+  // polls, or their live state turns bad (e.g. no signal, which isn't an event).
+  // Seeded on the first load so pre-existing alerts don't beep on open.
+  const prevAlerts = useRef<Map<string, { n: number; bad: boolean }> | null>(null);
   useEffect(() => {
-    const current = new Map(students.map((s) => [s.session_id, s.focus_alerts]));
+    const current = new Map(
+      students.map((s) => [s.session_id, { n: alertTotal(s), bad: needsAttention(s) }]),
+    );
     const prev = prevAlerts.current;
     if (prev) {
-      for (const [id, n] of current) {
-        if (n > (prev.get(id) ?? 0)) {
+      for (const [id, now] of current) {
+        const before = prev.get(id);
+        if (now.n > (before?.n ?? 0) || (now.bad && before && !before.bad)) {
           alertBeep();
           break;
         }
@@ -82,6 +91,7 @@ export function App() {
   const viewingTarget = students.find((s) => s.session_id === viewingSessionId) ?? null;
   const proctorTarget = students.find((s) => s.session_id === proctorSessionId) ?? null;
   const submissionsTarget = students.find((s) => s.session_id === submissionsSessionId) ?? null;
+  const terminalTarget = students.find((s) => s.session_id === terminalSessionId) ?? null;
 
   if (!authed) return <LoginGate onLoggedIn={() => setAuthed(true)} />;
 
@@ -98,6 +108,13 @@ export function App() {
       }}>
         <strong style={{ fontSize: 18 }}>{t("appTitle")}</strong>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={() => setVerifying(true)}
+            style={{ padding: "6px 12px", border: "1px solid #d1d5db", borderRadius: 6,
+                     background: "white", cursor: "pointer", fontSize: 13 }}
+          >
+            {t("verifyLog")}
+          </button>
           <LanguageToggle />
           <button
             onClick={signOut}
@@ -127,6 +144,7 @@ export function App() {
             onViewChat={(id) => setViewingSessionId(id)}
             onProctorLog={(id) => setProctorSessionId(id)}
             onViewSubmissions={(id) => setSubmissionsSessionId(id)}
+            onTerminalLog={(id) => setTerminalSessionId(id)}
           />
         </>
       )}
@@ -156,6 +174,10 @@ export function App() {
       {submissionsTarget && (
         <SubmissionsModal student={submissionsTarget} onClose={() => setSubmissionsSessionId(null)} />
       )}
+      {terminalTarget && (
+        <TerminalLogModal student={terminalTarget} onClose={() => setTerminalSessionId(null)} />
+      )}
+      {verifying && <VerifyTraceModal onClose={() => setVerifying(false)} />}
     </div>
   );
 }

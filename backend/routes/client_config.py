@@ -48,8 +48,13 @@ def client_config():
       force_fullscreen — the plugin puts CLion in full screen at exam start and
                         re-asserts it if the student leaves. Defaults to
                         whatever exam_mode is; override with FULLSCREEN.
-      heartbeat_ms    — how often the plugin pings the backend to stay on the
-                        live grid during a quiet exam.
+      heartbeat_ms    — how often the plugin sends its live status (focused,
+                        full screen, open panels/windows/tabs); it also sends one
+                        on every change. HEARTBEAT_MS in .env, default 10 s.
+      exam_allowed_tool_windows — panels allowed during the exam besides the
+                        VeriExam chat and the VeriExam Terminal (every other one
+                        is closed and reported). EXAM_ALLOWED_TOOL_WINDOWS in
+                        .env, comma-separated tool window ids, e.g. "Run".
     """
     mode = os.environ.get("STUDENT_CLIENT_MODE", "chat").strip().lower()
     if mode not in _VALID_MODES:
@@ -75,7 +80,10 @@ def client_config():
         "poll_interval_ms": _envint("POLL_INTERVAL_MS", 2000, minimum=500),
         "exam_mode": exam_mode,
         "force_fullscreen": force_fullscreen,
-        "heartbeat_ms": 30000,
+        "heartbeat_ms": _envint("HEARTBEAT_MS", 10000, minimum=5000),
+        "exam_allowed_tool_windows": [
+            w.strip() for w in os.environ.get("EXAM_ALLOWED_TOOL_WINDOWS", "").split(",") if w.strip()
+        ],
         # Dev convenience: hand the plugin a code to auto-login with, so it needs
         # no per-machine setup — the same DEV_AUTO_LOGIN_CODE the Chainlit student
         # app uses. Empty (the default) in exam/production, so auto-login is off
