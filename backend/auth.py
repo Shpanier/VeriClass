@@ -1,3 +1,4 @@
+import os
 import secrets
 import time
 from collections import defaultdict
@@ -14,6 +15,9 @@ _SESSION_TOKENS: dict[str, dict] = {}
 _FAILED_ATTEMPTS: dict[str, list[float]] = defaultdict(list)  # ip -> [timestamps]
 _RATE_LIMIT_WINDOW = 60 * 5  # 5 min
 _RATE_LIMIT_MAX = 4
+# A whole class shares the college's outgoing IP, so a few typos would lock
+# everyone out. Off unless LOGIN_RATE_LIMIT=true.
+_RATE_LIMIT_ON = os.environ.get("LOGIN_RATE_LIMIT", "false").strip().lower() in ("1", "true", "yes", "on")
 
 
 def login_with_code(code: str, password: str, ip: str, allow_teacher: bool = True,
@@ -21,6 +25,7 @@ def login_with_code(code: str, password: str, ip: str, allow_teacher: bool = Tru
     """Log in with a login code and its password (backend/passwords.py). None
     for an unknown code or a wrong password: both count toward the rate limit,
     and the caller can't tell which one it was."""
+    rate_limit = rate_limit and _RATE_LIMIT_ON
     if rate_limit and _is_rate_limited(ip):
         return {"rate_limited": True}
     with db.conn() as c:
