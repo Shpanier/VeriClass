@@ -207,6 +207,38 @@ sqlite3 veriexam.db "SELECT username, login_code FROM users WHERE role='teacher'
 Only a `role=teacher` account can open the **Exercises** tab and author new
 exercises, switch a student's persona, or toggle review mode.
 
+### Passwords
+
+Everyone logs in with a **username** (the login code) and a **password**. Until
+you set one, the password is the username itself, in any case: nothing has to be
+handed out. A password you set is stored only as a salted PBKDF2 hash and is
+case-sensitive. Set or reset passwords in the dashboard (**Courses** tab,
+*Passwords*), or from the command line:
+
+```bash
+python scripts/set_password.py yossico            # asks for the new password
+python scripts/set_password.py yossico --reset    # back to the username
+```
+
+The password is required: plugins before 0.4.0 can't send one, so their users are
+told to update the plugin.
+
+### Courses
+
+A student can be in several courses, and a course can offer several exercises.
+In the dashboard's **Courses** tab, create a course, tick the exercises students
+may open, pick the **default** (preselected) one, and tick its students.
+`add_students.py --course devops-2026` adds new students straight to a course.
+
+After logging in, a student picks a course, then one of its exercises. With one
+course offering one exercise there is nothing to pick, and the exercise opens
+directly. A student who is in no course gets the active exercise from the
+**Exercises** tab, as before courses existed.
+
+The web app (Chainlit) asks for the username and password in the chat. Set
+`CHAINLIT_AUTH_SECRET` (from `chainlit create-secret`) to get Chainlit's own login
+page instead, with a hidden password field.
+
 ---
 
 ## Launching everything — `scripts/dev_up.sh`
@@ -279,7 +311,8 @@ A 90-minute lab session, end to end:
 
 What the student sees:
 
-1. Enter login code → assigned a variant of the active exercise.
+1. Enter username and password → pick a course and exercise (skipped when
+   there is only one) → assigned a variant of that exercise.
 2. Receive a briefing bubble: exercise title, their personalized
    parameters, their test inputs, current mode.
 3. Welcome suggestions appear as clickable chips (configurable per

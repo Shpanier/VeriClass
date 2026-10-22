@@ -96,7 +96,7 @@ def client():
 
 
 def _login(tc, code):
-    return {"Authorization": f"Bearer {tc.post('/api/login', json={'code': code}).json()['token']}"}
+    return {"Authorization": f"Bearer {tc.post('/api/login', json={'code': code, 'password': code}).json()['token']}"}
 
 
 def test_teacher_sees_os_warnings(client):

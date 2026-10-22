@@ -312,3 +312,24 @@ export interface StepChecksResponse {
   has_steps: boolean;
   items: StepCheck[];
 }
+
+// A course (GET /api/courses): who is in it, which exercises it offers, and the
+// one preselected for students after login (backend/courses.py).
+export interface Course {
+  course_id: string;
+  name: string;
+  default_exercise: string | null;
+  exercises: string[];
+  members: number[]; // user ids
+}
+
+// One account (GET /api/users). custom_password is false while the password is
+// still the login code.
+export interface UserAccount {
+  id: number;
+  username: string;
+  login_code: string;
+  role: "student" | "teacher";
+  custom_password: boolean;
+  courses: string[];
+}

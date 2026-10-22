@@ -2,6 +2,7 @@ package edu.jce.veriexam.ui
 
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
+import com.intellij.ui.components.JBPasswordField
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import java.awt.GridBagConstraints
@@ -12,10 +13,12 @@ import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.SwingConstants
 
-/** First screen: enter the course login code. */
-class LoginPanel(private val onSubmit: (String) -> Unit) : JPanel(GridBagLayout()) {
+/** First screen: username (the login code) and password. Until the teacher sets
+ *  a password, it is the username. */
+class LoginPanel(private val onSubmit: (code: String, password: String) -> Unit) : JPanel(GridBagLayout()) {
 
     private val codeField = JBTextField(16)
+    private val passwordField = JBPasswordField().apply { columns = 16 }
     private val button = JButton("Log in")
     private val status = JBLabel("").apply {
         foreground = JBColor.RED
@@ -34,31 +37,42 @@ class LoginPanel(private val onSubmit: (String) -> Unit) : JPanel(GridBagLayout(
 
         add(JBLabel("🎓 Welcome to VeriExam").apply { horizontalAlignment = SwingConstants.CENTER }, c)
         c.gridy++
-        add(JBLabel("Enter your login code to begin:").apply { horizontalAlignment = SwingConstants.CENTER }, c)
+        add(JBLabel("Username:"), c)
         c.gridy++
         add(codeField, c)
+        c.gridy++
+        add(JBLabel("Password (at first, your username):"), c)
+        c.gridy++
+        add(passwordField, c)
         c.gridy++
         add(button, c)
         c.gridy++
         add(status, c)
 
         button.addActionListener { fire() }
-        codeField.addActionListener { fire() }
+        codeField.addActionListener { passwordField.requestFocusInWindow() }
+        passwordField.addActionListener { fire() }
     }
 
     private fun fire() {
         val code = codeField.text.trim()
+        val password = String(passwordField.password)
         if (code.isEmpty()) {
-            setError("Please type your login code.")
+            setError("Please type your username.")
+            return
+        }
+        if (password.isEmpty()) {
+            setError("Please type your password.")
             return
         }
         setBusy(true)
-        onSubmit(code)
+        onSubmit(code, password)
     }
 
     fun setBusy(busy: Boolean) {
         button.isEnabled = !busy
         codeField.isEnabled = !busy
+        passwordField.isEnabled = !busy
         button.text = if (busy) "Logging in…" else "Log in"
         if (busy) status.text = " "
     }

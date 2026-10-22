@@ -12,10 +12,6 @@ router = APIRouter()
 
 @router.get("/step-checks/pending")
 def pending_step_checks(teacher: dict = Depends(deps.require_teacher)):
-    try:
-        active = exercises.active()
-    except Exception:
-        active = None
     with db.conn() as c:
         rows = c.execute(
             "SELECT sc.*, u.username, s.exercise FROM step_checks sc "
@@ -38,7 +34,19 @@ def pending_step_checks(teacher: dict = Depends(deps.require_teacher)):
             "expected": step.get("expected", ""),
             "created_at": r["created_at"],
         })
-    return {"has_steps": bool(steps.steps_of(active)), "items": items}
+    # Show the panel when any exercise students can open has steps: the global
+    # active one, or one offered in a course.
+    offered = {c["exercise_id"] for c in _offered()}
+    has_steps = bool(items) or any(steps.steps_of(ex) for ex in exercises.all()
+                                   if ex["exercise_id"] in offered)
+    return {"has_steps": has_steps, "items": items}
+
+
+def _offered() -> list[dict]:
+    rows = [{"exercise_id": exercises.active_id()}] if exercises.all() else []
+    with db.conn() as c:
+        rows += [dict(r) for r in c.execute("SELECT DISTINCT exercise_id FROM course_exercises")]
+    return rows
 
 
 class Decision(BaseModel):

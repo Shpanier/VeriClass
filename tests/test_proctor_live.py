@@ -37,7 +37,7 @@ def client():
 
 
 def _hdr(tc, code):
-    r = tc.post("/api/login", json={"code": code})
+    r = tc.post("/api/login", json={"code": code, "password": code})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['token']}"}
 

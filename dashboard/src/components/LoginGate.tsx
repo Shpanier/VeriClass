@@ -18,15 +18,17 @@ const DEV_CODE = import.meta.env.DEV
 // it authenticates, because every dashboard endpoint requires require_teacher.
 export function LoginGate({ onLoggedIn }: Props) {
   const [code, setCode] = useState(DEV_CODE);
+  // Until the teacher sets a password, it is the login code (backend/passwords.py).
+  const [password, setPassword] = useState(DEV_CODE);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const attempt = useCallback(
-    async (raw: string) => {
+    async (raw: string, pass: string) => {
       setError(null);
       setBusy(true);
       try {
-        const res = await login(raw.trim().toUpperCase());
+        const res = await login(raw.trim().toUpperCase(), pass);
         if (res.role !== "teacher") {
           setError("That code isn't an instructor account.");
           return;
@@ -35,7 +37,7 @@ export function LoginGate({ onLoggedIn }: Props) {
         onLoggedIn();
       } catch (err) {
         setError(err instanceof Error && err.message === "bad-code"
-          ? "Code not recognized."
+          ? "Wrong code or password."
           : "Login failed — is the backend running?");
       } finally {
         setBusy(false);
@@ -49,13 +51,13 @@ export function LoginGate({ onLoggedIn }: Props) {
   useEffect(() => {
     if (DEV_CODE && !autoTried.current) {
       autoTried.current = true;
-      attempt(DEV_CODE);
+      attempt(DEV_CODE, DEV_CODE);
     }
   }, [attempt]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    attempt(code);
+    attempt(code, password);
   };
 
   return (
@@ -73,6 +75,16 @@ export function LoginGate({ onLoggedIn }: Props) {
           dir="auto"
           onChange={(e) => setCode(e.target.value)}
           placeholder="e.g. TEACH-01"
+          aria-label="Instructor code"
+          style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 15 }}
+        />
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password (at first: your code)"
+          aria-label="Password"
+          autoComplete="current-password"
           style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 15 }}
         />
         {DEV_CODE && (
@@ -84,7 +96,7 @@ export function LoginGate({ onLoggedIn }: Props) {
         {error && <span style={{ color: "#b91c1c", fontSize: 13 }}>{error}</span>}
         <button
           type="submit"
-          disabled={busy || !code.trim()}
+          disabled={busy || !code.trim() || !password}
           style={{ padding: "8px 16px", borderRadius: 6, border: "none", cursor: "pointer",
                    background: "#111827", color: "white", fontWeight: 600 }}
         >

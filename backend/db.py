@@ -49,6 +49,31 @@ CREATE TABLE IF NOT EXISTS system_settings (
     value TEXT NOT NULL
 );
 
+-- Courses (backend/courses.py). A student can be in several courses; each
+-- course offers some exercises (course_exercises) and preselects one of them
+-- (default_exercise). Students pick a course, then an exercise, after login.
+CREATE TABLE IF NOT EXISTS courses (
+    course_id         TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    default_exercise  TEXT,
+    created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS course_exercises (
+    course_id    TEXT NOT NULL,
+    exercise_id  TEXT NOT NULL,
+    PRIMARY KEY (course_id, exercise_id),
+    FOREIGN KEY (course_id) REFERENCES courses(course_id)
+);
+
+CREATE TABLE IF NOT EXISTS course_members (
+    course_id  TEXT NOT NULL,
+    user_id    INTEGER NOT NULL,
+    PRIMARY KEY (course_id, user_id),
+    FOREIGN KEY (course_id) REFERENCES courses(course_id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
 -- Teacher-authored exercises. Bundled exercises still live as YAML under
 -- config/exercises/; these are the ones created from the instructor console.
 -- Top-level fields mirror the YAML; variants + optional lists are kept in the
@@ -309,7 +334,12 @@ def init_schema() -> None:
             "run_report": "TEXT",
         })
         # Per-session key the plugin signs its local trace with (student export).
-        _add_missing_columns(c, "sessions", {"trace_key": "TEXT"})
+        _add_missing_columns(c, "sessions", {
+            "trace_key": "TEXT",
+            "course_id": "TEXT",  # the course the student picked (NULL: no courses set up)
+        })
+        # NULL = the password is still the login code (backend/passwords.py).
+        _add_missing_columns(c, "users", {"password_hash": "TEXT"})
         for table in ("terminal_commands", "proctor_events"):
             _add_missing_columns(c, table, {
                 "client_id": "TEXT",

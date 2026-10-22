@@ -3,7 +3,7 @@ import time
 from collections import defaultdict
 from typing import Optional
 
-from backend import db
+from backend import db, passwords
 
 # token -> {"id": int, "username": str, "role": str}. Role is cached on the
 # token so every authorized request avoids a DB round-trip; a role change needs
@@ -16,15 +16,19 @@ _RATE_LIMIT_WINDOW = 60 * 5  # 5 min
 _RATE_LIMIT_MAX = 4
 
 
-def login_with_code(code: str, ip: str, allow_teacher: bool = True,
+def login_with_code(code: str, password: str, ip: str, allow_teacher: bool = True,
                     rate_limit: bool = True) -> Optional[dict]:
+    """Log in with a login code and its password (backend/passwords.py). None
+    for an unknown code or a wrong password: both count toward the rate limit,
+    and the caller can't tell which one it was."""
     if rate_limit and _is_rate_limited(ip):
         return {"rate_limited": True}
     with db.conn() as c:
         row = c.execute(
-            "SELECT id, username, role FROM users WHERE login_code = ?", (code,)
+            "SELECT id, username, role, login_code, password_hash FROM users WHERE login_code = ?",
+            (code,),
         ).fetchone()
-    if not row:
+    if not row or not passwords.verify(password, row["password_hash"], row["login_code"]):
         if rate_limit:
             _FAILED_ATTEMPTS[ip].append(time.time())
         return None

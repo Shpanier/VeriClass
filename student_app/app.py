@@ -17,66 +17,138 @@ for noisy in ("httpx", "httpcore", "socketio", "engineio", "asyncio", "watchfile
 log = logging.getLogger("veriexam.student")
 
 
-@cl.on_chat_start
-async def on_chat_start():
-    """Show login prompt, then briefing bubble once authenticated."""
-    dev_code = os.environ.get("DEV_AUTO_LOGIN_CODE", "").strip().upper()
-    if dev_code:
-        code = dev_code
-        await cl.Message(content=f"🛠️ Dev mode: auto-login with `{code}`.").send()
-    else:
-        res = await cl.AskUserMessage(
-            content="🎓 Welcome to VeriExam. Enter your login code to begin.",
-            timeout=600,
-        ).send()
-        code = (res or {}).get("output", "").strip().upper()
-        if not code:
-            await cl.Message(content="No code received. Refresh the page to try again.").send()
-            return
+# With CHAINLIT_AUTH_SECRET set (make one with `chainlit create-secret`), Chainlit
+# shows its own login page, with a hidden password field. Without it, the chat
+# asks for the username and then the password (typed in plain sight).
+AUTH_PAGE = bool(os.environ.get("CHAINLIT_AUTH_SECRET", "").strip())
 
-    # The dev launcher starts the backend, this app, and the browser at once, so
-    # on a fresh boot our first request can beat uvicorn to the port. Retry a few
-    # times with backoff instead of dead-ending the student on a transient miss.
-    login = None
+
+async def _login(code: str, password: str):
+    """POST /api/login. The dev launcher starts the backend, this app, and the
+    browser at once, so on a fresh boot our first request can beat uvicorn to
+    the port: retry a few times with backoff. None when the server is unreachable."""
     for attempt in range(5):
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                login = await client.post(f"{BACKEND}/api/login", json={"code": code})
-            break
+                return await client.post(f"{BACKEND}/api/login", json={"code": code, "password": password})
         except httpx.HTTPError as e:
             log.warning("login request failed (attempt %d/5): %s", attempt + 1, e)
-            if attempt == 0:
-                await cl.Message(content="⏳ Waiting for the lab server to start…").send()
             await asyncio.sleep(1.5)
-    if login is None:
+    return None
+
+
+if AUTH_PAGE:
+    @cl.password_auth_callback
+    async def auth_callback(username: str, password: str):
+        r = await _login(username.strip().upper(), password)
+        if r is None or r.status_code != 200:
+            return None
+        return cl.User(identifier=username.strip().lower(), metadata={"login": r.json()})
+
+
+async def _prompt(text: str, timeout: int = 600) -> str:
+    res = await cl.AskUserMessage(content=text, timeout=timeout).send()
+    return (res or {}).get("output", "").strip()
+
+
+async def _chat_login():
+    """Login inside the chat (no Chainlit login page). The login response, or None."""
+    dev_code = os.environ.get("DEV_AUTO_LOGIN_CODE", "").strip().upper()
+    if dev_code:
+        await cl.Message(content=f"🛠️ Dev mode: auto-login with `{dev_code}`.").send()
+        code, password = dev_code, dev_code  # the default password is the code
+    else:
+        code = (await _prompt("🎓 Welcome to VeriExam. Enter your username.")).upper()
+        if not code:
+            await cl.Message(content="No username received. Refresh the page to try again.").send()
+            return None
+        password = await _prompt("Now your password. (Until your teacher changes it, it is your username.)")
+        if not password:
+            await cl.Message(content="No password received. Refresh the page to try again.").send()
+            return None
+    r = await _login(code, password)
+    if r is None:
         await cl.Message(content="⚠️ Can't reach the lab server. Ask the instructor.").send()
-        return
-    if login.status_code == 401:
-        await cl.Message(content="❌ Code not found. Ask the instructor for your code.").send()
-        return
-    if login.status_code != 200:
+        return None
+    if r.status_code in (401, 429):
+        detail = r.json().get("detail", "Wrong username or password.")
+        await cl.Message(content=f"❌ {detail} Refresh the page to try again.").send()
+        return None
+    if r.status_code != 200:
         await cl.Message(content="⚠️ Login failed. Please try again in a moment.").send()
+        return None
+    return r.json()
+
+
+async def _pick(question: str, options: list[tuple[str, str]]):
+    """One button per (value, label); the chosen value, or None on timeout."""
+    res = await cl.AskActionMessage(
+        content=question,
+        actions=[cl.Action(name="pick", payload={"value": v}, label=label) for v, label in options],
+        timeout=600,
+    ).send()
+    return ((res or {}).get("payload") or {}).get("value")
+
+
+async def _choose(courses: list[dict]):
+    """(course_id, exercise_id) the student opens. (None, None) when they are in
+    no course; False when they didn't choose in time. One course with one
+    exercise needs no question; the course's default is listed first."""
+    if not courses:
+        return None, None
+    course = courses[0]
+    if len(courses) > 1:
+        chosen = await _pick("Choose your course:", [(c["course_id"], c["name"]) for c in courses])
+        if chosen is None:
+            return False
+        course = next(c for c in courses if c["course_id"] == chosen)
+    exercises = course["exercises"]
+    if len(exercises) == 1:
+        return course["course_id"], exercises[0]["exercise_id"]
+    exercises = sorted(exercises, key=lambda e: e["exercise_id"] != course["default_exercise"])
+    options = [(e["exercise_id"], (e.get("title_he") or e["title_en"])
+                + (" ⭐" if e["exercise_id"] == course["default_exercise"] else "")) for e in exercises]
+    chosen = await _pick(f"**{course['name']}**: choose an exercise (⭐ = your teacher's choice):", options)
+    if chosen is None:
+        return False
+    return course["course_id"], chosen
+
+
+@cl.on_chat_start
+async def on_chat_start():
+    """Log in (login page or chat), choose a course and exercise when there is a
+    choice, then show the briefing."""
+    user = cl.user_session.get("user")
+    login = (user.metadata or {}).get("login") if (AUTH_PAGE and user) else await _chat_login()
+    if not login:
         return
-    token = login.json()["token"]
+    token = login["token"]
     auth = {"Authorization": f"Bearer {token}"}
+
+    choice = await _choose(login.get("courses") or [])
+    if choice is False:
+        await cl.Message(content="No choice received. Refresh the page to try again.").send()
+        return
+    course_id, exercise_id = choice
+    body = {k: v for k, v in (("course_id", course_id), ("exercise_id", exercise_id)) if v}
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            s = await client.post(f"{BACKEND}/api/sessions", json={}, headers=auth)
+            s = await client.post(f"{BACKEND}/api/sessions", json=body, headers=auth)
             s.raise_for_status()
             sess = s.json()
-            # /exercises/active now requires the token (students only ever get
-            # their own assigned variant).
+            # Students only ever get their own session's exercise and variant.
             ex = await client.get(
                 f"{BACKEND}/api/exercises/active",
-                params={"variant": sess["variant"]},
+                params={"variant": sess["variant"], "session_id": sess["session_id"]},
                 headers=auth,
             )
             ex.raise_for_status()
             exercise = ex.json()
     except httpx.HTTPError as e:
         log.warning("session/exercise setup failed: %s", e)
-        await cl.Message(content="⚠️ Couldn't start your session. Refresh to try again.").send()
+        hint = " Log out and in again." if AUTH_PAGE else " Refresh to try again."
+        await cl.Message(content="⚠️ Couldn't start your session." + hint).send()
         return
 
     cl.user_session.set("token", token)

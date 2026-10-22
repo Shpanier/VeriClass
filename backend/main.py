@@ -15,6 +15,7 @@ from backend import db, exercises
 from backend.routes import (
     ask,
     client_config,
+    courses as course_routes,
     exercises as ex_routes,
     files,
     grade,
@@ -83,6 +84,7 @@ app.include_router(files.router, prefix="/api")
 app.include_router(step_routes.router, prefix="/api")
 app.include_router(terminal_routes.router, prefix="/api")
 app.include_router(trace_routes.router, prefix="/api")
+app.include_router(course_routes.router, prefix="/api")
 
 
 @app.get("/healthz")

@@ -3,15 +3,41 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from backend import deps, exercises, steps, terminal
+from backend import db, deps, exercises, steps, terminal
 from backend import params as param_utils
 
 router = APIRouter()
 
 
+def _students_exercise(user: dict, session_id: Optional[str]) -> dict[str, Any]:
+    """The exercise a student is working on: their session's (session_id, from
+    plugin 0.4.0), else their latest session's (older clients start a session
+    and then ask here), else the global active one."""
+    if session_id:
+        session = deps.require_owns_session(session_id, user)
+        return exercises.get(session["exercise"])
+    with db.conn() as c:
+        row = c.execute(
+            "SELECT exercise FROM sessions WHERE user_id = ? ORDER BY last_active_at DESC, started_at DESC LIMIT 1",
+            (user["id"],),
+        ).fetchone()
+    if row:
+        try:
+            return exercises.get(row["exercise"])
+        except KeyError:
+            pass
+    return exercises.active()
+
+
 @router.get("/exercises/active")
-def active_exercise(variant: Optional[str] = None, user: dict = Depends(deps.current_user)):
-    ex = exercises.active()
+def active_exercise(
+    variant: Optional[str] = None,
+    session_id: Optional[str] = None,
+    user: dict = Depends(deps.current_user),
+):
+    """Teachers: the global active exercise. Students: the exercise of their own
+    session (see _students_exercise)."""
+    ex = exercises.active() if deps.is_teacher(user) else _students_exercise(user, session_id)
     response = {
         "exercise_id": ex["exercise_id"],
         "title_en": ex["title_en"],

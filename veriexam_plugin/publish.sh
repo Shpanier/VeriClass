@@ -20,6 +20,8 @@
 #    3) the local backend (BACKEND_PORT in ../deploy/tunnel.conf), if running
 #    4) NGROK_DOMAIN from ../deploy/tunnel.conf
 #  Teacher code:  $VERIEXAM_TEACHER_CODE, else you're prompted (input hidden).
+#  Password:      $VERIEXAM_TEACHER_PASSWORD, else you're prompted; empty = the code
+#                 (the default until a password is set).
 # ─────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -76,12 +78,18 @@ CODE="${VERIEXAM_TEACHER_CODE:-}"
 if [[ -z "$CODE" ]]; then
   read -r -s -p "Teacher login code: " CODE; echo
 fi
+PASSWORD="${VERIEXAM_TEACHER_PASSWORD-}"
+if [[ -z "${VERIEXAM_TEACHER_PASSWORD+set}" ]]; then
+  read -r -s -p "Password (Enter = the code): " PASSWORD; echo
+fi
+PASSWORD="${PASSWORD:-$CODE}"
+json_str() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 NG_HDR='ngrok-skip-browser-warning: true'   # skip ngrok-free's interstitial page
 LOGIN="$(curl -s -X POST "$SERVER/api/login" \
   -H 'Content-Type: application/json' -H "$NG_HDR" \
-  -d "{\"code\":\"$CODE\"}")"
+  -d "{\"code\":\"$(json_str "$CODE")\",\"password\":\"$(json_str "$PASSWORD")\"}")"
 TOKEN="$(printf '%s' "$LOGIN" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
-[[ -n "$TOKEN" ]] || { echo "✖ Login failed — check the teacher code and server URL. Server said: ${LOGIN:-<no response>}" >&2; exit 1; }
+[[ -n "$TOKEN" ]] || { echo "✖ Login failed — check the teacher code, password and server URL. Server said: ${LOGIN:-<no response>}" >&2; exit 1; }
 
 RESP="$(curl -s -X POST \
   "$SERVER/api/plugin/publish?version=$VERSION&product=$PRODUCT&filename=$(basename "$ZIP")" \

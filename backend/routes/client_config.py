@@ -1,5 +1,7 @@
 import os
 
+from typing import Optional
+
 from fastapi import APIRouter
 
 from backend import exercises
@@ -29,7 +31,7 @@ def _envint(name: str, default: int, minimum: int) -> int:
 
 
 @router.get("/client-config")
-def client_config():
+def client_config(exercise_id: Optional[str] = None):
     """Tell a rich client (the CLion plugin) how to behave.
 
     mode:
@@ -66,8 +68,10 @@ def client_config():
     # The active exercise's scaffold_filename wins (so activating a Python
     # exercise scaffolds pycalc.py without any .env change); fall back to the
     # global SCAFFOLD_FILENAME env, then the original mcalc.c default.
+    # exercise_id: the one the student picked (plugin 0.4.0+); else the global active one.
     try:
-        chosen = (exercises.active().get("scaffold_filename") or "").strip()
+        ex = exercises.get(exercise_id) if exercise_id else exercises.active()
+        chosen = (ex.get("scaffold_filename") or "").strip()
     except Exception:
         chosen = ""
     scaffold_filename = chosen or os.environ.get("SCAFFOLD_FILENAME", "mcalc.c").strip() or "mcalc.c"

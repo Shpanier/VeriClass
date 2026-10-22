@@ -43,31 +43,39 @@ class VeriExamApiClient {
 
     // --- auth & setup -----------------------------------------------------
 
-    fun login(code: String): LoginResponse {
+    /** Until the teacher sets one, the password is the login code itself. */
+    fun login(code: String, password: String): LoginResponse {
         val resp = sendJson(
             "POST", "/api/login",
-            body = mapOf("code" to code.trim().uppercase()),
+            body = mapOf("code" to code.trim().uppercase(), "password" to password),
             token = null,
         )
         if (resp.statusCode() == 401) {
-            throw VeriExamApiException("Code not found. Ask the instructor for your code.")
+            throw VeriExamApiException(detailOf(resp.body()) ?: "Wrong username or password.")
         }
         requireOk(resp, "Login failed")
         return gson.fromJson(resp.body(), LoginResponse::class.java)
     }
 
-    fun startSession(token: String): SessionResponse {
-        val resp = sendJson("POST", "/api/sessions", body = emptyMap<String, Any>(), token = token)
+    /** Opens (or resumes) the chosen exercise. Null ids: no choice was needed. */
+    fun startSession(token: String, courseId: String? = null, exerciseId: String? = null): SessionResponse {
+        val body = buildMap<String, Any> {
+            courseId?.let { put("course_id", it) }
+            exerciseId?.let { put("exercise_id", it) }
+        }
+        val resp = sendJson("POST", "/api/sessions", body = body, token = token)
         requireOk(resp, "Could not start a session")
         return gson.fromJson(resp.body(), SessionResponse::class.java)
     }
 
-    fun activeExercise(variant: String, token: String): Exercise {
-        // Authenticated now: the backend only hands a student their own variant,
+    /** The exercise of this session: the student's own variant only. */
+    fun sessionExercise(session: SessionResponse, token: String): Exercise {
+        // Authenticated: the backend only hands a student their own variant,
         // never the full set (which would leak every variant's expected outputs).
         val resp = sendJson(
             "GET",
-            "/api/exercises/active?variant=" + encode(variant),
+            "/api/exercises/active?variant=" + encode(session.variant) +
+                "&session_id=" + encode(session.session_id),
             body = null,
             token = token,
         )
@@ -75,10 +83,14 @@ class VeriExamApiClient {
         return gson.fromJson(resp.body(), Exercise::class.java)
     }
 
-    /** Tolerant: any failure falls back to plain chat mode so the client still works. */
-    fun clientConfig(): ClientConfig {
+    /**
+     * Tolerant: any failure falls back to plain chat mode so the client still
+     * works. [exerciseId]: the exercise the student opened (its starter file).
+     */
+    fun clientConfig(exerciseId: String? = null): ClientConfig {
         return try {
-            val resp = sendJson("GET", "/api/client-config", body = null, token = null)
+            val query = exerciseId?.let { "?exercise_id=" + encode(it) } ?: ""
+            val resp = sendJson("GET", "/api/client-config$query", body = null, token = null)
             if (resp.statusCode() != 200) ClientConfig()
             else gson.fromJson(resp.body(), ClientConfig::class.java) ?: ClientConfig()
         } catch (e: Exception) {
@@ -252,13 +264,15 @@ class VeriExamApiClient {
         }
     }
 
+    private fun detailOf(body: String?): String? = try {
+        val obj = gson.fromJson(body, Map::class.java)
+        (obj?.get("detail") ?: obj?.get("error"))?.toString()
+    } catch (e: Exception) {
+        null
+    }
+
     private fun friendlyError(status: Int, body: String?, context: String = "Request failed"): String {
-        val detail = try {
-            val obj = gson.fromJson(body, Map::class.java)
-            (obj?.get("detail") ?: obj?.get("error"))?.toString()
-        } catch (e: Exception) {
-            null
-        } ?: body?.take(200)
+        val detail = detailOf(body) ?: body?.take(200)
         return "$context (HTTP $status)${if (!detail.isNullOrBlank()) ": $detail" else ""}"
     }
 

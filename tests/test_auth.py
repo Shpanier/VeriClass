@@ -51,7 +51,7 @@ def client():
 
 
 def _token(tc, code):
-    r = tc.post("/api/login", json={"code": code})
+    r = tc.post("/api/login", json={"code": code, "password": code})
     assert r.status_code == 200, r.text
     return r.json()["token"]
 

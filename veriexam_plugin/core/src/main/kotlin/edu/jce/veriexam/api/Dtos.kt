@@ -10,10 +10,28 @@ data class LoginResponse(
     val user_id: Int = 0,
     val username: String = "",
     val role: String = "student",
+    /** The courses this user may open (backend/courses.py). Empty: no courses set up. */
+    val courses: List<CourseDto> = emptyList(),
+)
+
+/** A course the student is in, with the exercises it offers and the preselected one. */
+data class CourseDto(
+    val course_id: String = "",
+    val name: String = "",
+    val default_exercise: String = "",
+    val exercises: List<CourseExerciseDto> = emptyList(),
+)
+
+data class CourseExerciseDto(
+    val exercise_id: String = "",
+    val title_en: String = "",
+    val title_he: String? = null,
 )
 
 data class SessionResponse(
     val session_id: String = "",
+    /** Null when the student is in no course (the global active exercise). */
+    val course_id: String? = null,
     val exercise_id: String = "",
     val variant: String = "",
     val mode: String = "",

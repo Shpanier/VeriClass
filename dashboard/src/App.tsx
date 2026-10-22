@@ -14,10 +14,11 @@ import { ReviewQueue } from "./components/ReviewQueue";
 import { StepChecks } from "./components/StepChecks";
 import { LoginGate } from "./components/LoginGate";
 import { ExercisesPanel } from "./components/ExercisesPanel";
+import { CoursesPanel } from "./components/CoursesPanel";
 import { alertBeep, alertTotal, needsAttention, primeAudio } from "./proctor";
 import { LanguageToggle, useLang } from "./i18n";
 
-type Tab = "monitor" | "exercises";
+type Tab = "monitor" | "exercises" | "courses";
 
 export function App() {
   const { t } = useLang();
@@ -150,6 +151,7 @@ export function App() {
       )}
 
       {tab === "exercises" && <ExercisesPanel onActiveChanged={refreshActiveExercise} />}
+      {tab === "courses" && <CoursesPanel />}
 
       {askingTarget && (
         <AskThemModal
@@ -189,11 +191,12 @@ function TabBar({
 }: {
   tab: Tab;
   onChange: (t: Tab) => void;
-  t: (key: "tabMonitor" | "tabExercises") => string;
+  t: (key: "tabMonitor" | "tabExercises" | "tabCourses") => string;
 }) {
   const tabs: { key: Tab; label: string }[] = [
     { key: "monitor", label: t("tabMonitor") },
     { key: "exercises", label: t("tabExercises") },
+    { key: "courses", label: t("tabCourses") },
   ];
   return (
     <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #e5e7eb", marginBottom: 20 }}>

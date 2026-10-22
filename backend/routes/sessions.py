@@ -2,16 +2,19 @@ import secrets
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend import db, deps, exercises, variants
+from backend import courses, db, deps, variants
 
 router = APIRouter()
 
 
 class StartSessionRequest(BaseModel):
-    exercise_id: Optional[str] = None  # defaults to the active exercise
+    # The student's choice after login (plugin 0.4.0+). Either may be left out
+    # when there is only one possibility; see courses.resolve().
+    course_id: Optional[str] = None
+    exercise_id: Optional[str] = None
 
 
 def _trace_key(c, session_id: str) -> str:
@@ -29,7 +32,10 @@ def _trace_key(c, session_id: str) -> str:
 @router.post("/sessions")
 def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_user)):
     user_id = user["id"]
-    exercise = exercises.get(req.exercise_id) if req.exercise_id else exercises.active()
+    try:
+        course_id, exercise = courses.resolve(user, req.course_id, req.exercise_id)
+    except courses.CourseError as e:
+        raise HTTPException(e.status, str(e))
 
     with db.conn() as c:
         # Resume any session for this (user, exercise) that's still active.
@@ -47,11 +53,13 @@ def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_us
 
         if existing:
             c.execute(
-                "UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (existing["id"],),
+                "UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP, "
+                "course_id = COALESCE(?, course_id) WHERE id = ?",
+                (course_id, existing["id"]),
             )
             return {
                 "session_id": existing["id"],
+                "course_id": course_id,
                 "exercise_id": exercise["exercise_id"],
                 "variant": existing["variant"],
                 "mode": existing["mode"],
@@ -62,12 +70,15 @@ def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_us
         variant_id = variants.assign(exercise["exercise_id"])
         trace_key = secrets.token_hex(32)
         c.execute(
-            "INSERT INTO sessions (id, user_id, exercise, mode, variant, trace_key) VALUES (?, ?, ?, ?, ?, ?)",
-            (session_id, user_id, exercise["exercise_id"], exercise["default_mode"], variant_id, trace_key),
+            "INSERT INTO sessions (id, user_id, exercise, mode, variant, trace_key, course_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (session_id, user_id, exercise["exercise_id"], exercise["default_mode"], variant_id, trace_key,
+             course_id),
         )
 
     return {
         "session_id": session_id,
+        "course_id": course_id,
         "exercise_id": exercise["exercise_id"],
         "variant": variant_id,
         "mode": exercise["default_mode"],

@@ -57,10 +57,11 @@ class VeriExamPanel(
         // Auto-login precedence: an explicit per-machine setting wins; otherwise
         // ask the backend for a dev code (DEV_AUTO_LOGIN_CODE) so no per-student
         // setup is needed — same convenience as the Chainlit student app.
+        // Dev logins use the default password, the code itself.
         val localCode = VeriExamSettings.instance.devLoginCode
         if (localCode.isNotEmpty()) {
             loginPanel.setBusy(true)
-            doLogin(localCode)
+            doLogin(localCode, localCode)
         } else {
             maybeBackendAutoLogin()
         }
@@ -79,7 +80,7 @@ class VeriExamPanel(
                 ApplicationManager.getApplication().invokeLater {
                     if (project.isDisposed) return@invokeLater
                     loginPanel.setBusy(true)
-                    doLogin(code)
+                    doLogin(code, code)
                 }
             }
         }
@@ -87,26 +88,75 @@ class VeriExamPanel(
 
     // --- login flow -------------------------------------------------------
 
-    private fun doLogin(code: String) {
+    // The course/exercise picker while it is on screen, so errors show there.
+    private var chooser: ChoosePanel? = null
+
+    private fun doLogin(code: String, password: String) {
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                val login = api.login(code)
-                val session = api.startSession(login.token)
-                val exercise = api.activeExercise(session.variant, login.token)
-                val config = api.clientConfig()
+                val login = api.login(code, password)
                 ApplicationManager.getApplication().invokeLater {
                     if (project.isDisposed) return@invokeLater
+                    afterLogin(login)
+                }
+            } catch (e: Exception) {
+                ApplicationManager.getApplication().invokeLater { loginPanel.setError(errorText(e, "Login failed.")) }
+            }
+        }
+    }
+
+    /** No course, or one course with one exercise: open it. Otherwise let the student pick. */
+    private fun afterLogin(login: LoginResponse) {
+        val auto = ChoosePanel.autoChoice(login.courses)
+        if (login.courses.isEmpty() || auto != null) {
+            openExercise(login, auto?.first, auto?.second)
+            return
+        }
+        val panel = ChoosePanel(
+            login.username,
+            login.courses,
+            onChoose = { courseId, exerciseId -> openExercise(login, courseId, exerciseId) },
+            onBack = ::showLogin,
+        )
+        chooser = panel
+        removeAll()
+        add(panel, BorderLayout.CENTER)
+        revalidate()
+        repaint()
+    }
+
+    private fun showLogin() {
+        chooser = null
+        removeAll()
+        loginPanel.setBusy(false)
+        add(loginPanel, BorderLayout.CENTER)
+        revalidate()
+        repaint()
+    }
+
+    private fun openExercise(login: LoginResponse, courseId: String?, exerciseId: String?) {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            try {
+                val session = api.startSession(login.token, courseId, exerciseId)
+                val exercise = api.sessionExercise(session, login.token)
+                val config = api.clientConfig(session.exercise_id)
+                ApplicationManager.getApplication().invokeLater {
+                    if (project.isDisposed) return@invokeLater
+                    chooser = null
                     buildSession(login, session, exercise, config)
                 }
-            } catch (e: VeriExamApiException) {
-                ApplicationManager.getApplication().invokeLater { loginPanel.setError(e.message ?: "Login failed.") }
             } catch (e: Exception) {
                 ApplicationManager.getApplication().invokeLater {
-                    loginPanel.setError("Can't reach the backend at ${VeriExamSettings.instance.backendUrl}. (${e.message})")
+                    val message = errorText(e, "Could not open the exercise.")
+                    chooser?.setError(message) ?: loginPanel.setError(message)
                 }
             }
         }
     }
+
+    private fun errorText(e: Exception, fallback: String): String =
+        if (e is VeriExamApiException) e.message ?: fallback
+        else "Can't reach the backend at ${VeriExamSettings.instance.backendUrl}. (${e.message})"
 
     // --- session UI -------------------------------------------------------
 

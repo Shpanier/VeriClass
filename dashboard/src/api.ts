@@ -1,6 +1,7 @@
 import type {
   ActiveExercise,
   AnswerLevel,
+  Course,
   ExerciseSummary,
   FullExercise,
   GradeRecommendation,
@@ -17,6 +18,7 @@ import type {
   TerminalCommand,
   TerminalFullOutput,
   TraceVerifyResult,
+  UserAccount,
 } from "./types";
 
 const TOKEN_KEY = "veriexam.teacher.token";
@@ -84,13 +86,13 @@ export interface LoginResult {
   username: string;
 }
 
-// Standalone (not via j): a wrong code legitimately returns 401 and must not be
-// treated as a session-expiry bounce.
-export async function login(code: string): Promise<LoginResult> {
+// Standalone (not via j): a wrong code or password legitimately returns 401 and
+// must not be treated as a session-expiry bounce.
+export async function login(code: string, password: string): Promise<LoginResult> {
   const r = await fetch("/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, password }),
   });
   if (r.status === 401) throw new Error("bad-code");
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -174,6 +176,31 @@ export const api = {
     j<{ ok: boolean }>(`/api/step-checks/${id}/decide`, {
       method: "POST",
       body: JSON.stringify({ action, note }),
+    }),
+  courses: () => j<Course[]>("/api/courses"),
+  createCourse: (courseId: string, name: string) =>
+    j<Course>("/api/courses", {
+      method: "POST",
+      body: JSON.stringify({ course_id: courseId, name }),
+    }),
+  updateCourse: (c: Course) =>
+    j<Course>(`/api/courses/${encodeURIComponent(c.course_id)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        name: c.name,
+        exercises: c.exercises,
+        default_exercise: c.default_exercise,
+        members: c.members,
+      }),
+    }),
+  deleteCourse: (courseId: string) =>
+    j<{ ok: boolean }>(`/api/courses/${encodeURIComponent(courseId)}`, { method: "DELETE" }),
+  users: () => j<UserAccount[]>("/api/users"),
+  // password null: back to the default (the login code).
+  setPassword: (userId: number, password: string | null) =>
+    j<{ ok: boolean; custom_password: boolean }>(`/api/users/${userId}/password`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
     }),
   selectReview: (id: number, chosen: AnswerLevel, lang: Lang, text?: string) =>
     j<{ ok: boolean }>(`/api/reviews/${id}/select`, {
