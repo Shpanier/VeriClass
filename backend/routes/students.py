@@ -34,6 +34,7 @@ def _variant_params(exercise_id: str, variant_id: str) -> dict:
 def exam_state(last_focus_kind: Optional[str], live: Optional[dict], live_age_s: Optional[float]) -> tuple[Optional[str], Optional[str]]:
     """(state, detail) for the live grid:
 
+      ide_closed      the student closed the IDE (until the exam client starts again)
       no_signal       the exam client stopped sending its status
       away            outside the IDE (another app, minimized)
       other_window    a dialog, another project window, or a panel that isn't allowed
@@ -45,6 +46,9 @@ def exam_state(last_focus_kind: Optional[str], live: Optional[dict], live_age_s:
     The live snapshot wins when there is one; plugins too old to send it fall
     back to the last focus event.
     """
+    # Reported by the IDE as it closed; its last snapshot still looks fine.
+    if last_focus_kind == "ide_closed":
+        return "ide_closed", "closed the IDE"
     if live is not None and live_age_s is not None:
         if live_age_s > NO_SIGNAL_AFTER_S:
             return "no_signal", f"no status for {int(live_age_s)} s"
@@ -181,7 +185,7 @@ def session_messages(session_id: str, teacher: dict = Depends(deps.require_teach
         if not sess:
             raise HTTPException(404, "Unknown session")
         messages = c.execute(
-            "SELECT id, role, body, mode_at_time, created_at FROM messages "
+            "SELECT id, role, body, mode_at_time, created_at, model, cached FROM messages "
             "WHERE session_id = ? ORDER BY created_at ASC, id ASC",
             (session_id,),
         ).fetchall()

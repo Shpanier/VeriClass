@@ -278,6 +278,20 @@ CREATE TABLE IF NOT EXISTS grade_recommendations (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
+-- Answers from the stronger "ask again" model (backend/answer_cache.py), so a
+-- question already answered in the same context is served without a new call.
+-- key = hash of model + system prompt + earlier turns + normalized question.
+CREATE TABLE IF NOT EXISTS answer_cache (
+    key          TEXT PRIMARY KEY,
+    model        TEXT NOT NULL,
+    exercise     TEXT,
+    question     TEXT NOT NULL,
+    answer       TEXT NOT NULL,
+    hits         INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_hit_at  TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_submissions_session ON submissions(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_probes_session ON probes(session_id, status);
@@ -319,6 +333,8 @@ def init_schema() -> None:
         _add_missing_columns(c, "messages", {
             "answer_level": "TEXT",
             "via": "TEXT NOT NULL DEFAULT 'live'",  # 'export': imported from a student's signed export
+            "model": "TEXT",      # the LLM that wrote this reply (NULL: teacher, steps, older rows)
+            "cached": "INTEGER NOT NULL DEFAULT 0",  # 1: served from answer_cache, no LLM call
         })
         _add_missing_columns(c, "pending_reviews", {
             "variant_nudge_he": "TEXT",

@@ -8,6 +8,7 @@ import edu.jce.veriexam.api.VeriExamApiClient
 import edu.jce.veriexam.terminal.TerminalRecord
 import java.io.File
 import java.io.Writer
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -89,6 +90,23 @@ class SessionTrace(
     }
 
     fun proctor(kind: String, detail: String?, awayMs: Long?) {
+        val (id, body) = journalProctor(kind, detail, awayMs)
+        outbox.send(ReportOutbox.Item("/api/proctor/event", body, id))
+    }
+
+    /**
+     * A proctor event sent now, on the calling thread, waiting at most
+     * [timeoutMs]: for when the IDE is exiting and the outbox won't get to it.
+     */
+    fun proctorNow(kind: String, detail: String?, timeoutMs: Long) {
+        val (id, body) = journalProctor(kind, detail, null)
+        val status = runCatching {
+            api.postReport("/api/proctor/event", body, token, Duration.ofMillis(timeoutMs))
+        }.getOrDefault(-1)
+        journal.ack(id, if (status in 200..299) "yes" else "no")
+    }
+
+    private fun journalProctor(kind: String, detail: String?, awayMs: Long?): Pair<String, Map<String, Any?>> {
         val id = newId()
         val at = Instant.now()
         val body = linkedMapOf<String, Any?>(
@@ -100,7 +118,7 @@ class SessionTrace(
             "client_at" to TraceJournal.UTC.format(at),
         )
         journal.append("proctor", id, gson.toJson(body), at)
-        outbox.send(ReportOutbox.Item("/api/proctor/event", body, id))
+        return id to body
     }
 
     /** [target]: editor | terminal | chat. [source]: outside | ide | tutor (see PasteSources). */

@@ -111,6 +111,7 @@ const STRINGS = {
     kind_other_app_in_front: "Another app in front of the IDE",
     kind_window_unmaximized: "Made the IDE window smaller",
     kind_window_maximized: "Window maximized again",
+    kind_ide_closed: "Closed the IDE",
     arrivedLate: "arrived late",
     fromExport: "from the student's export",
     // live state on the grid
@@ -119,6 +120,7 @@ const STRINGS = {
     state_other_window: "OTHER WINDOW OPEN",
     state_not_fullscreen: "NOT FULL SCREEN",
     state_not_maximized: "NOT MAXIMIZED",
+    state_ide_closed: "CLOSED THE IDE",
     state_no_signal: "NO SIGNAL",
     stateNoSignalHint: "The IDE stopped reporting: closed, asleep, or no network.",
     liveTabs: "Tabs",
@@ -403,6 +405,7 @@ const STRINGS = {
     kind_other_app_in_front: "אפליקציה אחרת מול ה-IDE",
     kind_window_unmaximized: "הקטין את חלון ה-IDE",
     kind_window_maximized: "החלון הוגדל שוב",
+    kind_ide_closed: "סגר את ה-IDE",
     arrivedLate: "הגיע באיחור",
     fromExport: "מהקובץ שהתלמיד ייצא",
     // live state on the grid
@@ -411,6 +414,7 @@ const STRINGS = {
     state_other_window: "חלון אחר פתוח",
     state_not_fullscreen: "לא במסך מלא",
     state_not_maximized: "החלון לא מוגדל",
+    state_ide_closed: "סגר את ה-IDE",
     state_no_signal: "אין אות",
     stateNoSignalHint: "ה-IDE הפסיק לדווח: נסגר, במצב שינה או ללא רשת.",
     liveTabs: "לשוניות",

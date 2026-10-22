@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend import db, deps, exercises, steps, student_llm
+from backend import answer_cache, db, deps, exercises, steps, student_llm
 from backend.agents import tutor
 from backend.prompts import course_name, student_system_prompt
 from backend.routes import review as review_mod
@@ -21,6 +21,16 @@ router = APIRouter()
 class AskRequest(BaseModel):
     session_id: str
     message: str
+    # "Ask again": answer this (already asked) question with the stronger model.
+    reask: bool = False
+
+
+# Sent with replies that can be asked again; the value is the button's model name.
+REASK_HEADER = "X-VeriExam-Reask"
+_REASK_INSTRUCTION = (
+    "The student found a shorter answer to this question not detailed enough. Give a "
+    "complete, detailed explanation, still following every rule above."
+)
 
 
 _DENYLIST_PHRASES = [
@@ -38,14 +48,6 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
     if any(p in req.message.lower() for p in _DENYLIST_PHRASES):
         raise HTTPException(400, "Request looks like prompt injection — refused.")
 
-    with db.conn() as c:
-        history = c.execute(
-            "SELECT role, body FROM messages WHERE session_id = ? "
-            "AND trim(body) != '' "
-            "ORDER BY created_at DESC, id DESC LIMIT 20",
-            (req.session_id,),
-        ).fetchall()
-
     ex = exercises.get(s["exercise"])
     variant = exercises.variant(s["exercise"], s["variant"])
     sys_prompt = student_system_prompt(ex, variant, s["mode"])
@@ -55,8 +57,9 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
              and request.headers.get("x-veriexam-render", "").lower() != "markdown")
     if steps.steps_of(ex):
         sys_prompt += "\n\n" + steps.tutor_context(ex, req.session_id, plain)
-    msgs = [{"role": h["role"], "body": h["body"]} for h in reversed(history)]
-    msgs = [{"role": m["role"], "content": m["body"]} for m in msgs]
+    if req.reask:
+        return _reask(req, s, ex, sys_prompt)
+    msgs = _history(req.session_id)
     msgs.append({"role": "user", "content": req.message})
 
     with db.conn() as c:
@@ -84,35 +87,98 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
             async for tok in student_llm.stream_chat(sys_prompt, msgs):
                 collected.append(tok)
                 yield tok
-        except httpx.HTTPStatusError as e:
-            detail = ""
-            try:
-                detail = e.response.json().get("error", "")
-            except Exception:
-                detail = e.response.text[:200] if e.response is not None else ""
-            log.warning("Student LLM (%s) HTTP %s: %s", student_llm.NAME,
-                        e.response.status_code if e.response else "?", detail)
-            yield f"\n\n_⚠️ Student LLM ({student_llm.NAME}) error: {detail or e}_\n"
-        except httpx.RequestError as e:
-            log.warning("Student LLM (%s) unreachable: %s", student_llm.NAME, e)
-            yield f"\n\n_⚠️ Student LLM ({student_llm.NAME}) unreachable. Check network / {student_llm.KEY_ENV}._\n"
+        except (httpx.HTTPStatusError, httpx.RequestError) as e:
+            yield _llm_error(e, student_llm.NAME, student_llm.KEY_ENV)
+        finally:
+            # Only persist a real reply. Storing an empty assistant turn
+            # (transient Gemini error / safety block) poisons the session:
+            # it comes back as an empty model part with broken user/model
+            # alternation, which Gemini mishandles — the model then answers
+            # as if it forgot the conversation.
+            _save_reply(req.session_id, s["mode"], "".join(collected), model=student_llm.MODEL)
+
+    headers = {}
+    if student_llm.strong_available():
+        headers[REASK_HEADER] = student_llm.model_label(student_llm.STRONG_MODEL)
+    return StreamingResponse(gen(), media_type="text/plain", headers=headers)
+
+
+def _history(session_id: str, before_id: int | None = None) -> list[dict]:
+    """The last 20 non-empty turns, oldest first (only those before [before_id])."""
+    with db.conn() as c:
+        rows = c.execute(
+            "SELECT role, body FROM messages WHERE session_id = ? AND trim(body) != '' "
+            + ("AND id < ? " if before_id is not None else "")
+            + "ORDER BY created_at DESC, id DESC LIMIT 20",
+            (session_id, before_id) if before_id is not None else (session_id,),
+        ).fetchall()
+    return [{"role": r["role"], "content": r["body"]} for r in reversed(rows)]
+
+
+def _llm_error(e: Exception, name: str, key_env: str) -> str:
+    """The line shown to the student when the LLM call fails."""
+    if isinstance(e, httpx.HTTPStatusError):
+        detail = ""
+        try:
+            detail = e.response.json().get("error", "")
+        except Exception:
+            detail = e.response.text[:200] if e.response is not None else ""
+        log.warning("Student LLM (%s) HTTP %s: %s", name,
+                    e.response.status_code if e.response else "?", detail)
+        return f"\n\n_⚠️ Student LLM ({name}) error: {detail or e}_\n"
+    log.warning("Student LLM (%s) unreachable: %s", name, e)
+    return f"\n\n_⚠️ Student LLM ({name}) unreachable. Check network / {key_env}._\n"
+
+
+def _reask(req: AskRequest, s, ex, sys_prompt: str) -> StreamingResponse:
+    """Answer the student's earlier question again with the stronger model, from
+    the same point in the conversation (the first answer isn't sent). Served from
+    the answer cache when this question was already answered in this context."""
+    if not student_llm.strong_available():
+        raise HTTPException(400, "Asking again with another model is turned off.")
+    # Only what went to the LLM the first time: not past the teacher's review,
+    # not a finished lab step (both are offered no "ask again" button either).
+    if review_mod.review_mode_enabled():
+        raise HTTPException(400, "Your teacher is reviewing answers, so asking again is off.")
+    if steps.steps_of(ex) and steps.parse_done(req.message) is not None:
+        raise HTTPException(400, "A finished step goes to your teacher, not to a model.")
+    with db.conn() as c:
+        asked = c.execute(
+            "SELECT id FROM messages WHERE session_id = ? AND role = 'user' AND body = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (req.session_id, req.message),
+        ).fetchone()
+    if asked is None:
+        raise HTTPException(400, "Ask the question first, then ask again.")
+    model = student_llm.STRONG_MODEL
+    sys_prompt += "\n\n" + _REASK_INSTRUCTION
+    msgs = _history(req.session_id, before_id=asked["id"])
+    cache_key = answer_cache.key(model, sys_prompt, msgs, req.message)
+    msgs.append({"role": "user", "content": req.message})
+
+    async def gen():
+        cached = answer_cache.get(cache_key)
+        if cached is not None:
+            log.info("answer cache hit (%s) for session %s", model, req.session_id)
+            _save_reply(req.session_id, s["mode"], cached, model=model, cached=True)
+            async for chunk in _stream(cached):
+                yield chunk
+            return
+        collected = []
+        complete = False
+        try:
+            async for tok in student_llm.stream_strong(sys_prompt, msgs):
+                collected.append(tok)
+                yield tok
+            complete = True
+        except (httpx.HTTPStatusError, httpx.RequestError) as e:
+            yield _llm_error(e, model, "ANTHROPIC_API_KEY")
         finally:
             reply = "".join(collected)
-            with db.conn() as c:
-                # Only persist a real reply. Storing an empty assistant turn
-                # (transient Gemini error / safety block) poisons the session:
-                # it comes back as an empty model part with broken user/model
-                # alternation, which Gemini mishandles — the model then answers
-                # as if it forgot the conversation.
-                if reply.strip():
-                    c.execute(
-                        "INSERT INTO messages (session_id, role, body, mode_at_time) VALUES (?, ?, ?, ?)",
-                        (req.session_id, "assistant", reply, s["mode"]),
-                    )
-                c.execute(
-                    "UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (req.session_id,),
-                )
+            _save_reply(req.session_id, s["mode"], reply, model=model)
+            # Never cache a reply cut short by an error or the student closing the chat.
+            if complete:
+                answer_cache.put(cache_key, model, s["exercise"], req.message, reply)
 
     return StreamingResponse(gen(), media_type="text/plain")
 
@@ -193,12 +259,16 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict]):
 STEP_WAIT_SECONDS = 540  # under the plugin's 10-minute read timeout
 
 
-def _save_reply(session_id: str, mode: str, text: str) -> None:
+def _save_reply(session_id: str, mode: str, text: str,
+                model: str | None = None, cached: bool = False) -> None:
+    """Store an assistant turn (skipped when empty) and bump the session."""
     with db.conn() as c:
-        c.execute(
-            "INSERT INTO messages (session_id, role, body, mode_at_time) VALUES (?, ?, ?, ?)",
-            (session_id, "assistant", text, mode),
-        )
+        if text.strip():
+            c.execute(
+                "INSERT INTO messages (session_id, role, body, mode_at_time, model, cached) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, "assistant", text, mode, model, int(cached)),
+            )
         c.execute(
             "UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,)
         )

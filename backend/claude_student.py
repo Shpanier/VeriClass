@@ -43,15 +43,17 @@ def _to_claude(messages: list[dict]) -> list[dict]:
 
 
 async def stream_chat(
-    system_prompt: str, messages: list[dict], timeout: float = 60.0
+    system_prompt: str, messages: list[dict], timeout: float = 60.0, model: str | None = None
 ) -> AsyncIterator[str]:
+    """[model] overrides CLAUDE_MODEL (the "ask again" model, see student_llm)."""
+    model = model or MODEL
     headers = {
         "x-api-key": os.environ[API_KEY_ENV],
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
     }
     payload = {
-        "model": MODEL,
+        "model": model,
         "max_tokens": MAX_TOKENS,
         "system": system_prompt,
         "messages": _to_claude(messages),
@@ -67,7 +69,7 @@ async def stream_chat(
                         await resp.aread()
                         delay = 0.6 * (2 ** attempt)
                         log.warning("claude %s (HTTP %s); retry %d/%d in %.1fs",
-                                    MODEL, resp.status_code, attempt + 1, _MAX_ATTEMPTS - 1, delay)
+                                    model, resp.status_code, attempt + 1, _MAX_ATTEMPTS - 1, delay)
                         await asyncio.sleep(delay)
                         continue
                     if resp.is_error:

@@ -1,5 +1,6 @@
 package edu.jce.veriexam.exam
 
+import com.intellij.ide.AppLifecycleListener
 import com.intellij.ide.IdeEventQueue
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
@@ -25,6 +26,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectCloseListener
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.DialogWrapperDialog
 import com.intellij.openapi.util.Disposer
@@ -79,7 +81,9 @@ import javax.swing.Timer
  *  - reports every editor tab opened, and every paste into the editor, the
  *    terminal or the chat with where its text came from ([PasteSources]);
  *  - sends a live status (focused, full screen, open panels / windows / tabs)
- *    with every heartbeat and on every change, for the dashboard's live grid.
+ *    with every heartbeat and on every change, for the dashboard's live grid;
+ *  - reports `ide_closed` the moment the student closes the IDE or the exam
+ *    project, instead of the teacher seeing "no signal" 45 s later.
  *
  * Reports go through [SessionTrace]: journaled locally, queued and retried.
  *
@@ -110,6 +114,9 @@ class ExamGuard(
     private val allowedPanels = ExamPanelLock.allowedIds(config)
 
     private val stopped = AtomicBoolean(false)
+    private val disposed = AtomicBoolean(false)
+    // The IDE or project is closing: `ide_closed` was sent, and nothing more is.
+    private val closing = AtomicBoolean(false)
     private val away = AtomicBoolean(false)
     private val awaySinceMs = AtomicLong(0L)
     private val violations = AtomicInteger(0)
@@ -193,6 +200,17 @@ class ExamGuard(
 
     private fun start() {
         report("exam_started", detail = "exam client armed", awayMs = null)
+
+        ApplicationManager.getApplication().messageBus.connect(this).apply {
+            subscribe(AppLifecycleListener.TOPIC, object : AppLifecycleListener {
+                override fun appClosing() = onClosing("closed $ide")
+            })
+            subscribe(ProjectCloseListener.TOPIC, object : ProjectCloseListener {
+                override fun projectClosing(project: Project) {
+                    if (project == this@ExamGuard.project) onClosing("closed the exam project")
+                }
+            })
+        }
 
         ApplicationManager.getApplication().invokeLater {
             if (stopped.get() || project.isDisposed) return@invokeLater
@@ -635,6 +653,26 @@ class ExamGuard(
         enterFullScreen()
     }
 
+    /**
+     * The IDE or the exam project is closing. Sent directly with a short timeout,
+     * because the outbox stops with the IDE (it is in the student's journal
+     * either way). Then quiet, so the closing windows don't report as "left the
+     * IDE". If the IDE is still open a little later (the student cancelled a
+     * "terminate the running process?" question), the exam goes on.
+     */
+    private fun onClosing(detail: String) {
+        if (stopped.get() || !closing.compareAndSet(false, true)) return
+        stopped.set(true)
+        trace.proctorNow("ide_closed", detail, CLOSE_REPORT_MS)
+        scheduler.schedule({
+            if (!disposed.get() && !project.isDisposed && closing.compareAndSet(true, false)) {
+                stopped.set(false)
+                report("focus_regained", "$ide did not close after all", awayMs = null)
+                sendStatusSoon()
+            }
+        }, CLOSE_CANCELLED_AFTER_S, TimeUnit.SECONDS)
+    }
+
     // --- helpers ----------------------------------------------------------
 
     private fun report(kind: String, detail: String?, awayMs: Long?) {
@@ -661,6 +699,7 @@ class ExamGuard(
     private fun toolWindow() = ToolWindowManager.getInstance(project).getToolWindow("VeriExam")
 
     override fun dispose() {
+        disposed.set(true)
         stopped.set(true)
         heartbeatFuture?.cancel(false)
         watchdogFuture?.cancel(false)
@@ -681,6 +720,9 @@ class ExamGuard(
         private const val LEAVE_SETTLE_MS = 400
         private const val FULLSCREEN_TRANSITION_MS = 3_000L
         private const val WATCHDOG_MS = 2_000L
+        /** How long closing the IDE may wait for `ide_closed` to reach the server. */
+        private const val CLOSE_REPORT_MS = 2_000L
+        private const val CLOSE_CANCELLED_AFTER_S = 15L
 
         private val PASTE_ACTIONS = setOf("\$Paste", "EditorPaste", "EditorPasteSimple", "\$PasteSimple", "EditorPasteFromX11")
         private val HISTORY_PASTE_ACTIONS = setOf("PasteMultiple")

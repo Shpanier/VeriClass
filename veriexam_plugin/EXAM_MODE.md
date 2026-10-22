@@ -115,6 +115,17 @@ OS, with or without full screen:
 The dashboard shows **NOT MAXIMIZED** on the student's card while the window is
 smaller. Turn this off with `EXAM_MAXIMIZED=false`.
 
+**Closing the IDE** (plugin 0.4.2+): the moment the student closes the IDE or the
+exam project you get **`ide_closed`** ("closed PyCharm"), the alarm sounds, and
+the card shows **CLOSED THE IDE** until the student opens it again (then
+`exam_started`). Before 0.4.2 this only showed as **NO SIGNAL** 45 s later,
+which still covers a crash, a laptop going to sleep, or the network dropping.
+
+**Windows needs nothing extra to install.** The foreground check uses JNA, which
+ships inside PyCharm and CLion, so the same plugin zip works on Windows and
+macOS. Locking the computer so other apps can't open at all would need separate
+kiosk software (for example Windows Assigned Access); VeriExam doesn't do that.
+
 Other apps can't be stopped from running: VeriExam reports, it doesn't lock the
 computer. What it does is report every moment another app is in front, with its
 name.

@@ -7,7 +7,12 @@ package edu.jce.veriexam.util
  */
 object MarkdownLite {
 
-    fun toHtml(md: String): String {
+    /**
+     * [hardBreaks]: a single newline inside a paragraph is a line break (chat
+     * messages, where students and the tutor mean the lines they typed), not a
+     * space as in Markdown (the exercise brief, written with wrapped lines).
+     */
+    fun toHtml(md: String, hardBreaks: Boolean = false): String {
         val out = StringBuilder()
         val lines = md.replace("\r\n", "\n").split("\n")
         var i = 0
@@ -85,7 +90,7 @@ object MarkdownLite {
                 }
                 else -> {
                     closeList()
-                    if (!inPara) { out.append("<p>"); inPara = true } else out.append(" ")
+                    if (!inPara) { out.append("<p>"); inPara = true } else out.append(if (hardBreaks) "<br>" else " ")
                     out.append(inline(trimmed))
                 }
             }

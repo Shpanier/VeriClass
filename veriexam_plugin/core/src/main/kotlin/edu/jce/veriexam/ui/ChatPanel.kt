@@ -4,6 +4,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.util.Disposer
+import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
@@ -24,6 +25,7 @@ import java.awt.Font
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import java.awt.event.ActionEvent
+import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.awt.font.TextAttribute
 import java.util.concurrent.atomic.AtomicBoolean
@@ -39,13 +41,16 @@ import javax.swing.KeyStroke
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingUtilities
 import javax.swing.Timer
+import javax.swing.event.DocumentEvent
+import javax.swing.text.JTextComponent
 
 /**
  * The whole session is one scrolling conversation: the exercise brief is the
  * first message, then the students' turns and the tutor's replies as bubbles.
  * Messages render Markdown (bold, lists, inline code), and every fenced code
  * block gets its own Copy button so students never retype code. Tutor replies
- * stream in live from /api/ask.
+ * stream in live from /api/ask. A reply the server marks as "can be asked again"
+ * gets a button that sends the same question to its stronger model.
  */
 class ChatPanel(
     private val api: VeriExamApiClient,
@@ -84,8 +89,11 @@ class ChatPanel(
         border = JBUI.Borders.empty(4)
         emptyText.text = "Ask the tutor, or write \"Done with step N\" and your answers"
     }
+    private val south: JPanel
     private val sendButton = JButton("Send")
     private val cancelled = AtomicBoolean(false)
+    /** The "ask again" button under the latest reply; removed once anything new is sent. */
+    private var reaskRow: JComponent? = null
 
     init {
         Disposer.register(parent, this)
@@ -96,7 +104,7 @@ class ChatPanel(
             add(JBScrollPane(input), BorderLayout.CENTER)
             add(sendButton, BorderLayout.EAST)
         }
-        val south = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
+        south = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
             border = BorderFactory.createCompoundBorder(
                 JBUI.Borders.customLine(JBColor.border(), 1, 0, 0, 0),
                 JBUI.Borders.empty(6),
@@ -107,10 +115,16 @@ class ChatPanel(
         add(south, BorderLayout.SOUTH)
 
         sendButton.addActionListener { onSend() }
-        // Enter sends; Shift+Enter inserts a newline.
-        input.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "veriexam-send")
-        input.actionMap.put("veriexam-send", object : AbstractAction() {
-            override fun actionPerformed(e: ActionEvent) = onSend()
+        installSendKeys(input, ::onSend)
+        // The box grows with the student's lines, up to MAX_INPUT_ROWS, then scrolls.
+        input.document.addDocumentListener(object : DocumentAdapter() {
+            override fun textChanged(e: DocumentEvent) {
+                val rows = input.lineCount.coerceIn(MIN_INPUT_ROWS, MAX_INPUT_ROWS)
+                if (rows != input.rows) {
+                    input.rows = rows
+                    south.revalidate()
+                }
+            }
         })
     }
 
@@ -171,20 +185,32 @@ class ChatPanel(
         if (text.isEmpty() || !sendButton.isEnabled) return
         input.text = ""
         addMessage(Role.USER, text)
-        val reply = MessageBubble(Role.TUTOR).apply { setMarkdown("…") }
+        streamReply(text, reaskModel = null)
+    }
+
+    /**
+     * Stream the tutor's reply to [question]. [reaskModel]: the student asked
+     * this question again with that (stronger) model; the server answers it
+     * from the same point in the conversation and stores no second question.
+     */
+    private fun streamReply(question: String, reaskModel: String?) {
+        removeReaskButton()
+        val label = reaskModel?.let { "Tutor · $it" } ?: Role.TUTOR.label
+        val reply = MessageBubble(Role.TUTOR, label).apply { setMarkdown("…") }
         addRow(reply)
         scrollToBottom()
         setBusy(true)
 
         val buffer = StringBuilder()
         var failed = false
+        var canReaskWith: String? = null
         // Re-render at most every 80 ms while tokens stream in.
         val render = Timer(80) { reply.setMarkdown(buffer.toString().ifBlank { "…" }); scrollToBottom() }
             .apply { isRepeats = false }
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                api.ask(token, sessionId, text, cancelled) { chunk ->
+                canReaskWith = api.ask(token, sessionId, question, cancelled, reask = reaskModel != null) { chunk ->
                     ApplicationManager.getApplication().invokeLater {
                         buffer.append(chunk)
                         render.restart()
@@ -202,12 +228,14 @@ class ChatPanel(
                 ApplicationManager.getApplication().invokeLater {
                     render.stop()
                     reply.setMarkdown(buffer.toString().ifBlank { "⚠️ No reply." })
+                    canReaskWith?.takeIf { !failed && buffer.isNotBlank() }?.let { addReaskButton(question, it) }
                     scrollToBottom()
                     setBusy(false)
                     trace?.let { t ->
                         val answer = buffer.toString()
                         ApplicationManager.getApplication().executeOnPooledThread {
-                            t.chat(fromStudent = true, text = text, delivered = !failed)
+                            // Asking again stores no new question on the server, so none here either.
+                            if (reaskModel == null) t.chat(fromStudent = true, text = question, delivered = !failed)
                             if (answer.isNotBlank()) t.chat(fromStudent = false, text = answer, delivered = !failed)
                         }
                     }
@@ -216,7 +244,32 @@ class ChatPanel(
         }
     }
 
+    /** EDT. "Not detailed enough? Ask Sonnet 5.5" under the reply just finished. */
+    private fun addReaskButton(question: String, model: String) {
+        val button = JButton("Not detailed enough? Ask $model").apply {
+            toolTipText = "Send the same question to $model for a more detailed answer"
+            addActionListener {
+                if (sendButton.isEnabled) streamReply(question, reaskModel = model)
+            }
+        }
+        val row = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = JBUI.Borders.empty(0, 0, 4, 32)
+            add(button)
+        }
+        reaskRow = row
+        column.add(row)
+        column.revalidate()
+    }
+
+    private fun removeReaskButton() {
+        reaskRow?.let { column.remove(it); column.revalidate(); column.repaint() }
+        reaskRow = null
+    }
+
     private fun setBusy(busy: Boolean) {
+        reaskRow?.components?.forEach { it.isEnabled = !busy }
         sendButton.isEnabled = !busy
         sendButton.text = if (busy) "…" else "Send"
         input.isEnabled = !busy
@@ -255,7 +308,7 @@ class ChatPanel(
     // --- message bubble ---------------------------------------------------------
 
     /** One message: a role label and Markdown content, with copyable code blocks. */
-    class MessageBubble(val role: Role) : JPanel(BorderLayout()) {
+    class MessageBubble(val role: Role, label: String = role.label) : JPanel(BorderLayout()) {
         private val body = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
@@ -272,7 +325,7 @@ class ChatPanel(
                 JBUI.Borders.customLine(JBColor(Color(0xD9DEE6), Color(0x454A52)), 1),
                 JBUI.Borders.empty(6, 10, 8, 10),
             )
-            add(JLabel(role.label).apply {
+            add(JLabel(label).apply {
                 font = font.deriveFont(Font.BOLD, font.size2D - 1f)
                 foreground = JBColor.GRAY
                 border = JBUI.Borders.emptyBottom(2)
@@ -313,7 +366,7 @@ class ChatPanel(
             }
             val align = if (rtl) "text-align:right;" else ""
             text = "<html><body style=\"font-family:${f.family};font-size:${f.size}pt;margin:0;$align\">" +
-                MarkdownLite.toHtml(md) + "</body></html>"
+                MarkdownLite.toHtml(md, hardBreaks = role != Role.EXERCISE) + "</body></html>"
         }
 
         /** True when Hebrew letters dominate, ignoring `inline code` (identifiers are Latin). */
@@ -371,6 +424,23 @@ class ChatPanel(
     private data class Segment(val text: String, val isCode: Boolean)
 
     companion object {
+        private const val MIN_INPUT_ROWS = 3
+        private const val MAX_INPUT_ROWS = 8
+
+        /** Enter sends; Shift+Enter starts a new line (a text area has no binding for it). */
+        internal fun installSendKeys(area: JTextComponent, onSend: () -> Unit) {
+            area.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "veriexam-send")
+            area.actionMap.put("veriexam-send", object : AbstractAction() {
+                override fun actionPerformed(e: ActionEvent) = onSend()
+            })
+            area.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, InputEvent.SHIFT_DOWN_MASK), "veriexam-newline")
+            area.actionMap.put("veriexam-newline", object : AbstractAction() {
+                override fun actionPerformed(e: ActionEvent) {
+                    if (area.isEditable && area.isEnabled) area.replaceSelection("\n")
+                }
+            })
+        }
+
         // Older servers send plain text with these markers instead of ``` fences.
         private const val PLAIN_START = "▼▼▼"
         private const val PLAIN_END = "▲▲▲"
