@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 import yaml
 
-from backend import db, portability, terminal
+from backend import db, packages, portability, terminal
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +15,11 @@ _LOADED: dict[str, dict[str, Any]] = {}
 # an *edit* of a built-in (it overrides the YAML in memory) rather than a
 # console-authored exercise.
 _YAML_IDS: set[str] = set()
+# The ids that came from a package folder (backend/packages.py). The folder is
+# the source of truth: edits are written back into it, never into the DB.
+_PACKAGE_IDS: set[str] = set()
+# Packages that failed to load at the last (re)load: [{folder, error}].
+_LOAD_ERRORS: list[dict[str, str]] = []
 
 _ACTIVE_SETTING_KEY = "active_exercise_id"
 # Stored in place of an id when the teacher switched the active exercise off:
@@ -31,13 +36,16 @@ _DIRECTORY: Optional[Path] = None
 
 
 def load_all(directory: Path) -> dict[str, dict[str, Any]]:
-    """Load the bundled YAML exercises. Clears the cache first, so this is the
-    canonical 'start from disk' step. Call load_from_db() afterwards to layer
-    teacher edits / console-authored exercises on top."""
+    """Load the bundled YAML exercises, then the packages in the private data
+    folder (a package wins over a bundled exercise with the same id). Clears the
+    cache first, so this is the canonical 'start from disk' step. Call
+    load_from_db() afterwards to layer dashboard-made exercises on top."""
     global _DIRECTORY
     _DIRECTORY = directory
     _LOADED.clear()
     _YAML_IDS.clear()
+    _PACKAGE_IDS.clear()
+    _LOAD_ERRORS.clear()
     for path in sorted(directory.glob("*.yaml")):
         with path.open() as f:
             data = yaml.safe_load(f)
@@ -49,7 +57,49 @@ def load_all(directory: Path) -> dict[str, dict[str, Any]]:
         _check_os(data)
         _LOADED[data["exercise_id"]] = data
         _YAML_IDS.add(data["exercise_id"])
+    for folder in packages.package_dirs():
+        _load_package(folder)
     return _LOADED
+
+
+def _load_package(folder: Path) -> Optional[dict[str, Any]]:
+    """Load one package folder into the cache; a broken one is logged and kept
+    out (see load_errors()) rather than stopping the server."""
+    try:
+        data = packages.load_package(folder)
+        _validate(data, folder.name)
+    except ValueError as e:
+        logger.warning("exercise package skipped: %s", e)
+        _LOAD_ERRORS.append({"folder": str(folder), "error": str(e)})
+        return None
+    eid = data["exercise_id"]
+    if eid in _YAML_IDS:
+        logger.warning("package %s replaces the bundled exercise with the same id", folder)
+        _YAML_IDS.discard(eid)
+    _check_os(data)
+    _LOADED[eid] = data
+    _PACKAGE_IDS.add(eid)
+    return data
+
+
+def reload_package(exercise_id: str) -> dict[str, Any]:
+    """Load one package again from its folder (after an edit or an install)."""
+    folder = packages.exercises_dir() / exercise_id
+    if exercise_id in _PACKAGE_IDS and _LOADED.get(exercise_id, {}).get("package_dir"):
+        folder = Path(_LOADED[exercise_id]["package_dir"])
+    _LOAD_ERRORS[:] = [e for e in _LOAD_ERRORS if Path(e["folder"]) != folder]
+    data = _load_package(folder)
+    if data is None:
+        raise ValueError(_LOAD_ERRORS[-1]["error"])
+    return data
+
+
+def load_errors() -> list[dict[str, str]]:
+    return list(_LOAD_ERRORS)
+
+
+def is_package(exercise_id: str) -> bool:
+    return exercise_id in _PACKAGE_IDS
 
 
 def reload_all() -> dict[str, dict[str, Any]]:
@@ -73,6 +123,10 @@ def load_from_db() -> None:
             "FROM exercises"
         ).fetchall()
     for row in rows:
+        if row["exercise_id"] in _PACKAGE_IDS:
+            logger.warning("ignoring the database copy of %s: its package folder is the source",
+                           row["exercise_id"])
+            continue
         ex = _row_to_exercise(row)
         _check_os(ex)
         _LOADED[row["exercise_id"]] = ex
@@ -151,6 +205,10 @@ def variant(exercise_id: str, variant_id: str) -> dict[str, Any]:
     for v in variants(exercise_id):
         if v["id"] == variant_id:
             return v
+    # An exercise without variants has one implicit variant; sessions started
+    # when it still had a placeholder one ("A", "v1") open that.
+    if _LOADED[exercise_id].get("implicit_variant"):
+        return variants(exercise_id)[0]
     raise KeyError(f"variant {variant_id} not found in {exercise_id}")
 
 
@@ -172,6 +230,15 @@ def update(exercise_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     if exercise_id not in _LOADED:
         raise KeyError(exercise_id)
     payload = {**payload, "exercise_id": exercise_id}
+    if exercise_id in _PACKAGE_IDS:
+        # A package: write the edit into its files and load it again.
+        current = _LOADED[exercise_id]
+        merged = {**current, **{k: v for k, v in payload.items() if v is not None}}
+        if current.get("implicit_variant") and payload.get("variants") == current["variants"]:
+            merged["implicit_variant"] = True
+        _validate(merged, "update")
+        packages.write_back(current, payload)
+        return reload_package(exercise_id)
     # Preserve fields the editor UI may not send. The dashboard form has no
     # scaffold_filename input, so a plain edit would otherwise wipe it (and with
     # it the exercise's language) — keep the current value when none is given.
@@ -180,6 +247,14 @@ def update(exercise_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             existing = _LOADED.get(exercise_id, {}).get(key)
             if existing:
                 payload[key] = existing
+    # The edit form sends step text and the expected answer; keep the rest
+    # (os_check, evidence, …) of each step it doesn't mention.
+    old_steps = _LOADED[exercise_id].get("steps") or []
+    if payload.get("steps") and old_steps:
+        payload["steps"] = [
+            {**(old_steps[i] if i < len(old_steps) else {}), **{k: v for k, v in st.items() if v is not None}}
+            for i, st in enumerate(payload["steps"])
+        ]
     _validate(payload, "update")
     return _upsert(payload)
 
@@ -271,6 +346,11 @@ def _set_setting(key: str, value: str) -> None:
         )
 
 
+def validate(data: dict[str, Any], where: str) -> None:
+    """Raise ValueError on any problem with an exercise dict (public name)."""
+    _validate(data, where)
+
+
 def _validate(data: dict[str, Any], where: str) -> None:
     """Single gate for both YAML and console-authored exercises. Raises
     ValueError on any problem (the route maps this to a 400)."""
@@ -311,6 +391,10 @@ def _validate(data: dict[str, Any], where: str) -> None:
     # scaffold_filename is optional; if given it selects the starter file (and,
     # via its extension, the language) the IDE plugin scaffolds for this exercise.
     terminal.validate(data.get("terminal"), where)
+
+    cc = data.get("check_command")
+    if cc is not None and (not isinstance(cc, str) or not cc.strip()):
+        raise ValueError(f"{where}: check_command must be a command line, e.g. 'python checks.py'")
 
     sf = data.get("scaffold_filename")
     if sf is not None:

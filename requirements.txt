@@ -15,3 +15,5 @@ crewai==0.86.0
 setuptools<81
 ruff==0.7.0
 pytest==8.3.3
+# Round-trip YAML: dashboard edits written back into exercise packages keep their comments.
+ruamel.yaml>=0.18

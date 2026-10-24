@@ -1,0 +1,32 @@
+# A small package for the tests (backend/packages.py). Not a real lab.
+exercise_id: pkg-demo
+course_name: "Test Course"
+language: python
+title_he: "תרגיל לדוגמה"
+title_en: "Demo package"
+default_mode: mentor
+download: pkg-demo-files.zip
+check_command: python checks.py
+brief_md: |
+  **Welcome.** A demo exercise with two steps.
+welcome_suggestions:
+  - "Done with step 1. Our answers:"
+  - "We are stuck. Can you give us a hint?"
+  - "How do we run a Python file?"
+tutor_notes: |
+  Never state the number of rows.
+terminal:
+  blocked_hint: "Install packages in PyCharm's Terminal tab."
+steps:
+  - title: "Count the rows"
+    minutes: 10
+    text: |
+      Run `count.py` and answer:
+      - How many rows are there?
+      - Which column has missing values?
+  - title: "ספירה בעברית"
+    minutes: 5
+    text: |
+      ענו על השאלות:
+      1. כמה שורות יש ב-`data.csv`?
+      2. למה?

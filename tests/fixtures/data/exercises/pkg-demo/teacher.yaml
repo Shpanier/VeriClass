@@ -1,0 +1,12 @@
+# Teacher-only: never sent to students or the tutor.
+notes: |
+  The answer for step 1 is 3 rows.
+steps:
+  - expected: |
+      3 rows; column b has a missing value.
+    questions: 2
+    evidence:
+      - label: "ran count.py"
+        command: "python count.py"
+        expect: "^3$"
+  - expected: "3, because the header isn't a row."

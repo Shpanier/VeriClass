@@ -1,0 +1,13 @@
+questions:
+  - id: q01
+    step: 1
+    question: "How do I count the rows of a CSV file?"
+    paraphrases: ["איך סופרים שורות בקובץ CSV?"]
+    answers:
+      nudge: {en: "Which pandas attribute gives the size of a table?", he: "איזו תכונה של pandas נותנת את גודל הטבלה?"}
+      normal: {en: "Load it with pd.read_csv and look at len(df).", he: "טענו עם pd.read_csv ובדקו את len(df)."}
+  - id: q02
+    step: 1
+    question: "How do I find the columns with missing values?"
+    answers:
+      direct: {en: "df.isna().sum() counts the missing values per column.", he: "df.isna().sum() סופר ערכים חסרים בכל עמודה."}

@@ -1,8 +1,11 @@
 """Run an exercise's terminal commands on macOS and in BusyBox, and show what differs.
 
 Usage:
-    python scripts/check_exercise_os.py config/exercises/lab1-linux-git.yaml
+    python scripts/check_exercise_os.py ../VeriExPrivateData/exercises/lab1-linux-git
     python scripts/check_exercise_os.py config/exercises/*.yaml --no-docker
+
+Takes exercise package folders (backend/packages.py, teacher.yaml merged in) or
+one-file exercise YAMLs.
 
 What it runs, in order, in a fresh folder: every command in the code blocks of
 each step, then the step's teacher-only `os_check:` lines (put the reference
@@ -33,7 +36,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend import portability, terminal  # noqa: E402
+from backend import packages, portability, terminal  # noqa: E402
 
 IMAGE = "alpine/git:v2.47.2"  # BusyBox 1.37 + Git 2.47
 
@@ -104,7 +107,8 @@ def normalize(text: str) -> str:
 
 
 def check(path: Path, use_docker: bool) -> int:
-    ex = yaml.safe_load(path.read_text(encoding="utf-8"))
+    ex = (packages.load_package(path) if path.is_dir()
+          else yaml.safe_load(path.read_text(encoding="utf-8")))
     allow = set(terminal.policy_for(ex)["allow"])
     cmds = portability.commands_of(ex, allow)
     print(f"\n=== {ex['exercise_id']}: {len(cmds)} commands")

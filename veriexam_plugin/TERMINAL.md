@@ -80,7 +80,7 @@ an exercise's commands on this machine and in BusyBox (Docker), and shows every
 command whose output differs:
 
 ```bash
-python scripts/check_exercise_os.py config/exercises/lab1-linux-git.yaml
+python scripts/check_exercise_os.py ../VeriExPrivateData/exercises/lab1-linux-git
 ```
 
 It runs, in order, every command in the steps' code blocks, then each step's
