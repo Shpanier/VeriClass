@@ -23,10 +23,11 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
     refresh();
   }, []);
 
-  const setActive = async (id: string) => {
+  // makeActive=false switches the active exercise off (no exercise is active).
+  const setActive = async (id: string, makeActive = true) => {
     setBusyId(id);
     try {
-      await api.setActiveExercise(id);
+      await (makeActive ? api.setActiveExercise(id) : api.disableActiveExercise());
       await refresh();
       onActiveChanged(); // keep the monitor tab's header in sync
     } catch (e) {
@@ -67,6 +68,9 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
 
       {exercises === null && <p style={{ color: "#6b7280" }}>{t("loading")}</p>}
       {exercises?.length === 0 && <p style={{ color: "#6b7280" }}>{t("noExercises")}</p>}
+      {!!exercises?.length && !exercises.some((ex) => ex.is_active) && (
+        <p style={{ color: "#b45309", marginTop: 0 }}>{t("noActiveExercise")}</p>
+      )}
 
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
         {exercises?.map((ex) => {
@@ -96,7 +100,11 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
                 {t("variantsCount", { n: ex.variant_count })} · {modeLabel(ex.default_mode, t)}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {!ex.is_active && (
+                {ex.is_active ? (
+                  <Button variant="neutral" disabled={busy} onClick={() => setActive(ex.exercise_id, false)}>
+                    {busy ? t("saving") : t("disableActive")}
+                  </Button>
+                ) : (
                   <Button variant="neutral" disabled={busy} onClick={() => setActive(ex.exercise_id)}>
                     {busy ? t("saving") : t("setActive")}
                   </Button>

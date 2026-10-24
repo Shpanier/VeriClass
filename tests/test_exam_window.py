@@ -67,3 +67,21 @@ def test_client_config_asks_for_a_maximized_window(client, monkeypatch):
     monkeypatch.setenv("EXAM_MODE", "false")
     monkeypatch.delenv("EXAM_MAXIMIZED")
     assert client.get("/api/client-config").json()["exam_maximized"] is False
+
+
+def test_closing_the_ide_shows_at_once_until_the_exam_starts_again(client):
+    hs = _h(client, STUDENT)
+    ht = _h(client, TEACHER)
+    sid = client.post("/api/sessions", json={}, headers=hs).json()["session_id"]
+    client.post("/api/proctor/heartbeat", headers=hs,
+                json={"session_id": sid, "status": {"focused": True, "maximized": True}})
+    before = {s["session_id"]: s for s in client.get("/api/students", headers=ht).json()}[sid]["focus_alerts"]
+    r = client.post("/api/proctor/event", headers=hs,
+                    json={"session_id": sid, "kind": "ide_closed", "detail": "closed PyCharm"})
+    assert r.status_code == 200, r.text
+    row = {s["session_id"]: s for s in client.get("/api/students", headers=ht).json()}[sid]
+    # The last snapshot (still fresh) said "focused"; the close wins over it.
+    assert (row["exam_state"], row["focus_alerts"]) == ("ide_closed", before + 1)
+    client.post("/api/proctor/event", headers=hs, json={"session_id": sid, "kind": "exam_started"})
+    row = {s["session_id"]: s for s in client.get("/api/students", headers=ht).json()}[sid]
+    assert row["exam_state"] == "ok"

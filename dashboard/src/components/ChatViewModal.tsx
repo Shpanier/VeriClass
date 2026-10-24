@@ -137,6 +137,7 @@ function MessageBubble({ m }: { m: Message }) {
       >
         <div style={{ fontSize: 10, color: "#666", marginBottom: 4 }}>
           {m.role} · {m.created_at} · {m.mode_at_time}
+          {m.model && <> · {m.model}{m.cached ? " (cached)" : ""}</>}
         </div>
         {m.body}
       </div>

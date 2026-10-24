@@ -14,7 +14,9 @@ ALERT_KINDS = ("focus_lost", "minimized", "fullscreen_exited",
                # Windows: the OS has another app in front (GetForegroundWindow).
                "other_app_in_front",
                # The window was made smaller than maximized ("restore down").
-               "window_unmaximized")
+               "window_unmaximized",
+               # The student closed the IDE (or the exam project) during the exam.
+               "ide_closed")
 
 # Terminal violations: a refused command in the VeriExam terminal (written by
 # routes/terminal.py, never by the client directly) and an attempt to open the

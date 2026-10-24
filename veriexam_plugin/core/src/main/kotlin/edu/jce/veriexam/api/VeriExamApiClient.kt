@@ -19,6 +19,9 @@ class VeriExamApiException(message: String) : RuntimeException(message)
 // HTML "you are about to visit" interstitial (which would break JSON parsing).
 // Harmless when the backend is reached directly (localhost / LAN / Cloudflare).
 private const val NGROK_HEADER = "ngrok-skip-browser-warning"
+// Set by the server on a tutor reply that may be asked again with a stronger model.
+private const val REASK_HEADER = "X-VeriExam-Reask"
+private val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(30)
 
 /**
  * Thin client over the six student-facing VeriExam endpoints. All calls are
@@ -105,14 +108,19 @@ class VeriExamApiClient {
      * the calling thread for each decoded chunk; callers marshal to the EDT.
      * Reading stops early if [cancelled] flips to true. Long timeout: review
      * mode holds the response until the teacher picks a variant.
+     *
+     * [reask]: answer this already-asked question again with the server's
+     * stronger model. Returns the name of that model (e.g. "Sonnet 5.5") when
+     * this reply may be asked again, else null.
      */
     fun ask(
         token: String,
         sessionId: String,
         message: String,
         cancelled: AtomicBoolean,
+        reask: Boolean = false,
         onToken: (String) -> Unit,
-    ) {
+    ): String? {
         val request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/ask"))
             .header("Authorization", "Bearer $token")
             .header("Content-Type", "application/json")
@@ -122,7 +130,7 @@ class VeriExamApiClient {
             .timeout(Duration.ofMinutes(10))
             .POST(
                 HttpRequest.BodyPublishers.ofString(
-                    gson.toJson(mapOf("session_id" to sessionId, "message" to message)),
+                    gson.toJson(mapOf("session_id" to sessionId, "message" to message, "reask" to reask)),
                     StandardCharsets.UTF_8,
                 ),
             )
@@ -144,6 +152,7 @@ class VeriExamApiClient {
                 if (n > 0) onToken(String(buf, 0, n))
             }
         }
+        return resp.headers().firstValue(REASK_HEADER).orElse(null)?.takeIf { it.isNotBlank() }
     }
 
     // --- probes -----------------------------------------------------------
@@ -213,8 +222,8 @@ class VeriExamApiClient {
      * paste) and return the HTTP status. Throws on a network failure, so the
      * outbox ([edu.jce.veriexam.trace.ReportOutbox]) knows to retry. Call off the EDT.
      */
-    fun postReport(path: String, body: Map<String, Any?>, token: String): Int =
-        sendJson("POST", path, body = body.filterValues { it != null }, token = token).statusCode()
+    fun postReport(path: String, body: Map<String, Any?>, token: String, timeout: Duration = REQUEST_TIMEOUT): Int =
+        sendJson("POST", path, body = body.filterValues { it != null }, token = token, timeout = timeout).statusCode()
 
     /**
      * Keep-alive carrying the exam client's live status (focused, full screen,
@@ -238,11 +247,12 @@ class VeriExamApiClient {
         path: String,
         body: Any?,
         token: String?,
+        timeout: Duration = REQUEST_TIMEOUT,
     ): HttpResponse<String> {
         val builder = HttpRequest.newBuilder(URI.create(baseUrl + path))
             .header("Content-Type", "application/json")
             .header(NGROK_HEADER, "true")
-            .timeout(Duration.ofSeconds(30))
+            .timeout(timeout)
         if (token != null) builder.header("Authorization", "Bearer $token")
 
         val publisher = if (body == null) {

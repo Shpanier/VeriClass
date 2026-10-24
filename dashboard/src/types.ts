@@ -37,7 +37,7 @@ export interface Student {
   last_alert_at?: string | null;
 }
 
-export type ExamState = "ok" | "away" | "other_window" | "not_fullscreen" | "not_maximized" | "no_signal";
+export type ExamState = "ok" | "away" | "other_window" | "not_fullscreen" | "not_maximized" | "ide_closed" | "no_signal";
 
 // What the exam client sends with every heartbeat and on every change.
 export interface LiveStatus {
@@ -257,6 +257,10 @@ export interface Message {
   body: string;
   mode_at_time: string;
   created_at: string;
+  /** The LLM that wrote this reply (null: teacher, lab steps, older rows). */
+  model?: string | null;
+  /** 1: served from the answer cache, no LLM call. */
+  cached?: number;
 }
 
 export interface Probe {
@@ -284,6 +288,7 @@ export interface PendingReview {
   id: number;
   session_id: string;
   username: string;
+  exercise_id?: string;
   question: string;
   // English variants.
   variant_nudge: string;
@@ -300,6 +305,7 @@ export interface StepCheck {
   id: number;
   session_id: string;
   username: string;
+  exercise_id?: string;
   step: number;
   total: number;
   title: string;

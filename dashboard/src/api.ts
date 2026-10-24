@@ -118,6 +118,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ exercise_id: exerciseId }),
     }),
+  disableActiveExercise: () =>
+    j<{ exercise_id: null }>("/api/exercises/active", { method: "DELETE" }),
   students: () => j<Student[]>("/api/students"),
   sessionDetail: (sessionId: string) =>
     j<SessionDetail>(`/api/students/${sessionId}/messages`),

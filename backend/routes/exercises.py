@@ -26,7 +26,10 @@ def _students_exercise(user: dict, session_id: Optional[str]) -> dict[str, Any]:
             return exercises.get(row["exercise"])
         except KeyError:
             pass
-    return exercises.active()
+    ex = exercises.active()
+    if ex is None:
+        raise HTTPException(404, "No exercise is open right now. Ask your teacher.")
+    return ex
 
 
 @router.get("/exercises/active")
@@ -37,7 +40,12 @@ def active_exercise(
 ):
     """Teachers: the global active exercise. Students: the exercise of their own
     session (see _students_exercise)."""
-    ex = exercises.active() if deps.is_teacher(user) else _students_exercise(user, session_id)
+    if deps.is_teacher(user):
+        ex = exercises.active()
+        if ex is None:
+            raise HTTPException(404, "No active exercise")
+    else:
+        ex = _students_exercise(user, session_id)
     response = {
         "exercise_id": ex["exercise_id"],
         "title_en": ex["title_en"],
@@ -82,7 +90,7 @@ def active_exercise(
 # --- teacher-only authoring --------------------------------------------------
 
 
-def _summary(ex: dict[str, Any], active_id: str) -> dict[str, Any]:
+def _summary(ex: dict[str, Any], active_id: Optional[str]) -> dict[str, Any]:
     return {
         "exercise_id": ex["exercise_id"],
         "title_en": ex["title_en"],
@@ -192,7 +200,8 @@ def update_exercise(
 
 
 class SetActiveRequest(BaseModel):
-    exercise_id: str
+    # None switches the active exercise off (students outside a course get none).
+    exercise_id: Optional[str] = None
 
 
 @router.post("/exercises/active")
@@ -202,3 +211,10 @@ def set_active_exercise(req: SetActiveRequest, teacher: dict = Depends(deps.requ
     except KeyError:
         raise HTTPException(404, f"Unknown exercise '{req.exercise_id}'")
     return {"exercise_id": req.exercise_id}
+
+
+@router.delete("/exercises/active")
+def disable_active_exercise(teacher: dict = Depends(deps.require_teacher)):
+    """Switch the active exercise off. Course exercises are not affected."""
+    exercises.set_active(None)
+    return {"exercise_id": None}

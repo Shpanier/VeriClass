@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 
@@ -17,6 +17,9 @@ _LOADED: dict[str, dict[str, Any]] = {}
 _YAML_IDS: set[str] = set()
 
 _ACTIVE_SETTING_KEY = "active_exercise_id"
+# Stored in place of an id when the teacher switched the active exercise off:
+# students outside every course then get no exercise.
+_DISABLED = "__none__"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
@@ -96,20 +99,29 @@ def get(exercise_id: str) -> dict[str, Any]:
     return _LOADED[exercise_id]
 
 
-def active() -> dict[str, Any]:
-    """The exercise students get assigned to. Honors the teacher's choice stored
-    in system_settings; falls back to the first exercise alphabetically (the
-    original single-exercise MVP behavior) when unset or stale."""
+def active() -> Optional[dict[str, Any]]:
+    """The exercise students outside every course get assigned to. Honors the
+    teacher's choice stored in system_settings; None when the teacher switched it
+    off. Falls back to the first exercise alphabetically (the original
+    single-exercise MVP behavior) when unset or stale."""
     if not _LOADED:
         raise RuntimeError("No exercises loaded")
     chosen = _get_setting(_ACTIVE_SETTING_KEY)
+    if chosen == _DISABLED:
+        return None
     if chosen and chosen in _LOADED:
         return _LOADED[chosen]
+    return first()
+
+
+def first() -> dict[str, Any]:
+    """The first exercise alphabetically, for callers that always need one."""
     return next(iter(_LOADED.values()))
 
 
-def active_id() -> str:
-    return active()["exercise_id"]
+def active_id() -> Optional[str]:
+    ex = active()
+    return ex["exercise_id"] if ex else None
 
 
 def all() -> list[dict[str, Any]]:
@@ -220,7 +232,11 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
     return stored
 
 
-def set_active(exercise_id: str) -> None:
+def set_active(exercise_id: Optional[str]) -> None:
+    """Make an exercise the active one; None switches the active exercise off."""
+    if exercise_id is None:
+        _set_setting(_ACTIVE_SETTING_KEY, _DISABLED)
+        return
     if exercise_id not in _LOADED:
         raise KeyError(exercise_id)
     _set_setting(_ACTIVE_SETTING_KEY, exercise_id)
