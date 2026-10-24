@@ -14,10 +14,12 @@ class LevelText(BaseModel):
 
 
 class VariantSet(BaseModel):
-    """The three teacher-reviewable answer levels, each bilingual."""
+    """The four teacher-reviewable answers, each bilingual: three Socratic levels
+    and one direct (non-Socratic) answer."""
     nudge: LevelText
     normal: LevelText
     more: LevelText
+    direct: LevelText
 
 
 class ProbeItem(BaseModel):

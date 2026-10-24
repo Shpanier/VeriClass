@@ -11,6 +11,7 @@ import type {
   PendingReview,
   ProbeSuggestion,
   ProctorEvent,
+  RegenModel,
   SessionDetail,
   StepChecksResponse,
   Student,
@@ -173,6 +174,12 @@ export const api = {
       body: JSON.stringify({ enabled }),
     }),
   pendingReviews: () => j<PendingReview[]>("/api/reviews/pending"),
+  reviewConfig: () => j<{ regen_models: RegenModel[] }>("/api/reviews/config"),
+  regenerateReview: (id: number, model: RegenModel["key"]) =>
+    j<PendingReview>(`/api/reviews/${id}/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({ model }),
+    }),
   pendingStepChecks: () => j<StepChecksResponse>("/api/step-checks/pending"),
   decideStepCheck: (id: number, action: "approve" | "return", note: string) =>
     j<{ ok: boolean }>(`/api/step-checks/${id}/decide`, {
@@ -204,7 +211,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ password }),
     }),
-  selectReview: (id: number, chosen: AnswerLevel, lang: Lang, text?: string) =>
+  selectReview: (id: number, chosen: AnswerLevel | "bank", lang: Lang, text?: string) =>
     j<{ ok: boolean }>(`/api/reviews/${id}/select`, {
       method: "POST",
       body: JSON.stringify(text === undefined ? { chosen, lang } : { chosen, lang, text }),

@@ -20,6 +20,9 @@ KEY_ENV = claude_student.API_KEY_ENV if PROVIDER == "anthropic" else gemini_stud
 MODEL = claude_student.MODEL if PROVIDER == "anthropic" else gemini_student.MODEL
 
 STRONG_MODEL = os.environ.get("CLAUDE_STRONG_MODEL", "claude-sonnet-5-5").strip()
+# The smartest model, for the teacher's "regenerate with Opus" button in the
+# review queue (empty turns that button off).
+BEST_MODEL = os.environ.get("CLAUDE_BEST_MODEL", "claude-opus-5-5").strip()
 
 
 def strong_available() -> bool:
@@ -27,6 +30,18 @@ def strong_available() -> bool:
     already answered."""
     return bool(STRONG_MODEL and os.environ.get(claude_student.API_KEY_ENV)
                 and STRONG_MODEL != MODEL)
+
+
+def regen_models() -> list[dict]:
+    """The models the teacher can have a question's four answers drafted again
+    with: [{key: 'strong'|'best', model, label}], only those configured with a key."""
+    if not os.environ.get(claude_student.API_KEY_ENV):
+        return []
+    out = []
+    for key, model in (("strong", STRONG_MODEL), ("best", BEST_MODEL)):
+        if model and model not in {m["model"] for m in out}:
+            out.append({"key": key, "model": model, "label": model_label(model)})
+    return out
 
 
 def model_label(model: str) -> str:

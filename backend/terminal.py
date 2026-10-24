@@ -6,10 +6,12 @@ An exercise may carry an optional `terminal:` block:
       allow: [ls, cat, grep, awk, sort, uniq, head, tail, wc, git]  # replaces the default list
       allow_extra: [python3]   # added on top of `allow` (or of the default list)
       scripts: true            # students may run their own .sh scripts (checked line by line)
+      blocked_hint: "Install packages in PyCharm's Terminal tab."  # shown under every refusal
 
-Without one, DEFAULT_ALLOW applies. Shell builtins (cd, echo, export, test, …)
-are always allowed; shells (sh, bash, powershell, cmd) and eval/exec never are —
-the plugin enforces both regardless of this list.
+Without one, DEFAULT_ALLOW applies, plus PYTHON_EXTRA for a Python exercise
+(language: python), so `pip install` works in a Python lab. Shell builtins (cd,
+echo, export, test, …) are always allowed; shells (sh, bash, powershell, cmd) and
+eval/exec never are — the plugin enforces both regardless of this list.
 """
 from typing import Any
 
@@ -33,7 +35,12 @@ DEFAULT_ALLOW: tuple[str, ...] = (
     "git",
 )
 
+# Added to the default list in a Python exercise without a `terminal:` block. In
+# October 2026 six students' `pip install` was refused at the start of a Python lab.
+PYTHON_EXTRA: tuple[str, ...] = ("pip", "pip3", "python", "python3", "py")
+
 _NAME_MAX = 64
+_HINT_MAX = 300
 
 
 def validate(cfg: Any, where: str) -> None:
@@ -42,7 +49,10 @@ def validate(cfg: Any, where: str) -> None:
         return
     if not isinstance(cfg, dict):
         raise ValueError(f"{where}: terminal must be a mapping")
-    unknown = set(cfg) - {"allow", "allow_extra", "scripts"}
+    hint = cfg.get("blocked_hint")
+    if hint is not None and (not isinstance(hint, str) or len(hint) > _HINT_MAX):
+        raise ValueError(f"{where}: terminal.blocked_hint must be text of at most {_HINT_MAX} characters")
+    unknown = set(cfg) - {"allow", "allow_extra", "scripts", "blocked_hint"}
     if unknown:
         raise ValueError(f"{where}: terminal has unknown key(s): {', '.join(sorted(unknown))}")
     for key in ("allow", "allow_extra"):
@@ -63,9 +73,13 @@ def policy_for(exercise: dict[str, Any]) -> dict[str, Any]:
     cfg = exercise.get("terminal") or {}
     base = cfg.get("allow")
     allow = {n.strip().lower() for n in (base if base is not None else DEFAULT_ALLOW)}
+    if base is None and (exercise.get("language") or "").lower() == "python":
+        allow |= set(PYTHON_EXTRA)
     allow |= {n.strip().lower() for n in cfg.get("allow_extra") or []}
     return {
         "allow": sorted(allow),
         "scripts": bool(cfg.get("scripts", True)),
         "source": "exercise" if cfg else "default",
+        # Shown under every refused line: where to run the command instead.
+        "blocked_hint": (cfg.get("blocked_hint") or "").strip() or None,
     }

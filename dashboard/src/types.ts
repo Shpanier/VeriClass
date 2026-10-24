@@ -281,8 +281,25 @@ export interface SessionDetail {
   probes: Probe[];
 }
 
-export type AnswerLevel = "nudge" | "normal" | "more";
+// Three Socratic levels and a direct (non-Socratic) answer.
+export type AnswerLevel = "nudge" | "normal" | "more" | "direct";
 export type Lang = "en" | "he";
+
+// The closest question-bank entry to a student's question (backend/bank.py).
+export interface BankMatch {
+  id: string;
+  step: number | null;
+  question: string;
+  score: number; // 0..1
+  answers: Partial<Record<AnswerLevel, { en: string; he: string }>>;
+}
+
+// A model the teacher can have the four answers drafted again with.
+export interface RegenModel {
+  key: "strong" | "best";
+  model: string;
+  label: string;
+}
 
 export interface PendingReview {
   id: number;
@@ -294,11 +311,19 @@ export interface PendingReview {
   variant_nudge: string;
   variant_normal: string;
   variant_more: string;
+  variant_direct: string | null; // null on rows from before the direct answer existed
   // Hebrew variants (may be null on rows created before the bilingual feature).
   variant_nudge_he: string | null;
   variant_normal_he: string | null;
   variant_more_he: string | null;
+  variant_direct_he: string | null;
   created_at: string;
+  /** The model that drafted the answers; regenerated_at is set after "redo with". */
+  model: string | null;
+  regenerated_at: string | null;
+  /** The language the student wrote in: the card opens on it. */
+  suggested_lang: Lang;
+  bank_match: BankMatch | null;
 }
 
 export interface StepCheck {

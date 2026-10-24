@@ -82,9 +82,26 @@ def test_default_policy():
 
 def test_exercise_policy_replaces_and_extends():
     p = terminal.policy_for({"terminal": {"allow": ["LS", "cat"], "allow_extra": ["python3"], "scripts": False}})
-    assert p == {"allow": ["cat", "ls", "python3"], "scripts": False, "source": "exercise"}
+    assert p == {"allow": ["cat", "ls", "python3"], "scripts": False, "source": "exercise", "blocked_hint": None}
     p = terminal.policy_for({"terminal": {"allow_extra": ["python3"]}})
     assert "python3" in p["allow"] and "grep" in p["allow"]
+
+
+def test_python_lab_allows_pip_by_default():
+    # October 2026: six students' `pip install` was refused at the start of a Python lab.
+    p = terminal.policy_for({"language": "python"})
+    assert {"pip", "pip3", "python", "python3"} <= set(p["allow"])
+    # An explicit list wins: the teacher decides.
+    p = terminal.policy_for({"language": "python", "terminal": {"allow": ["ls"]}})
+    assert p["allow"] == ["ls"]
+
+
+def test_blocked_hint():
+    hint = "Install packages in PyCharm's Terminal tab."
+    assert terminal.policy_for({"terminal": {"blocked_hint": hint}})["blocked_hint"] == hint
+    terminal.validate({"blocked_hint": hint}, "x")
+    with pytest.raises(ValueError):
+        terminal.validate({"blocked_hint": "x" * 301}, "x")
 
 
 @pytest.mark.parametrize(

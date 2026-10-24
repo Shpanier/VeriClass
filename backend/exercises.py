@@ -23,10 +23,15 @@ _DISABLED = "__none__"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
+_DIRECTORY: Optional[Path] = None
+
+
 def load_all(directory: Path) -> dict[str, dict[str, Any]]:
     """Load the bundled YAML exercises. Clears the cache first, so this is the
     canonical 'start from disk' step. Call load_from_db() afterwards to layer
     teacher edits / console-authored exercises on top."""
+    global _DIRECTORY
+    _DIRECTORY = directory
     _LOADED.clear()
     _YAML_IDS.clear()
     for path in sorted(directory.glob("*.yaml")):
@@ -40,6 +45,16 @@ def load_all(directory: Path) -> dict[str, dict[str, Any]]:
         _check_os(data)
         _LOADED[data["exercise_id"]] = data
         _YAML_IDS.add(data["exercise_id"])
+    return _LOADED
+
+
+def reload_all() -> dict[str, dict[str, Any]]:
+    """Start again from disk, then layer the database's edits on top (what the
+    server does at startup)."""
+    if _DIRECTORY is None:
+        raise RuntimeError("load_all() was never called")
+    load_all(_DIRECTORY)
+    load_from_db()
     return _LOADED
 
 

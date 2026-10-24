@@ -21,7 +21,7 @@ os.environ.setdefault("GEMINI_API_KEY", "unused-in-auth-tests")
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import db
+from backend import db, exercises
 from backend.main import app
 
 REPO = Path(__file__).resolve().parent.parent
@@ -33,7 +33,8 @@ BOB_CODE = "STU-BOBBB"
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as tc:  # lifespan runs init_schema + load exercises
+    # Teacher logins are local-only (deps.TEACHER_LOCAL_ONLY): look like the dashboard on this machine.
+    with TestClient(app, client=("127.0.0.1", 50000)) as tc:  # lifespan runs init_schema + load exercises
         with db.conn() as c:
             c.execute(
                 "INSERT INTO users(username, login_code, role) VALUES(?,?,?)",
@@ -48,6 +49,11 @@ def client():
                 ("Bob Beta", BOB_CODE, "student"),
             )
         yield tc
+        # The authoring tests edit and create exercises in the database every test
+        # module shares: put the bundled exercises back as they were.
+        with db.conn() as c:
+            c.execute("DELETE FROM exercises")
+        exercises.reload_all()
 
 
 def _token(tc, code):

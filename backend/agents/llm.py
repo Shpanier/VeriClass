@@ -59,6 +59,7 @@ def gemini_llm(
     model: str | None = None,
     temperature: float = 0.4,
     timeout: float | None = None,
+    max_tokens: int | None = None,
 ) -> LLM:
     """Return a CrewAI LLM pinned to Gemini.
 
@@ -71,11 +72,30 @@ def gemini_llm(
     if PROVIDER == "anthropic":
         # Current Claude models reject `temperature`, so it is not sent.
         return _ClaudeLLM(model=f"anthropic/{CLAUDE_MODEL}", api_key=_api_key(),
-                          timeout=tmo, max_tokens=4096)
+                          timeout=tmo, max_tokens=max_tokens or 4096)
     name = model or _config().get("model") or DEFAULT_MODEL
+    extra = {"max_tokens": max_tokens} if max_tokens else {}
     return LLM(
         model=f"gemini/{name}",
         api_key=_api_key(),
         temperature=temperature,
         timeout=tmo,
+        **extra,
     )
+
+
+def claude_llm(model: str, timeout: float | None = None, max_tokens: int = 4096) -> LLM:
+    """A CrewAI LLM on a named Claude model, whatever LLM_PROVIDER says: the
+    teacher's "regenerate with Sonnet / Opus" buttons. Needs ANTHROPIC_API_KEY."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not key:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set, so answers can't be regenerated with Claude.")
+    tmo = timeout if timeout is not None else float(_config().get("timeout_sec", 30))
+    return _ClaudeLLM(model=f"anthropic/{model}", api_key=key, timeout=tmo, max_tokens=max_tokens)
+
+
+def default_model_name() -> str:
+    """The model the agents use when no model is named (shown in the review queue)."""
+    if PROVIDER == "anthropic":
+        return CLAUDE_MODEL
+    return _config().get("model") or DEFAULT_MODEL

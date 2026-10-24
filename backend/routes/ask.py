@@ -1,14 +1,17 @@
 import asyncio
 import logging
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend import answer_cache, db, deps, exercises, steps, student_llm
+from backend import (
+    answer_cache, bank, db, deps, environment, exercises, prompting, steps, student_llm, textutil,
+)
 from backend.agents import tutor
-from backend.prompts import course_name, student_system_prompt
+from backend.prompts import course_name
 from backend.routes import review as review_mod
 
 REVIEW_TIMEOUT_SECONDS = 600  # how long the student request waits for the teacher
@@ -23,6 +26,8 @@ class AskRequest(BaseModel):
     message: str
     # "Ask again": answer this (already asked) question with the stronger model.
     reask: bool = False
+    # Plugin 0.4.3+: the student's OS, e.g. "Windows 11 amd64" (also sent as a header).
+    client_os: Optional[str] = None
 
 
 # Sent with replies that can be asked again; the value is the button's model name.
@@ -49,14 +54,12 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
         raise HTTPException(400, "Request looks like prompt injection — refused.")
 
     ex = exercises.get(s["exercise"])
-    variant = exercises.variant(s["exercise"], s["variant"])
-    sys_prompt = student_system_prompt(ex, variant, s["mode"])
+    environment.remember_os(req.session_id, req.client_os or request.headers.get("x-veriexam-client-os"))
     # Older IDE plugins (Java HTTP client) showed replies as plain text; newer ones
     # announce Markdown support with X-VeriExam-Render.
     plain = ("java" in request.headers.get("user-agent", "").lower()
              and request.headers.get("x-veriexam-render", "").lower() != "markdown")
-    if steps.steps_of(ex):
-        sys_prompt += "\n\n" + steps.tutor_context(ex, req.session_id, plain)
+    sys_prompt = prompting.system_prompt_for(s, plain)
     if req.reask:
         return _reask(req, s, ex, sys_prompt)
     msgs = _history(req.session_id)
@@ -77,9 +80,19 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
 
     if review_mod.review_mode_enabled():
         return StreamingResponse(
-            _gen_review(req, s, sys_prompt, msgs),
+            _gen_review(req, s, sys_prompt, msgs, plain),
             media_type="text/plain",
         )
+
+    # Question bank (BANK_AUTO_ANSWER): a near-identical question gets its ready
+    # answer, in the student's language, with no model call.
+    if bank.AUTO_ANSWER:
+        match = bank.match_for_session(req.session_id, req.message)
+        if match and match["score"] >= bank.AUTO_THRESHOLD:
+            answer = match["answers"].get("normal") or next(iter(match["answers"].values()))
+            text = answer[textutil.detect_lang(req.message)]
+            _save_reply(req.session_id, s["mode"], text, model="bank")
+            return StreamingResponse(_stream(text), media_type="text/plain")
 
     async def gen():
         collected = []
@@ -183,8 +196,9 @@ def _reask(req: AskRequest, s, ex, sys_prompt: str) -> StreamingResponse:
     return StreamingResponse(gen(), media_type="text/plain")
 
 
-async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict]):
-    """Review-mode generator: enqueue 3 variants, wait for teacher pick, stream chosen."""
+async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict], plain: bool = False):
+    """Review-mode generator: draft four answers, wait for the teacher's pick,
+    stream the chosen text."""
     # Tell the student something is happening so they don't think it hung.
     yield "🧑‍🏫 _Your teacher is reviewing your question — one moment…_\n\n"
 
@@ -198,18 +212,7 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict]):
         yield f"_⚠️ Could not generate review options: {e}_\n"
         return
 
-    with db.conn() as c:
-        cur = c.execute(
-            "INSERT INTO pending_reviews(session_id, question, "
-            "variant_nudge, variant_normal, variant_more, "
-            "variant_nudge_he, variant_normal_he, variant_more_he) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-            (req.session_id, req.message,
-             variants["nudge"]["en"], variants["normal"]["en"], variants["more"]["en"],
-             variants["nudge"]["he"], variants["normal"]["he"], variants["more"]["he"]),
-        )
-        review_id = cur.lastrowid
-
+    review_id = review_mod.enqueue(req.session_id, req.message, variants, plain)
     ev = review_mod.event_for(review_id)
     try:
         try:
@@ -223,35 +226,25 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict]):
             yield "_⚠️ No teacher response in time. Please ping the instructor and try again._\n"
             return
 
-        with db.conn() as c:
-            row = c.execute(
-                "SELECT chosen_level, chosen_lang, final_text, "
-                "variant_nudge, variant_normal, variant_more, "
-                "variant_nudge_he, variant_normal_he, variant_more_he "
-                "FROM pending_reviews WHERE id = ?", (review_id,),
-            ).fetchone()
-        chosen = row["chosen_level"]
-        # Prefer the exact text the teacher sent (it may be edited and/or Hebrew).
-        # Fall back to the stored variant in the chosen language for safety.
-        suffix = "_he" if row["chosen_lang"] == "he" else ""
-        fallback = row[f"variant_{chosen}{suffix}"] or row[f"variant_{chosen}"]
-        text = row["final_text"] or fallback
-
-        # Stream it back in small chunks so the UI animates rather than thudding.
-        for word in text.split(" "):
-            yield word + " "
-            await asyncio.sleep(0.01)
-
+        chosen, text = review_mod.chosen_text(review_id)
+        # Save BEFORE streaming: a connection dropped mid-stream (the student
+        # closed the IDE, the tunnel blinked) must not lose an answer the teacher
+        # already approved. In October 2026 two approved answers were lost that way.
         with db.conn() as c:
             c.execute(
-                "INSERT INTO messages (session_id, role, body, mode_at_time, answer_level) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (req.session_id, "assistant", text, s["mode"], chosen),
+                "INSERT INTO messages (session_id, role, body, mode_at_time, answer_level, model) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (req.session_id, "assistant", text, s["mode"], chosen, review_mod.model_of(review_id)),
             )
             c.execute(
                 "UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (req.session_id,),
             )
+
+        # Stream it back in small chunks so the UI animates rather than thudding.
+        for word in text.split(" "):
+            yield word + " "
+            await asyncio.sleep(0.01)
     finally:
         review_mod.drop_event(review_id)
 

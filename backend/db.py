@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS messages (
     role          TEXT NOT NULL,
     body          TEXT NOT NULL,
     mode_at_time  TEXT NOT NULL,
-    answer_level  TEXT,            -- 'nudge' | 'normal' | 'more' when picked by teacher; NULL otherwise
+    answer_level  TEXT,            -- 'nudge' | 'normal' | 'more' | 'direct' | 'bank' when picked by teacher; NULL otherwise
     created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
@@ -342,6 +342,13 @@ def init_schema() -> None:
             "variant_more_he": "TEXT",
             "chosen_lang": "TEXT",
             "final_text": "TEXT",
+            # The fourth, non-Socratic answer (added after the October 2026 classes).
+            "variant_direct": "TEXT",
+            "variant_direct_he": "TEXT",
+            "model": "TEXT",              # the model that drafted the four answers
+            "regenerated_at": "TEXT",     # set when the teacher had them drafted again
+            "render_plain": "INTEGER NOT NULL DEFAULT 0",  # the student's client shows plain text
+            "bank_match": "TEXT",         # JSON: the closest question-bank entry (backend/bank.py)
         })
         _add_missing_columns(c, "submissions", {
             "language": "TEXT",
@@ -353,6 +360,7 @@ def init_schema() -> None:
         _add_missing_columns(c, "sessions", {
             "trace_key": "TEXT",
             "course_id": "TEXT",  # the course the student picked (NULL: no courses set up)
+            "client_os": "TEXT",  # e.g. "Windows 11 amd64", from the plugin (0.4.3+)
         })
         # NULL = the password is still the login code (backend/passwords.py).
         _add_missing_columns(c, "users", {"password_hash": "TEXT"})
