@@ -40,3 +40,11 @@ veriexam_plugin/busybox/
 # Local secrets backups and tunnel logs
 .env.backup*
 deploy/logs/
+
+# Course labs and their files hold teacher-only answers (expected, os_check,
+# tutor notes): they stay on the teacher's machine. Only the demo exercises are public.
+config/exercises/*
+!config/exercises/ex3-mcalc.yaml
+!config/exercises/ex4-mstat.yaml
+!config/exercises/ex5-pycalc.yaml
+config/exercise_files/
