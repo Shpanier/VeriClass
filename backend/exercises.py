@@ -21,6 +21,10 @@ _ACTIVE_SETTING_KEY = "active_exercise_id"
 # students outside every course then get no exercise.
 _DISABLED = "__none__"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+# Optional exercise fields kept in the DB row's `data` JSON, and kept on an edit
+# that doesn't send them (the dashboard form has no input for some).
+_EXTRA_KEYS = ("scaffold_filename", "course_name", "language", "tutor_notes", "steps", "terminal",
+               "check_command", "faq")
 
 
 _DIRECTORY: Optional[Path] = None
@@ -87,12 +91,7 @@ def _row_to_exercise(row: Any) -> dict[str, Any]:
         "welcome_suggestions": extra.get("welcome_suggestions", []),
         "required_error_strings": extra.get("required_error_strings", []),
         "param_labels": extra.get("param_labels", []),
-        "scaffold_filename": extra.get("scaffold_filename"),
-        "course_name": extra.get("course_name"),
-        "language": extra.get("language"),
-        "tutor_notes": extra.get("tutor_notes"),
-        "steps": extra.get("steps"),
-        "terminal": extra.get("terminal"),
+        **{k: extra.get(k) for k in _EXTRA_KEYS},
         # An edit of a built-in keeps the 'yaml' source but is flagged edited so
         # the dashboard can show "built-in (edited)".
         "source": "yaml" if is_yaml else "console",
@@ -176,7 +175,7 @@ def update(exercise_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     # Preserve fields the editor UI may not send. The dashboard form has no
     # scaffold_filename input, so a plain edit would otherwise wipe it (and with
     # it the exercise's language) — keep the current value when none is given.
-    for key in ("scaffold_filename", "course_name", "language", "tutor_notes", "steps", "terminal"):
+    for key in _EXTRA_KEYS:
         if not payload.get(key):
             existing = _LOADED.get(exercise_id, {}).get(key)
             if existing:
@@ -196,12 +195,7 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
         "welcome_suggestions": payload.get("welcome_suggestions", []),
         "required_error_strings": payload.get("required_error_strings", []),
         "param_labels": payload.get("param_labels", []),
-        "scaffold_filename": payload.get("scaffold_filename"),
-        "course_name": payload.get("course_name"),
-        "language": payload.get("language"),
-        "tutor_notes": payload.get("tutor_notes"),
-        "steps": payload.get("steps"),
-        "terminal": payload.get("terminal"),
+        **{k: payload.get(k) for k in _EXTRA_KEYS},
     }
     with db.conn() as c:
         c.execute(
@@ -233,12 +227,7 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
         "welcome_suggestions": data["welcome_suggestions"],
         "required_error_strings": data["required_error_strings"],
         "param_labels": data["param_labels"],
-        "scaffold_filename": data["scaffold_filename"],
-        "course_name": data["course_name"],
-        "language": data["language"],
-        "tutor_notes": data["tutor_notes"],
-        "steps": data["steps"],
-        "terminal": data["terminal"],
+        **{k: data[k] for k in _EXTRA_KEYS},
         "source": "yaml" if is_yaml else "console",
         "edited": is_yaml,
     }

@@ -26,6 +26,14 @@ class ChoosePanelTest {
     }
 
     @Test
+    fun `today's meeting opens its exercise in the only course`() {
+        val course = CourseDto("dl", "Deep Learning", "ex5", listOf(ex("ex5"), ex("lab2")), today_exercise = "lab2")
+        assertEquals("dl" to "lab2", ChoosePanel.autoChoice(listOf(course)))
+        // An exercise the course doesn't offer is ignored.
+        assertNull(ChoosePanel.autoChoice(listOf(course.copy(today_exercise = "other"))))
+    }
+
+    @Test
     fun `the Hebrew title follows the English one`() {
         assertEquals("Lab 1 · מעבדה 1", ChoosePanel.label(CourseExerciseDto("lab1", "Lab 1", "מעבדה 1")))
         assertEquals("Lab 1", ChoosePanel.label(CourseExerciseDto("lab1", "Lab 1", null)))

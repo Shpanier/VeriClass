@@ -131,6 +131,9 @@ class ChoosePanel(
          */
         fun autoChoice(courses: List<CourseDto>): Pair<String, String>? {
             val course = courses.singleOrNull() ?: return null
+            // A meeting today in the student's only course: open its exercise.
+            course.today_exercise?.takeIf { id -> course.exercises.any { it.exercise_id == id } }
+                ?.let { return course.course_id to it }
             val exercise = course.exercises.singleOrNull() ?: return null
             return course.course_id to exercise.exercise_id
         }

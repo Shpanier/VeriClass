@@ -15,6 +15,7 @@ import edu.jce.veriexam.api.VeriExamApiException
 import edu.jce.veriexam.api.SessionResponse
 import edu.jce.veriexam.exam.ExamBanner
 import edu.jce.veriexam.exam.ExamGuard
+import edu.jce.veriexam.ide.CheckRunner
 import edu.jce.veriexam.ide.ExerciseScaffolder
 import edu.jce.veriexam.ide.RunReporter
 import edu.jce.veriexam.ide.SubmissionCollector
@@ -194,8 +195,15 @@ class VeriExamPanel(
 
         // One scrolling conversation: the exercise brief is the first message;
         // students scroll up to read it again.
-        val chat = ChatPanel(api, login.token, session.session_id, sessionScope, trace) { onPaste("chat", it) }
+        val steps = ChatPanel.StepState(exercise.steps_total, exercise.step_current)
+        val chat = ChatPanel(
+            api, login.token, session.session_id, sessionScope, trace,
+            onPaste = { onPaste("chat", it) },
+            steps = steps,
+            attachments = { stepAttachment(exercise) },
+        )
         chat.addMessage(ChatPanel.Role.EXERCISE, Briefing.markdown(exercise, session.variant))
+        nonEnglishPathNotice()?.let(chat::addNotice)
         if (config.isIdeMode && exercise.variant != null) {
             chat.addComponent(TestChecklistPanel(exercise.variant))
         }
@@ -228,6 +236,37 @@ class VeriExamPanel(
 
         revalidate()
         repaint()
+    }
+
+    /**
+     * EDT. What a step submission carries for the teacher: the open file and the
+     * Run console now, and the exercise's check command's output (run off the EDT).
+     */
+    private fun stepAttachment(exercise: Exercise): ChatPanel.PendingAttachment {
+        val work = SubmissionCollector.collect(project)
+        val command = exercise.check_command
+        return ChatPanel.PendingAttachment {
+            mapOf(
+                "filename" to work.filename,
+                "source" to work.source,
+                "console" to work.console,
+                "check_output" to CheckRunner.run(project, command),
+            )
+        }
+    }
+
+    /**
+     * A project folder whose path has non-English letters makes the terminal's
+     * `cd` fail (seen in class in October 2026), so say so up front.
+     */
+    private fun nonEnglishPathNotice(): String? {
+        val path = project.basePath ?: return null
+        if (path.all { it.code < 128 }) return null
+        return "Your project folder's path has letters that aren't English:\n\n`$path`\n\n" +
+            "Some terminal commands (like `cd`) will fail there. Move the project to a folder with an " +
+            "English name, for example `C:/VeriExam/lab` or `~/VeriExam/lab`, and open it again.\n\n" +
+            "בנתיב של תיקיית הפרויקט יש אותיות שאינן באנגלית, ולכן חלק מהפקודות בטרמינל (כמו `cd`) ייכשלו. " +
+            "העבירו את הפרויקט לתיקייה עם שם באנגלית ופתחו אותו מחדש."
     }
 
     private fun header(

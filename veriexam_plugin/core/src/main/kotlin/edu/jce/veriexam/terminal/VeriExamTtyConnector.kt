@@ -158,6 +158,7 @@ class VeriExamTtyConnector(
                 emit("${YELLOW}veriexam: ${verdict.reason}$RESET\r\n")
             } else {
                 emit("${RED}veriexam: ${verdict.reason}.$RESET\r\n")
+                policy.blockedHint?.let { emit("$YELLOW${wrap(it)}$RESET\r\n") }
                 emit("${DIM}This attempt was reported to your instructor.$RESET\r\n")
             }
             record(line, verdict, exitCode = null, durationMs = null, output = null)

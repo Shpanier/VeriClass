@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend import courses, db, deps, variants
+from backend import courses, db, deps, environment, variants
 
 router = APIRouter()
 
@@ -15,6 +15,8 @@ class StartSessionRequest(BaseModel):
     # when there is only one possibility; see courses.resolve().
     course_id: Optional[str] = None
     exercise_id: Optional[str] = None
+    # Plugin 0.4.3+: the student's OS, for the tutor (backend/environment.py).
+    client_os: Optional[str] = None
 
 
 def _trace_key(c, session_id: str) -> str:
@@ -54,8 +56,8 @@ def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_us
         if existing:
             c.execute(
                 "UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP, "
-                "course_id = COALESCE(?, course_id) WHERE id = ?",
-                (course_id, existing["id"]),
+                "course_id = COALESCE(?, course_id), client_os = COALESCE(?, client_os) WHERE id = ?",
+                (course_id, environment.clean_os(req.client_os), existing["id"]),
             )
             return {
                 "session_id": existing["id"],
@@ -70,10 +72,10 @@ def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_us
         variant_id = variants.assign(exercise["exercise_id"])
         trace_key = secrets.token_hex(32)
         c.execute(
-            "INSERT INTO sessions (id, user_id, exercise, mode, variant, trace_key, course_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO sessions (id, user_id, exercise, mode, variant, trace_key, course_id, client_os) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (session_id, user_id, exercise["exercise_id"], exercise["default_mode"], variant_id, trace_key,
-             course_id),
+             course_id, environment.clean_os(req.client_os)),
         )
 
     return {

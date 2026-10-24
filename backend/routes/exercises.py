@@ -81,9 +81,16 @@ def active_exercise(
     # Step-by-step labs: append only the step this student is on (step 1 for a
     # new pair; later steps after a re-login). Teacher-only `expected` never leaves.
     if steps.steps_of(ex):
-        n = steps.current_step_for_user(user["id"], ex["exercise_id"])
+        n = (steps.current_step(session_id) if session_id
+             else steps.current_step_for_user(user["id"], ex["exercise_id"]))
         if n <= len(steps.steps_of(ex)):
             response["brief_md"] += "\n\n" + steps.step_markdown(ex, n)
+        # The plugin (0.4.3+) offers to send answers as a submission of this step.
+        response["steps_total"] = len(steps.steps_of(ex))
+        response["step_current"] = n
+    # Run by the plugin on a step submission, its output attached for the teacher.
+    if ex.get("check_command"):
+        response["check_command"] = ex["check_command"]
     return response
 
 

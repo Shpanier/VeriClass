@@ -20,6 +20,8 @@ data class CourseDto(
     val name: String = "",
     val default_exercise: String = "",
     val exercises: List<CourseExerciseDto> = emptyList(),
+    /** The exercise of today's meeting in this course, if there is one (backend 0.4.3+). */
+    val today_exercise: String? = null,
 )
 
 data class CourseExerciseDto(
@@ -71,12 +73,19 @@ data class Exercise(
     val variant: Variant? = null,
     /** What the VeriExam terminal allows for this exercise. Null from a backend without terminal support. */
     val terminal: TerminalPolicyDto? = null,
+    /** Step-by-step labs: how many steps, and the one this student is on (0: no steps / older backend). */
+    val steps_total: Int = 0,
+    val step_current: Int = 0,
+    /** Run on a step submission and attached for the teacher, e.g. "python checks.py". */
+    val check_command: String? = null,
 )
 
 /** The exercise's terminal rules: which programs may run, and whether student scripts may. */
 data class TerminalPolicyDto(
     val allow: List<String> = emptyList(),
     val scripts: Boolean = true,
+    /** Shown under every refused line: where to run the command instead. */
+    val blocked_hint: String? = null,
 )
 
 data class Probe(

@@ -3,6 +3,7 @@ package edu.jce.veriexam.api
 import com.google.gson.Gson
 import com.intellij.openapi.diagnostic.thisLogger
 import edu.jce.veriexam.settings.VeriExamSettings
+import edu.jce.veriexam.trace.SessionTrace
 import java.io.InputStreamReader
 import java.net.URI
 import java.net.http.HttpClient
@@ -65,6 +66,8 @@ class VeriExamApiClient {
         val body = buildMap<String, Any> {
             courseId?.let { put("course_id", it) }
             exerciseId?.let { put("exercise_id", it) }
+            // The tutor uses it to explain errors (Windows behaves differently).
+            put("client_os", SessionTrace.CLIENT_OS)
         }
         val resp = sendJson("POST", "/api/sessions", body = body, token = token)
         requireOk(resp, "Could not start a session")
@@ -112,6 +115,9 @@ class VeriExamApiClient {
      * [reask]: answer this already-asked question again with the server's
      * stronger model. Returns the name of that model (e.g. "Sonnet 5.5") when
      * this reply may be asked again, else null.
+     *
+     * [attachment]: sent with a step submission ("Done with step N") for the
+     * teacher: filename, source (the open file), console, check_output.
      */
     fun ask(
         token: String,
@@ -119,8 +125,16 @@ class VeriExamApiClient {
         message: String,
         cancelled: AtomicBoolean,
         reask: Boolean = false,
+        attachment: Map<String, String?>? = null,
         onToken: (String) -> Unit,
     ): String? {
+        val body = buildMap<String, Any> {
+            put("session_id", sessionId)
+            put("message", message)
+            put("reask", reask)
+            put("client_os", SessionTrace.CLIENT_OS)
+            attachment?.filterValues { !it.isNullOrBlank() }?.takeIf { it.isNotEmpty() }?.let { put("attachment", it) }
+        }
         val request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/ask"))
             .header("Authorization", "Bearer $token")
             .header("Content-Type", "application/json")
@@ -128,12 +142,7 @@ class VeriExamApiClient {
             // This client renders Markdown (chat bubbles); older ones got plain text.
             .header("X-VeriExam-Render", "markdown")
             .timeout(Duration.ofMinutes(10))
-            .POST(
-                HttpRequest.BodyPublishers.ofString(
-                    gson.toJson(mapOf("session_id" to sessionId, "message" to message, "reask" to reask)),
-                    StandardCharsets.UTF_8,
-                ),
-            )
+            .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8))
             .build()
 
         val resp = http.send(request, HttpResponse.BodyHandlers.ofInputStream())

@@ -61,9 +61,25 @@ class ChatPanel(
     private val trace: SessionTrace? = null,
     /** Exam mode: called with the text of every paste into the input box. */
     private val onPaste: ((String) -> Unit)? = null,
+    /** Step-by-step labs: how many steps, and the one the student is on (kept up to date from replies). */
+    private val steps: StepState = StepState(0, 0),
+    /** On a step submission, on the EDT: what to attach for the teacher (the open file, the check's output). */
+    private val attachments: (() -> PendingAttachment?)? = null,
 ) : JPanel(BorderLayout()), Disposable {
 
-    enum class Role(val label: String) { EXERCISE("📘 Exercise"), USER("You"), TUTOR("Tutor") }
+    enum class Role(val label: String) {
+        EXERCISE("📘 Exercise"), USER("You"), TUTOR("Tutor"), NOTICE("⚠️ VeriExam"),
+    }
+
+    /** The lab's steps as far as this chat knows. */
+    class StepState(var total: Int, var current: Int) {
+        val active: Boolean get() = total > 0 && current in 1..total
+    }
+
+    /** An attachment collected on the EDT, finished off it (running the check command can take seconds). */
+    fun interface PendingAttachment {
+        fun complete(): Map<String, String?>
+    }
 
     private val column = ScrollableColumn().apply { border = JBUI.Borders.empty(6, 6, 12, 6) }
     private val scroll = JBScrollPane(
@@ -94,6 +110,8 @@ class ChatPanel(
     private val cancelled = AtomicBoolean(false)
     /** The "ask again" button under the latest reply; removed once anything new is sent. */
     private var reaskRow: JComponent? = null
+    /** "Send these as your step answers?" / "No answers yet" above the box; removed on the next send. */
+    private var promptRow: JComponent? = null
 
     init {
         Disposer.register(parent, this)
@@ -183,9 +201,73 @@ class ChatPanel(
     private fun onSend() {
         val text = input.text.trim()
         if (text.isEmpty() || !sendButton.isEnabled) return
+        removePrompt()
+        if (steps.active) {
+            if (AnswerDetector.isDone(text) && AnswerDetector.doneWithoutAnswers(text)) {
+                showPrompt(
+                    "Your message has no answers yet. Write them after the colon, then send. " +
+                        "· ההודעה עוד בלי תשובות. כתבו אותן אחרי הנקודתיים ושלחו.",
+                    "Edit · לערוך" to { input.requestFocusInWindow(); input.caretPosition = input.text.length },
+                    "Send anyway · לשלוח בכל זאת" to { send(text) },
+                )
+                return
+            }
+            if (!AnswerDetector.isDone(text) && AnswerDetector.looksLikeAnswers(text)) {
+                val n = steps.current
+                showPrompt(
+                    "This looks like your answers to step $n. Send them to your teacher? " +
+                        "· נראה כמו תשובות לשלב $n. לשלוח אותן למורה?",
+                    "Send as step $n · לשלוח כהגשה" to { send(AnswerDetector.asSubmission(text, n)) },
+                    "Ask the tutor · לשאול את הטוטור" to { send(text) },
+                )
+                return
+            }
+        }
+        send(text)
+    }
+
+    private fun send(text: String) {
+        removePrompt()
         input.text = ""
         addMessage(Role.USER, text)
-        streamReply(text, reaskModel = null)
+        val attachment = if (steps.active && AnswerDetector.isDone(text)) {
+            runCatching { attachments?.invoke() }.getOrNull()
+        } else null
+        streamReply(text, reaskModel = null, attachment = attachment)
+    }
+
+    /** EDT. A short question above the input box with one button per choice. */
+    private fun showPrompt(message: String, vararg choices: Pair<String, () -> Unit>) {
+        val panel = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
+            isOpaque = true
+            background = JBColor(Color(0xFFF4D6), Color(0x4A3F22))
+            border = JBUI.Borders.empty(6, 8)
+            add(JLabel("<html>${com.intellij.openapi.util.text.StringUtil.escapeXmlEntities(message)}</html>"),
+                BorderLayout.CENTER)
+            add(JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0)).apply {
+                isOpaque = false
+                for ((label, action) in choices) add(JButton(label).apply { addActionListener { action() } })
+            }, BorderLayout.SOUTH)
+        }
+        promptRow = panel
+        south.add(panel, BorderLayout.SOUTH)
+        south.revalidate()
+        south.repaint()
+    }
+
+    private fun removePrompt() {
+        promptRow?.let { south.remove(it); south.revalidate(); south.repaint() }
+        promptRow = null
+    }
+
+    /** EDT. A notice from VeriExam itself (not the tutor), e.g. a project folder that will cause trouble. */
+    fun addNotice(markdown: String) = addMessage(Role.NOTICE, markdown)
+
+    /** Follow the lab's progress from the replies the server sends (decisions, "you are on step N"). */
+    private fun trackStep(reply: String) {
+        Regex("""approved step (\d+)""").find(reply)?.let { steps.current = it.groupValues[1].toInt() + 1 }
+        Regex("""You are now on step (\d+)""").find(reply)?.let { steps.current = it.groupValues[1].toInt() }
+        if (reply.contains("finished all the steps")) steps.current = steps.total + 1
     }
 
     /**
@@ -193,7 +275,7 @@ class ChatPanel(
      * this question again with that (stronger) model; the server answers it
      * from the same point in the conversation and stores no second question.
      */
-    private fun streamReply(question: String, reaskModel: String?) {
+    private fun streamReply(question: String, reaskModel: String?, attachment: PendingAttachment? = null) {
         removeReaskButton()
         val label = reaskModel?.let { "Tutor · $it" } ?: Role.TUTOR.label
         val reply = MessageBubble(Role.TUTOR, label).apply { setMarkdown("…") }
@@ -210,7 +292,9 @@ class ChatPanel(
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                canReaskWith = api.ask(token, sessionId, question, cancelled, reask = reaskModel != null) { chunk ->
+                val attached = attachment?.let { runCatching { it.complete() }.getOrNull() }
+                canReaskWith = api.ask(token, sessionId, question, cancelled, reask = reaskModel != null,
+                    attachment = attached) { chunk ->
                     ApplicationManager.getApplication().invokeLater {
                         buffer.append(chunk)
                         render.restart()
@@ -228,6 +312,7 @@ class ChatPanel(
                 ApplicationManager.getApplication().invokeLater {
                     render.stop()
                     reply.setMarkdown(buffer.toString().ifBlank { "⚠️ No reply." })
+                    trackStep(buffer.toString())
                     canReaskWith?.takeIf { !failed && buffer.isNotBlank() }?.let { addReaskButton(question, it) }
                     scrollToBottom()
                     setBusy(false)
@@ -284,7 +369,7 @@ class ChatPanel(
             border = when (bubble.role) {
                 Role.USER -> JBUI.Borders.empty(4, 48, 4, 0)
                 Role.TUTOR -> JBUI.Borders.empty(4, 0, 4, 32)
-                Role.EXERCISE -> JBUI.Borders.empty(4, 0, 8, 0)
+                Role.EXERCISE, Role.NOTICE -> JBUI.Borders.empty(4, 0, 8, 0)
             }
             add(bubble, BorderLayout.CENTER)
         }
@@ -319,6 +404,7 @@ class ChatPanel(
                 Role.USER -> JBColor(Color(0xE3EEFC), Color(0x2B3A4F))
                 Role.TUTOR -> JBColor(Color(0xF4F5F7), Color(0x30333A))
                 Role.EXERCISE -> JBColor(Color(0xFFF8E1), Color(0x3A3524))
+                Role.NOTICE -> JBColor(Color(0xFFE9D6), Color(0x4A3322))
             }
             isOpaque = true
             border = BorderFactory.createCompoundBorder(

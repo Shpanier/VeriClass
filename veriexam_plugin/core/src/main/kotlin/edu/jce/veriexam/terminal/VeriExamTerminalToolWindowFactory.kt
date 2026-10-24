@@ -72,7 +72,9 @@ private class TerminalHostPanel(private val project: Project, parent: Disposable
             val pluginDir = PluginManager.getPluginByClass(VeriExamTtyConnector::class.java)?.pluginPath
             val connector = VeriExamTtyConnector(
                 shell = ShellLocator.locate(pluginDir),
-                policy = TerminalPolicy(dto.allow.map { it.lowercase() }.toSet(), dto.scripts),
+                policy = TerminalPolicy(
+                    dto.allow.map { it.lowercase() }.toSet(), dto.scripts, dto.blocked_hint?.takeIf { it.isNotBlank() },
+                ),
                 projectDir = projectDir,
                 projectName = project.name,
                 stateDir = Files.createTempDirectory("veriexam-terminal").toFile(),

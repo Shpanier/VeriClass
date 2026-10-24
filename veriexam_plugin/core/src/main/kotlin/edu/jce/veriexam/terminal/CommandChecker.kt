@@ -8,6 +8,8 @@ data class TerminalPolicy(
     val allow: Set<String>,
     /** Allow `./script.sh`, `sh script.sh` and `. script.sh` — after scanning the script with the same rules. */
     val scripts: Boolean = true,
+    /** The exercise's note shown under every refused line: where to run the command instead. */
+    val blockedHint: String? = null,
 )
 
 /** The checker's answer for one command line. */
