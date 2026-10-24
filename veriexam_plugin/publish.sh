@@ -19,6 +19,9 @@
 #    2) $VERIEXAM_SERVER
 #    3) the local backend (BACKEND_PORT in ../deploy/tunnel.conf), if running
 #    4) NGROK_DOMAIN from ../deploy/tunnel.conf
+#  Authentication, to a server on this machine: the local key the server keeps
+#  in the private data folder (../../VeriExPrivateData/.local-token, or
+#  $VERIEXAM_DATA_DIR/.local-token) — nothing to type. Otherwise:
 #  Teacher code:  $VERIEXAM_TEACHER_CODE, else you're prompted (input hidden).
 #  Password:      $VERIEXAM_TEACHER_PASSWORD, else you're prompted; empty = the code
 #                 (the default until a password is set).
@@ -73,6 +76,18 @@ ZIP="$(ls -t "$PRODUCT/build/distributions/veriexam-$PRODUCT-plugin-"*.zip 2>/de
 [[ -n "$ZIP" ]] || { echo "✖ No zip in $PRODUCT/build/distributions/. Build first (drop --no-build)." >&2; exit 1; }
 echo "==> publishing $ZIP (version $VERSION, product $PRODUCT) → $SERVER"
 
+NG_HDR='ngrok-skip-browser-warning: true'   # skip ngrok-free's interstitial page
+DATA_DIR="${VERIEXAM_DATA_DIR:-../../VeriExPrivateData}"
+if [[ "$SERVER" =~ ^http://(127\.0\.0\.1|localhost)(:|/|$) && -r "$DATA_DIR/.local-token" ]]; then
+  # The server is on this machine: its local key authenticates (no teacher code).
+  RESP="$(curl -s -X POST \
+    "$SERVER/api/plugin/publish?version=$VERSION&product=$PRODUCT&filename=$(basename "$ZIP")" \
+    -H "X-VeriExam-Local-Token: $(cat "$DATA_DIR/.local-token")" --data-binary @"$ZIP")"
+  echo "$RESP" | grep -q '"ok":true' \
+    && { echo "==> ✓ published ($PRODUCT). Students can now run:  scripts/update_plugin.sh --product $PRODUCT"; exit 0; } \
+    || { echo "✖ Publish failed: $RESP" >&2; exit 1; }
+fi
+
 # Teacher code → token.
 CODE="${VERIEXAM_TEACHER_CODE:-}"
 if [[ -z "$CODE" ]]; then
@@ -84,7 +99,6 @@ if [[ -z "${VERIEXAM_TEACHER_PASSWORD+set}" ]]; then
 fi
 PASSWORD="${PASSWORD:-$CODE}"
 json_str() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
-NG_HDR='ngrok-skip-browser-warning: true'   # skip ngrok-free's interstitial page
 LOGIN="$(curl -s -X POST "$SERVER/api/login" \
   -H 'Content-Type: application/json' -H "$NG_HDR" \
   -d "{\"code\":\"$(json_str "$CODE")\",\"password\":\"$(json_str "$PASSWORD")\"}")"
