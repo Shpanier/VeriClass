@@ -12,6 +12,7 @@ import type {
   ProbeSuggestion,
   ProctorEvent,
   RegenModel,
+  RosterResult,
   SessionDetail,
   StepChecksResponse,
   Student,
@@ -205,6 +206,11 @@ export const api = {
   deleteCourse: (courseId: string) =>
     j<{ ok: boolean }>(`/api/courses/${encodeURIComponent(courseId)}`, { method: "DELETE" }),
   users: () => j<UserAccount[]>("/api/users"),
+  importStudents: (contentBase64: string, courseId: string | null, dryRun: boolean) =>
+    j<RosterResult>("/api/students/import", {
+      method: "POST",
+      body: JSON.stringify({ content_base64: contentBase64, course_id: courseId, dry_run: dryRun }),
+    }),
   // password null: back to the default (the login code).
   setPassword: (userId: number, password: string | null) =>
     j<{ ok: boolean; custom_password: boolean }>(`/api/users/${userId}/password`, {

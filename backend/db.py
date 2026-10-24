@@ -371,7 +371,13 @@ def init_schema() -> None:
             "check_output": "TEXT",
         })
         # NULL = the password is still the login code (backend/passwords.py).
-        _add_missing_columns(c, "users", {"password_hash": "TEXT"})
+        # email / student_id / group_name come from a CSV import (backend/roster.py).
+        _add_missing_columns(c, "users", {
+            "password_hash": "TEXT",
+            "email": "TEXT",
+            "student_id": "TEXT",
+            "group_name": "TEXT",
+        })
         for table in ("terminal_commands", "proctor_events"):
             _add_missing_columns(c, table, {
                 "client_id": "TEXT",

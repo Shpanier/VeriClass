@@ -4,6 +4,7 @@ import type { Course, ExerciseSummary, UserAccount } from "../types";
 import { useLang } from "../i18n";
 import { Button } from "./ui/Button";
 import { controlStyle } from "./ui/Field";
+import { ImportStudentsModal } from "./ImportStudentsModal";
 
 // The "Courses" tab: which students are in which course, which exercises each
 // course offers, and the one preselected after login (backend/courses.py).
@@ -17,6 +18,7 @@ export function CoursesPanel() {
   const [newId, setNewId] = useState("");
   const [newName, setNewName] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const load = () =>
     Promise.all([api.courses(), api.exercises(), api.users()])
@@ -51,11 +53,14 @@ export function CoursesPanel() {
     <section>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <h2 style={{ margin: 0 }}>{t("coursesTitle")}</h2>
-        {!creating && (
-          <Button variant="primary" onClick={() => setCreating(true)}>
-            {t("newCourse")}
-          </Button>
-        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button onClick={() => setImporting(true)}>{t("importStudents")}</Button>
+          {!creating && (
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              {t("newCourse")}
+            </Button>
+          )}
+        </div>
       </div>
       <p style={{ color: "#6b7280", fontSize: 13, marginTop: 0, maxWidth: 760 }}>{t("coursesIntro")}</p>
 
@@ -98,6 +103,9 @@ export function CoursesPanel() {
       </div>
 
       <PasswordsSection users={users} onChanged={load} />
+      {importing && (
+        <ImportStudentsModal courses={courses ?? []} onClose={() => setImporting(false)} onImported={load} />
+      )}
     </section>
   );
 }

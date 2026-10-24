@@ -48,3 +48,9 @@ config/exercises/*
 !config/exercises/ex4-mstat.yaml
 !config/exercises/ex5-pycalc.yaml
 config/exercise_files/
+
+# Student lists and login codes: personal data, never in git.
+*login-codes*.csv
+*Login_Codes*
+*roster*.csv
+rosters/

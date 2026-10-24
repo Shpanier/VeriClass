@@ -367,6 +367,28 @@ export interface Course {
   members: number[]; // user ids
 }
 
+// POST /api/students/import: one CSV row and what happens to it (backend/roster.py).
+export interface RosterRow {
+  line: number;
+  name: string;
+  username?: string; // when two different people share a name
+  email?: string;
+  student_id?: string;
+  course?: string | null;
+  group?: string;
+  status?: "new" | "existing";
+  error?: string;
+  code?: string;
+  user_id?: number;
+}
+
+export interface RosterResult {
+  rows: RosterRow[];
+  counts: { new: number; existing: number; errors: number };
+  columns: string[];
+  codes_csv?: string; // after an import (not a preview)
+}
+
 // One account (GET /api/users). custom_password is false while the password is
 // still the login code.
 export interface UserAccount {
