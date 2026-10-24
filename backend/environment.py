@@ -1,6 +1,6 @@
 """What the tutor should know about where the student works: the operating
 system (plugin 0.4.3+ sends it when the session starts and with every question;
-older plugins only with terminal lines), which shell the VeriExam terminal runs,
+older plugins only with terminal lines), which shell the VeriClass terminal runs,
 and what that terminal allows. In October 2026 the tutor blamed a long number for
 an error that really came from Windows; this block is the fix."""
 from typing import Any, Optional
@@ -63,8 +63,8 @@ def tutor_block(session_id: str, ex: dict[str, Any]) -> str:
         "STUDENT ENVIRONMENT (use it when you diagnose an error):",
         f"- Operating system: {os_name}." if os_name else
         "- Operating system: not reported yet (most students use Windows).",
-        f"- The VeriExam terminal at the bottom of PyCharm runs each line in {shell}.",
-        "- Programs allowed in the VeriExam terminal: " + ", ".join(policy["allow"])
+        f"- The VeriClass terminal at the bottom of PyCharm runs each line in {shell}.",
+        "- Programs allowed in the VeriClass terminal: " + ", ".join(policy["allow"])
         + ". Anything else is refused there and reported to the teacher.",
     ]
     if policy.get("blocked_hint"):

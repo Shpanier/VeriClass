@@ -1,4 +1,4 @@
-# deploy/ — put the VeriExam backend on the web for an exam
+# deploy/ — put the VeriClass backend on the web for an exam
 
 Run the backend on your laptop and expose it through a tunnel so students'
 CLion plugins can reach it from anywhere. **Teacher-side only** — students just

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────
-#  tunnel.sh — the control macro for exposing the VeriExam backend over the web.
+#  tunnel.sh — the control macro for exposing the VeriClass backend over the web.
 #
 #  Reads deploy/tunnel.conf and starts the chosen tunnel (ngrok / cloudflare).
 #  Optionally starts the backend too. Keeps your laptop awake during the exam.

@@ -1,9 +1,9 @@
 """Exercise packages: one folder per exercise, in the lecturer's private data
-folder (VERIEXAM_DATA_DIR, default ../VeriExPrivateData next to the code). The
+folder (VERICLASS_DATA_DIR, default ../VeriClassPrivateData next to the code). The
 folder is the source of truth: the server loads it, the dashboard writes its
 edits back into it, and nothing in it goes to git.
 
-    VeriExPrivateData/exercises/<exercise_id>/
+    VeriClassPrivateData/exercises/<exercise_id>/
       exercise.yaml   what students and the tutor see (same keys as config/exercises/*.yaml;
                       `variants` is optional)
       teacher.yaml    teacher-only, per step: expected, os_check, evidence, questions; and notes
@@ -35,7 +35,7 @@ from backend import bank, portability, terminal, textutil
 logger = logging.getLogger(__name__)
 
 _REPO = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.environ.get("VERIEXAM_DATA_DIR") or (_REPO.parent / "VeriExPrivateData")).expanduser()
+DATA_DIR = Path(os.environ.get("VERICLASS_DATA_DIR") or (_REPO.parent / "VeriClassPrivateData")).expanduser()
 
 EXERCISE_FILE = "exercise.yaml"
 TEACHER_FILE = "teacher.yaml"

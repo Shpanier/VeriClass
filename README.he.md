@@ -1,6 +1,6 @@
 <div dir="rtl" align="right">
 
-# VeriExam — מודל שפה בשליטת המרצה
+# VeriClass — מודל שפה בשליטת המרצה
 
 > 🇮🇱 גרסה עברית · [English version](README.md)
 
@@ -87,7 +87,7 @@
 
 </div>
 
-לסטודנט יש **שני קליינטים מתחלפים** מול אותו צד שרת: אפליקציית הוויב של Chainlit (רכיב 4) ו**תוסף ל־CLion** (רכיב 4b) שמכניס את אותו זרם של כניסה ← תדריך ← צ׳אט ← שאלות הבנה אל תוך ה־IDE. ראו [*קליינט סטודנט חלופי: תוסף ה־CLion*](#קליינט-סטודנט-חלופי-תוסף-ה־clion) ואת [`veriexam_plugin/README.md`](veriexam_plugin/README.md).
+לסטודנט יש **שני קליינטים מתחלפים** מול אותו צד שרת: אפליקציית הוויב של Chainlit (רכיב 4) ו**תוסף ל־CLion** (רכיב 4b) שמכניס את אותו זרם של כניסה ← תדריך ← צ׳אט ← שאלות הבנה אל תוך ה־IDE. ראו [*קליינט סטודנט חלופי: תוסף ה־CLion*](#קליינט-סטודנט-חלופי-תוסף-ה־clion) ואת [`vericlass_plugin/README.md`](vericlass_plugin/README.md).
 
 המודל המקומי הוא הנתיב היחיד שרואה הודעות של סטודנטים. המודל הענני משמש **אך ורק** להצעות שאלות הבנה למרצה (`/api/probe/suggest`), ורק אחרי ש־`backend/sanitize.py` הסיר שמות, קודים ומידע מזהה אחר.
 
@@ -159,7 +159,7 @@ python scripts/add_students.py --teachers "Dr. Cohen,TA Levi"
 <div dir="ltr">
 
 ```bash
-sqlite3 veriexam.db \
+sqlite3 vericlass.db \
   "INSERT INTO users(username, login_code, role) VALUES('Dr. Cohen','TEACH-01','teacher');"
 ```
 
@@ -170,7 +170,7 @@ sqlite3 veriexam.db \
 <div dir="ltr">
 
 ```bash
-sqlite3 veriexam.db "SELECT username, login_code FROM users WHERE role='teacher';"
+sqlite3 vericlass.db "SELECT username, login_code FROM users WHERE role='teacher';"
 ```
 
 </div>
@@ -271,7 +271,7 @@ Chainlit, עם שדה סיסמה מוסתר.
 - אם סטודנט רץ מהר מדי / נשען על המודל יותר מדי, הפעילו את מצב הסקירה. השאלה הבאה שלו תגיע לתור שלכם.
 
 **אחרי השיעור**
-- כל התמלילים ותוצאות שאלות ההבנה נמצאים ב־`veriexam.db`. שאילתות שימושיות:
+- כל התמלילים ותוצאות שאלות ההבנה נמצאים ב־`vericlass.db`. שאילתות שימושיות:
 
 <div dir="ltr">
 
@@ -315,7 +315,7 @@ GROUP BY s.user_id, answer_level;
 ## קליינט סטודנט חלופי: תוסף ה־CLion
 
 הסטודנטים בקורס הזה ממילא כותבים את קוד ה־C שלהם ב־CLion. הספרייה
-[`veriexam_plugin/`](veriexam_plugin/) היא תוסף JetBrains שמטמיע את *כל* קליינט הסטודנט
+[`vericlass_plugin/`](vericlass_plugin/) היא תוסף JetBrains שמטמיע את *כל* קליינט הסטודנט
 בתוך חלון כלים (tool window) ב־CLion, כך שלא צריך לצאת מה־IDE כדי לדבר עם החונך.
 הוא משתמש באותם שישה endpoints של צד השרת כמו Chainlit — צד השרת ללא שינוי, פרט
 ל־endpoint קטן אחד לקריאה בלבד (`GET /api/client-config`) שחושף את מתג ההתנהגות.
@@ -332,12 +332,12 @@ GROUP BY s.user_id, answer_level;
 
 </div>
 
-בנייה והרצה (פירוט מלא ב־[`veriexam_plugin/README.md`](veriexam_plugin/README.md)):
+בנייה והרצה (פירוט מלא ב־[`vericlass_plugin/README.md`](vericlass_plugin/README.md)):
 
 <div dir="ltr">
 
 ```bash
-cd veriexam_plugin
+cd vericlass_plugin
 gradle wrapper --gradle-version 8.10.2   # פעם אחת, יוצר את ה-wrapper jar
 ./gradlew :clion:runIde                  # מריץ CLion ארגז-חול עם התוסף טעון
 ./gradlew :pycharm:runIde                # מריץ PyCharm ארגז-חול עם התוסף טעון
@@ -345,23 +345,23 @@ gradle wrapper --gradle-version 8.10.2   # פעם אחת, יוצר את ה-wrapp
 
 </div>
 
-בארגז־החול, הגדירו את כתובת צד השרת תחת **Settings → Tools → VeriExam**, פתחו את
-חלון הכלים **VeriExam**, והתחברו עם קוד קורס. אפשר להשתמש ב־Chainlit ובתוסף בו־זמנית
+בארגז־החול, הגדירו את כתובת צד השרת תחת **Settings → Tools → VeriClass**, פתחו את
+חלון הכלים **VeriClass**, והתחברו עם קוד קורס. אפשר להשתמש ב־Chainlit ובתוסף בו־זמנית
 מול אותו צד שרת.
 
 ---
 
 ## כתיבת תרגילים
 
-לכל מרצה יש שרת VeriExam משלו. תרגיל הוא **חבילה**: תיקייה בתיקיית נתונים פרטית
-ליד הקוד (`VERIEXAM_DATA_DIR`, כברירת מחדל `../VeriExPrivateData`), שלא נכנסת ל־git
+לכל מרצה יש שרת VeriClass משלו. תרגיל הוא **חבילה**: תיקייה בתיקיית נתונים פרטית
+ליד הקוד (`VERICLASS_DATA_DIR`, כברירת מחדל `../VeriClassPrivateData`), שלא נכנסת ל־git
 אף פעם: ‏`exercise.yaml` (מה שהסטודנטים והטוטור רואים), ‏`teacher.yaml` (התשובות
 הצפויות, למורה בלבד), ‏`faq.yaml` (בנק השאלות), ‏`files/` (מה שהסטודנטים מורידים)
 ו־`solution/`. התיקייה היא המקור: השרת טוען ממנה, ועריכות בלוח נכתבות חזרה אליה.
 
 שלוש דרכים להוסיף או לשנות תרגיל:
 
-1. **בסשן Claude Code שלכם** (בלי טוקנים של השרת): שרת ה־MCP שב־`veriexam_mcp/`
+1. **בסשן Claude Code שלכם** (בלי טוקנים של השרת): שרת ה־MCP שב־`vericlass_mcp/`
    נותן ל־Claude כלים לשרת שלכם — טיוטת תרגיל, בדיקה (`validate_exercise`), התקנה
    (`push_exercise`, גם לקורס או כמפגש), ייבוא סטודנטים ודוח שיעור אנונימי. רושמים
    אותו פעם אחת עם `scripts/install_mcp.sh`. ה**סקיל** שכותב תרגיל שלם מתוך מצגת,
@@ -450,9 +450,9 @@ backend/                     # FastAPI app
 student_app/
   app.py                     # Chainlit student UI (login + chat + probes)
 
-veriexam_plugin/                # alternative student client: a CLion/JetBrains plugin
+vericlass_plugin/                # alternative student client: a CLion/JetBrains plugin
   build.gradle.kts           # IntelliJ Platform Gradle build (targets CLion)
-  src/main/kotlin/edu/jce/veriexam/
+  src/main/kotlin/edu/jce/vericlass/
     api/                     # DTOs + HTTP/streaming client over the 6 endpoints
     ui/                      # tool window, login, briefing, chat, checklist
     probe/                   # 2s probe poller + answer dialog
@@ -484,7 +484,7 @@ scripts/
 | `GEMINI_API_KEY`      | The only LLM key. Powers the CrewAI agents and the student chat. |
 | `AGENT_MODEL`         | Gemini model for the agents (review drafts, probes, grading). Default `gemini-2.5-pro`. |
 | `STUDENT_CHAT_MODEL`  | Gemini model for the direct student chat. Default `gemini-2.5-flash-lite`. |
-| `DB_PATH`             | `./veriexam.db` by default.                                      |
+| `DB_PATH`             | `./vericlass.db` by default.                                      |
 | `AUDIT_AES_KEY`       | 32-byte base64 key for encrypting raw cloud-LLM payloads.     |
 | `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only).   |
 | `STUDENT_CLIENT_MODE` | CLion plugin behavior: `chat` (default) or `ide`. Ignored by Chainlit. |

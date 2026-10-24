@@ -1,4 +1,4 @@
-"""The MCP server (veriexam_mcp/server.py): its tools against the test backend,
+"""The MCP server (vericlass_mcp/server.py): its tools against the test backend,
 and one real MCP round trip over stdio, as Claude Code runs it."""
 import asyncio
 import os
@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from backend import db, exercises, packages
 from backend.main import app
-from veriexam_mcp import server
+from vericlass_mcp import server
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -95,8 +95,8 @@ def test_real_mcp_round_trip_over_stdio():
 
     async def run():
         params = StdioServerParameters(
-            command=sys.executable, args=[str(REPO / "veriexam_mcp" / "server.py")],
-            env={**os.environ, "VERIEXAM_DATA_DIR": str(packages.DATA_DIR)})
+            command=sys.executable, args=[str(REPO / "vericlass_mcp" / "server.py")],
+            env={**os.environ, "VERICLASS_DATA_DIR": str(packages.DATA_DIR)})
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()

@@ -1,4 +1,4 @@
-# VeriExam — Instructor-Controlled LLM for CS Education
+# VeriClass — Instructor-Controlled LLM for CS Education
 
 > English version · [גרסה עברית](README.he.md)
 
@@ -139,7 +139,7 @@ The student has **two interchangeable clients** for the same backend: the
 Chainlit web app (component 4) and a **CLion plugin** (4b) that puts the same
 login → briefing → chat → probes flow inside the IDE. See
 [*Alternative student client: the CLion plugin*](#alternative-student-client-the-clion-plugin)
-and [`veriexam_plugin/README.md`](veriexam_plugin/README.md).
+and [`vericlass_plugin/README.md`](vericlass_plugin/README.md).
 
 All LLM calls — the student chat and the CrewAI agents (review drafts, probe
 suggestions, grading) — run on Gemini. Anything sent to the agents is first
@@ -202,14 +202,14 @@ screen (codes are case-insensitive). To add a teacher to an existing database
 directly:
 
 ```bash
-sqlite3 veriexam.db \
+sqlite3 vericlass.db \
   "INSERT INTO users(username, login_code, role) VALUES('Dr. Cohen','TEACH-01','teacher');"
 ```
 
 List the instructor codes already in your database at any time:
 
 ```bash
-sqlite3 veriexam.db "SELECT username, login_code FROM users WHERE role='teacher';"
+sqlite3 vericlass.db "SELECT username, login_code FROM users WHERE role='teacher';"
 ```
 
 Only a `role=teacher` account can open the **Exercises** tab and author new
@@ -324,7 +324,7 @@ A 90-minute lab session, end to end:
   your queue.
 
 **After class**
-- All transcripts and probe results are in `veriexam.db`.
+- All transcripts and probe results are in `vericlass.db`.
 
 ---
 
@@ -357,7 +357,7 @@ shows their test inputs as a checklist.
 ## Alternative student client: the CLion & PyCharm plugin
 
 Students already work in a JetBrains IDE — CLion for C, PyCharm for Python. The
-[`veriexam_plugin/`](veriexam_plugin/) directory is a JetBrains plugin that embeds the
+[`vericlass_plugin/`](vericlass_plugin/) directory is a JetBrains plugin that embeds the
 *entire* student client in an IDE tool window, so they never leave the IDE to
 talk to the tutor. One shared source tree builds both the CLion and PyCharm
 plugins (`:clion` / `:pycharm` Gradle modules). It uses the same six backend
@@ -374,23 +374,23 @@ one place — it is *not* a per-student plugin setting):
 | `STUDENT_CLIENT_MODE=chat`   | Faithful chat port — login, briefing, streaming chat, suggestion chips, probes. Same as Chainlit, in a tool window. |
 | `STUDENT_CLIENT_MODE=ide`    | Everything in `chat`, **plus** it scaffolds the student's assigned variant as a starter `mcalc.c` in their project and shows the variant's required test inputs as a checklist. |
 
-Build & run (full details in [`veriexam_plugin/README.md`](veriexam_plugin/README.md)):
+Build & run (full details in [`vericlass_plugin/README.md`](vericlass_plugin/README.md)):
 
 ```bash
-cd veriexam_plugin
+cd vericlass_plugin
 gradle wrapper --gradle-version 8.10.2   # one-time, generates the wrapper jar
 ./gradlew :clion:runIde                  # sandbox CLion with the plugin
 ./gradlew :pycharm:runIde                # sandbox PyCharm with the plugin
 ```
 
-In the sandbox, set the backend URL under **Settings → Tools → VeriExam**, open the
-**VeriExam** tool window, and log in with a course code. Chainlit and the plugin can
+In the sandbox, set the backend URL under **Settings → Tools → VeriClass**, open the
+**VeriClass** tool window, and log in with a course code. Chainlit and the plugin can
 be used at the same time against the same backend.
 
 **Shipping updates to students without passing files around.** When the backend
 is exposed over a tunnel (see [`deploy/README-NGROK.md`](deploy/README-NGROK.md)),
 it also distributes the plugin. Build + upload once on the JDK-21 machine
-(`cd veriexam_plugin && ./publish.sh` — add `--product pycharm` for the PyCharm
+(`cd vericlass_plugin && ./publish.sh` — add `--product pycharm` for the PyCharm
 build), then each student runs a single command:
 
 ```bash
@@ -399,19 +399,19 @@ curl -fsSL https://<your-domain>.ngrok-free.dev/api/plugin/install.sh | bash
 
 That installs the latest build into their matching IDE, CLion or PyCharm (they
 just restart). Full
-details in [`veriexam_plugin/README.md`](veriexam_plugin/README.md) →
+details in [`vericlass_plugin/README.md`](vericlass_plugin/README.md) →
 *Distributing updates over the tunnel*.
 
 ---
 
 ## Writing exercises
 
-Each lecturer runs their own VeriExam server. Exercises are **packages**:
-folders in a private data folder next to the code (`VERIEXAM_DATA_DIR`, default
-`../VeriExPrivateData`), which never goes into git:
+Each lecturer runs their own VeriClass server. Exercises are **packages**:
+folders in a private data folder next to the code (`VERICLASS_DATA_DIR`, default
+`../VeriClassPrivateData`), which never goes into git:
 
 ```
-VeriExPrivateData/exercises/<exercise_id>/
+VeriClassPrivateData/exercises/<exercise_id>/
   exercise.yaml   what students and the tutor see (brief, steps, tutor notes, terminal rules)
   teacher.yaml    teacher-only: each step's expected answer, reference commands, evidence rules
   faq.yaml        the question bank: likely questions per step with four ready answers
@@ -423,7 +423,7 @@ The folder is the source of truth: the server loads it, and the dashboard's
 edits are written back into it. Three ways to add or change an exercise:
 
 1. **In your own Claude Code session** (no server tokens). The MCP server in
-   `veriexam_mcp/` gives Claude tools for your server: start an exercise in
+   `vericlass_mcp/` gives Claude tools for your server: start an exercise in
    `drafts/`, check it (`validate_exercise`), install it (`push_exercise`,
    optionally into a course or as a dated meeting), import students, read an
    anonymized class report. Register it once with `scripts/install_mcp.sh`.
@@ -523,9 +523,9 @@ backend/                     # FastAPI app
 student_app/
   app.py                     # Chainlit student UI (login + chat + probes)
 
-veriexam_plugin/                # alternative student client: a CLion/JetBrains plugin
+vericlass_plugin/                # alternative student client: a CLion/JetBrains plugin
   build.gradle.kts           # IntelliJ Platform Gradle build (targets CLion)
-  src/main/kotlin/edu/jce/veriexam/
+  src/main/kotlin/edu/jce/vericlass/
     api/                     # DTOs + HTTP/streaming client over the 6 endpoints
     ui/                      # tool window, login, briefing, chat, checklist
     probe/                   # 2s probe poller + answer dialog
@@ -553,12 +553,12 @@ scripts/
 | `GEMINI_API_KEY`      | The only LLM key. Powers the CrewAI agents and the student chat. |
 | `AGENT_MODEL`         | Gemini model for the agents (review drafts, probes, grading). Default `gemini-2.5-pro`. |
 | `STUDENT_CHAT_MODEL`  | Gemini model for the direct student chat. Default `gemini-2.5-flash-lite`. |
-| `DB_PATH`             | `./veriexam.db` by default.                                      |
+| `DB_PATH`             | `./vericlass.db` by default.                                      |
 | `AUDIT_AES_KEY`       | 32-byte base64 key for encrypting raw cloud-LLM payloads.     |
 | `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only).   |
 | `STUDENT_CLIENT_MODE` | CLion plugin behavior: `chat` (default) or `ide`. Ignored by Chainlit. |
 | `SCAFFOLD_FILENAME`   | File the plugin's `ide` mode scaffolds into the project. Default `mcalc.c`. |
-| `VERIEXAM_DATA_DIR`   | The private data folder (exercise packages, login codes, reports). Default `../VeriExPrivateData`. |
+| `VERICLASS_DATA_DIR`   | The private data folder (exercise packages, login codes, reports). Default `../VeriClassPrivateData`. |
 | `CLAUDE_STRONG_MODEL`, `CLAUDE_BEST_MODEL` | The review queue's *Redo with* models (Sonnet 5.5, Opus 5.5). |
 | `BANK_MATCH_THRESHOLD`, `BANK_AUTO_ANSWER`, `BANK_AUTO_THRESHOLD` | When the question bank's answer is shown, or (review mode off) sent directly. |
 

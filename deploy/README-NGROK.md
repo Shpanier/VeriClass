@@ -39,10 +39,10 @@ student CLion plugin ──https──► your-domain.ngrok-free.app ──► y
 5. **Build the student package once** (on a JDK-21 machine — NOT the dev box),
    stamping the SAME url (note the `https://`):
    ```bash
-   cd veriexam_plugin
+   cd vericlass_plugin
    ./packaging/make_exam_package.sh --backend-url https://chip-calm-mallard.ngrok-free.app
    ```
-   → `veriexam_plugin/dist/VeriExamInstaller.zip` — hand this to students. They install it
+   → `vericlass_plugin/dist/VeriClassInstaller.zip` — hand this to students. They install it
    once; they never touch ngrok.
 
 ---
@@ -72,9 +72,9 @@ student CLion plugin ──https──► your-domain.ngrok-free.app ──► y
 
 Once the tunnel is up, the backend also serves the CLion plugin, so you never
 have to hand-carry a zip between machines. Full details in
-`veriexam_plugin/README.md` → *Distributing updates over the tunnel*. In short:
+`vericlass_plugin/README.md` → *Distributing updates over the tunnel*. In short:
 
-- **Build machine** (JDK 21): `cd veriexam_plugin && ./publish.sh` — builds and
+- **Build machine** (JDK 21): `cd vericlass_plugin && ./publish.sh` — builds and
   uploads the new zip to the backend (teacher-authenticated).
 - **Students / teacher:** one command pulls + installs the latest build:
   ```bash
@@ -92,7 +92,7 @@ Public, no-auth endpoints for this: `GET /api/plugin/version`,
 ## Notes
 - **Stable URL ⇒ package once.** Only change the plugin package if you change
   `NGROK_DOMAIN`. Even then you don't need JDK again — just edit
-  `veriexam_plugin/dist/VeriExamInstaller/exam.conf` and re-zip.
+  `vericlass_plugin/dist/VeriClassInstaller/exam.conf` and re-zip.
 - The ngrok "browser warning" page only affects real browsers, not the plugin
   or `curl`. The install endpoints send the skip header themselves anyway.
 - Watch your usage at https://dashboard.ngrok.com. Nearing the request/GB cap is

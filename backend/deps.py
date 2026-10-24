@@ -31,7 +31,7 @@ def _token_from_header(authorization: Optional[str]) -> str:
 
 # Teacher accounts work only on the instructor's own machine (the dashboard on
 # localhost). Set TEACHER_LOCAL_ONLY=false to allow them over the tunnel, e.g.
-# to run veriexam_plugin/publish.sh from another computer.
+# to run vericlass_plugin/publish.sh from another computer.
 TEACHER_LOCAL_ONLY = os.environ.get("TEACHER_LOCAL_ONLY", "true").strip().lower() not in ("0", "false", "no", "off")
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 # Proxies/tunnels (ngrok, Cloudflare) add these; the local Vite proxy does not.
@@ -62,7 +62,7 @@ def teacher_blocked(role: str, request: Request) -> bool:
     return TEACHER_LOCAL_ONLY and role == "teacher" and not is_local_request(request)
 
 
-# The lecturer's own tools on this machine (the MCP server, veriexam_mcp/)
+# The lecturer's own tools on this machine (the MCP server, vericlass_mcp/)
 # authenticate with a random key the server keeps in the private data folder,
 # readable only by the lecturer's account: no password to store anywhere.
 LOCAL_TOKEN_FILE = packages.DATA_DIR / ".local-token"
@@ -95,10 +95,10 @@ def _local_tool_user(request: Request, token: str) -> Optional[dict]:
 
 
 def current_user(request: Request, authorization: Optional[str] = Header(None),
-                 x_veriexam_local_token: Optional[str] = Header(None)) -> dict:
+                 x_vericlass_local_token: Optional[str] = Header(None)) -> dict:
     """Any authenticated user. Returns {id, username, role}."""
-    if not authorization and x_veriexam_local_token:
-        user = _local_tool_user(request, x_veriexam_local_token.strip())
+    if not authorization and x_vericlass_local_token:
+        user = _local_tool_user(request, x_vericlass_local_token.strip())
         if user is None:
             raise HTTPException(401, "Invalid local key (only tools on the lecturer's computer may use it)")
         return user

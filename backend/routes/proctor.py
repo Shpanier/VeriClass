@@ -18,7 +18,7 @@ ALERT_KINDS = ("focus_lost", "minimized", "fullscreen_exited",
                # The student closed the IDE (or the exam project) during the exam.
                "ide_closed")
 
-# Terminal violations: a refused command in the VeriExam terminal (written by
+# Terminal violations: a refused command in the VeriClass terminal (written by
 # routes/terminal.py, never by the client directly) and an attempt to open the
 # IDE's own, unmonitored Terminal during an exam. Alerts, but not "away".
 TERMINAL_ALERT_KINDS = ("blocked_command", "stock_terminal_opened")
@@ -160,7 +160,7 @@ def record_event(req: ProctorEventRequest, user: dict = Depends(deps.current_use
 
 @router.post("/proctor/paste")
 def record_paste(req: PasteRequest, user: dict = Depends(deps.current_user)):
-    """The exam client saw a paste (editor, VeriExam terminal or chat box)."""
+    """The exam client saw a paste (editor, VeriClass terminal or chat box)."""
     deps.require_owns_session(req.session_id, user)
     with db.conn() as c:
         if not _touch_session(c, req.session_id):

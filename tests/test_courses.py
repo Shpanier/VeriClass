@@ -51,7 +51,7 @@ def _uid(code):
 def test_login_needs_a_password(client):
     r = client.post("/api/login", json={"code": ONE})  # what plugin 0.3.0 sends
     assert r.status_code == 401
-    assert "Update the VeriExam plugin" in r.json()["detail"]
+    assert "Update the VeriClass plugin" in r.json()["detail"]
 
 
 def test_default_password_is_the_login_code_in_any_case(client):

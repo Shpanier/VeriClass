@@ -1,0 +1,56 @@
+<idea-plugin>
+    <id>edu.jce.vericlass.clion</id>
+    <name>VeriClass — Instructor-Controlled LLM</name>
+    <version>0.1.0</version>
+    <vendor email="shpanier@jce.ac.il" url="https://www.jce.ac.il">JCE Lev — Software Engineering Seminar</vendor>
+
+    <description><![CDATA[
+        Student client for the <b>VeriClass</b> instructor-controlled LLM platform, embedded directly
+        in CLion. Log in with your course code, read your personalized exercise briefing, and chat
+        with the locally-hosted tutor model without leaving the IDE. Comprehension probes from the
+        instructor appear inline.<br/><br/>
+        Behavior is chosen by the backend's <code>STUDENT_CLIENT_MODE</code> setting:
+        <ul>
+            <li><b>chat</b> — faithful chat experience: login, briefing, streaming chat, probes.</li>
+            <li><b>ide</b> — also scaffolds your assigned variant's starter C file into the open
+                project and shows the test inputs you must pass as a checklist.</li>
+        </ul>
+        With <code>EXAM_MODE</code> on, the plugin also runs a proctored exam: CLion opens in full
+        screen and any time you leave it (minimize, switch app, exit full screen) your instructor is
+        notified and you are warned to return. Only the editor, the VeriClass chat and the
+        VeriClass Terminal are open; other panels and windows, and pastes from outside the IDE, are
+        reported too. "Export my log" saves a signed copy of everything sent, to hand in if the
+        network failed.
+    ]]></description>
+
+    <!-- CLion is built on the IntelliJ Platform; the plugin uses only platform + VFS APIs. -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="VeriClass"
+                    anchor="right"
+                    icon="AllIcons.Toolwindows.ToolWindowMessages"
+                    factoryClass="edu.jce.vericlass.ui.VeriClassToolWindowFactory"/>
+
+        <!-- The VeriClass terminal: every command is checked against the exercise's
+             rules and logged for the teacher. Bottom, where Terminal and Run live. -->
+        <toolWindow id="VeriClass Terminal"
+                    anchor="bottom"
+                    icon="AllIcons.Nodes.Console"
+                    factoryClass="edu.jce.vericlass.terminal.VeriClassTerminalToolWindowFactory"/>
+
+        <applicationService serviceImplementation="edu.jce.vericlass.settings.VeriClassSettings"/>
+
+        <applicationConfigurable parentId="tools"
+                                 id="edu.jce.vericlass.settings"
+                                 displayName="VeriClass"
+                                 instance="edu.jce.vericlass.settings.VeriClassSettingsConfigurable"/>
+
+        <!-- Exam mode: when the backend reports exam_mode, open the tutor tool
+             window and go full screen on project start. No-op otherwise. -->
+        <postStartupActivity implementation="edu.jce.vericlass.exam.ExamStartupActivity"/>
+
+        <!-- Sticky balloon shown to the student each time they leave the exam. -->
+        <notificationGroup id="VeriClass Exam" displayType="STICKY_BALLOON"/>
+    </extensions>
+</idea-plugin>

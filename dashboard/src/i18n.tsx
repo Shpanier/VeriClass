@@ -13,7 +13,7 @@ import type { Lang } from "./types";
 const STRINGS = {
   en: {
     // chrome
-    appTitle: "VeriExam — Teacher Dashboard",
+    appTitle: "VeriClass — Teacher Dashboard",
     language: "עברית", // label shows the OTHER language you can switch to
     signOut: "Sign out",
     on: "On",
@@ -146,7 +146,7 @@ const STRINGS = {
     verifyLog: "🔏 Verify a student's log",
     verifyTitle: "Verify a student's exported log",
     verifyHint:
-      "Students export their log with “Export my log” in VeriExam when something didn't reach you. Choose the CSV file exactly as they sent it (opening and saving it in Excel changes it).",
+      "Students export their log with “Export my log” in VeriClass when something didn't reach you. Choose the CSV file exactly as they sent it (opening and saving it in Excel changes it).",
     verifyChoose: "Choose CSV file…",
     verifyOk: "✓ Untouched: {n} signed rows from {student}.",
     verifyBad: "✗ {error}",
@@ -166,11 +166,11 @@ const STRINGS = {
     traceKind_chat_user: "Chat (student)",
     traceKind_chat_tutor: "Chat (tutor)",
     traceKind_export_end: "End of file",
-    // VeriExam terminal
+    // VeriClass terminal
     terminalLog: "Terminal log",
     terminalN: "Terminal ({n})",
     blockedN: "{n} blocked",
-    openTerminalLogTitle: "Every command this student entered in the VeriExam terminal",
+    openTerminalLogTitle: "Every command this student entered in the VeriClass terminal",
     terminalSummary: "{n} command(s) · {refused} refused · refreshing every 2s",
     terminalRefusedOnly: "Refused only",
     noTerminalCommands: "No terminal commands yet.",
@@ -380,7 +380,7 @@ const STRINGS = {
   },
   he: {
     // chrome
-    appTitle: "VeriExam — לוח בקרה למורה",
+    appTitle: "VeriClass — לוח בקרה למורה",
     language: "English",
     signOut: "התנתקות",
     on: "פעיל",
@@ -513,7 +513,7 @@ const STRINGS = {
     verifyLog: "🔏 אימות יומן של תלמיד",
     verifyTitle: "אימות יומן שתלמיד ייצא",
     verifyHint:
-      "תלמידים מייצאים את היומן בכפתור “Export my log” ב-VeriExam כשמשהו לא הגיע אליך. יש לבחור את קובץ ה-CSV בדיוק כפי שנשלח (פתיחה ושמירה ב-Excel משנות אותו).",
+      "תלמידים מייצאים את היומן בכפתור “Export my log” ב-VeriClass כשמשהו לא הגיע אליך. יש לבחור את קובץ ה-CSV בדיוק כפי שנשלח (פתיחה ושמירה ב-Excel משנות אותו).",
     verifyChoose: "בחירת קובץ CSV…",
     verifyOk: "✓ ללא שינוי: {n} שורות חתומות של {student}.",
     verifyBad: "✗ {error}",
@@ -533,11 +533,11 @@ const STRINGS = {
     traceKind_chat_user: "צ'אט (תלמיד)",
     traceKind_chat_tutor: "צ'אט (מנחה)",
     traceKind_export_end: "סוף הקובץ",
-    // VeriExam terminal
+    // VeriClass terminal
     terminalLog: "יומן טרמינל",
     terminalN: "טרמינל ({n})",
     blockedN: "{n} נחסמו",
-    openTerminalLogTitle: "כל הפקודות שהתלמיד הקליד בטרמינל של VeriExam",
+    openTerminalLogTitle: "כל הפקודות שהתלמיד הקליד בטרמינל של VeriClass",
     terminalSummary: "{n} פקודות · {refused} נחסמו · מתרענן כל 2 שניות",
     terminalRefusedOnly: "רק פקודות שנחסמו",
     noTerminalCommands: "עדיין אין פקודות בטרמינל.",
@@ -764,7 +764,7 @@ interface LangCtx {
 
 const Ctx = createContext<LangCtx | null>(null);
 
-const STORAGE_KEY = "veriexam.lang";
+const STORAGE_KEY = "vericlass.lang";
 
 function initialLang(): Lang {
   const saved = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;

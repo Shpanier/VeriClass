@@ -5,7 +5,7 @@ import { arrivedLate, eventTime } from "../proctor";
 import { useLang } from "../i18n";
 
 /**
- * One student's VeriExam-terminal log: every line they entered, newest first —
+ * One student's VeriClass-terminal log: every line they entered, newest first —
  * what ran (exit code, output) and what the plugin refused (and why). Polls
  * every 2s like the other live viewers. "Refused only" narrows to the alerts.
  */

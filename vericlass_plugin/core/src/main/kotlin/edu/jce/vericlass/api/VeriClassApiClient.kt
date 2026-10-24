@@ -1,0 +1,300 @@
+package edu.jce.vericlass.api
+
+import com.google.gson.Gson
+import com.intellij.openapi.diagnostic.thisLogger
+import edu.jce.vericlass.settings.VeriClassSettings
+import edu.jce.vericlass.trace.SessionTrace
+import java.io.InputStreamReader
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
+import java.time.Duration
+import java.util.concurrent.atomic.AtomicBoolean
+
+/** Raised for any non-2xx backend response, carrying a student-friendly message. */
+class VeriClassApiException(message: String) : RuntimeException(message)
+
+// Sent on every request so ngrok-free serves the API directly instead of its
+// HTML "you are about to visit" interstitial (which would break JSON parsing).
+// Harmless when the backend is reached directly (localhost / LAN / Cloudflare).
+private const val NGROK_HEADER = "ngrok-skip-browser-warning"
+// Set by the server on a tutor reply that may be asked again with a stronger model.
+private const val REASK_HEADER = "X-VeriClass-Reask"
+private val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(30)
+
+/**
+ * Thin client over the six student-facing VeriClass endpoints. All calls are
+ * blocking and MUST be invoked off the EDT (use a pooled thread). The base URL
+ * is read fresh from settings on every call so changing it takes effect without
+ * a restart.
+ */
+class VeriClassApiClient {
+
+    private val gson = Gson()
+    private val http: HttpClient = HttpClient.newBuilder()
+        // Pin HTTP/1.1. The default (HTTP/2) attempts an h2c upgrade on cleartext
+        // http:// and drops the POST body against an HTTP/1.1 server (uvicorn),
+        // so every POST arrives empty and the backend returns 422 "Field
+        // required". uvicorn speaks HTTP/1.1 anyway, and 1.1 chunked transfer is
+        // exactly what the streamed /api/ask reader expects.
+        .version(HttpClient.Version.HTTP_1_1)
+        .connectTimeout(Duration.ofSeconds(10))
+        .build()
+
+    private val baseUrl: String get() = VeriClassSettings.instance.backendUrl
+
+    // --- auth & setup -----------------------------------------------------
+
+    /** Until the teacher sets one, the password is the login code itself. */
+    fun login(code: String, password: String): LoginResponse {
+        val resp = sendJson(
+            "POST", "/api/login",
+            body = mapOf("code" to code.trim().uppercase(), "password" to password),
+            token = null,
+        )
+        if (resp.statusCode() == 401) {
+            throw VeriClassApiException(detailOf(resp.body()) ?: "Wrong username or password.")
+        }
+        requireOk(resp, "Login failed")
+        return gson.fromJson(resp.body(), LoginResponse::class.java)
+    }
+
+    /** Opens (or resumes) the chosen exercise. Null ids: no choice was needed. */
+    fun startSession(token: String, courseId: String? = null, exerciseId: String? = null): SessionResponse {
+        val body = buildMap<String, Any> {
+            courseId?.let { put("course_id", it) }
+            exerciseId?.let { put("exercise_id", it) }
+            // The tutor uses it to explain errors (Windows behaves differently).
+            put("client_os", SessionTrace.CLIENT_OS)
+        }
+        val resp = sendJson("POST", "/api/sessions", body = body, token = token)
+        requireOk(resp, "Could not start a session")
+        return gson.fromJson(resp.body(), SessionResponse::class.java)
+    }
+
+    /** The exercise of this session: the student's own variant only. */
+    fun sessionExercise(session: SessionResponse, token: String): Exercise {
+        // Authenticated: the backend only hands a student their own variant,
+        // never the full set (which would leak every variant's expected outputs).
+        val resp = sendJson(
+            "GET",
+            "/api/exercises/active?variant=" + encode(session.variant) +
+                "&session_id=" + encode(session.session_id),
+            body = null,
+            token = token,
+        )
+        requireOk(resp, "Could not load the exercise")
+        return gson.fromJson(resp.body(), Exercise::class.java)
+    }
+
+    /**
+     * Tolerant: any failure falls back to plain chat mode so the client still
+     * works. [exerciseId]: the exercise the student opened (its starter file).
+     */
+    fun clientConfig(exerciseId: String? = null): ClientConfig {
+        return try {
+            val query = exerciseId?.let { "?exercise_id=" + encode(it) } ?: ""
+            val resp = sendJson("GET", "/api/client-config$query", body = null, token = null)
+            if (resp.statusCode() != 200) ClientConfig()
+            else gson.fromJson(resp.body(), ClientConfig::class.java) ?: ClientConfig()
+        } catch (e: Exception) {
+            ClientConfig()
+        }
+    }
+
+    // --- chat (streaming) -------------------------------------------------
+
+    /**
+     * POST /api/ask and stream the plain-text response. [onToken] is called on
+     * the calling thread for each decoded chunk; callers marshal to the EDT.
+     * Reading stops early if [cancelled] flips to true. Long timeout: review
+     * mode holds the response until the teacher picks a variant.
+     *
+     * [reask]: answer this already-asked question again with the server's
+     * stronger model. Returns the name of that model (e.g. "Sonnet 5.5") when
+     * this reply may be asked again, else null.
+     *
+     * [attachment]: sent with a step submission ("Done with step N") for the
+     * teacher: filename, source (the open file), console, check_output.
+     */
+    fun ask(
+        token: String,
+        sessionId: String,
+        message: String,
+        cancelled: AtomicBoolean,
+        reask: Boolean = false,
+        attachment: Map<String, String?>? = null,
+        onToken: (String) -> Unit,
+    ): String? {
+        val body = buildMap<String, Any> {
+            put("session_id", sessionId)
+            put("message", message)
+            put("reask", reask)
+            put("client_os", SessionTrace.CLIENT_OS)
+            attachment?.filterValues { !it.isNullOrBlank() }?.takeIf { it.isNotEmpty() }?.let { put("attachment", it) }
+        }
+        val request = HttpRequest.newBuilder(URI.create(baseUrl + "/api/ask"))
+            .header("Authorization", "Bearer $token")
+            .header("Content-Type", "application/json")
+            .header(NGROK_HEADER, "true")
+            // This client renders Markdown (chat bubbles); older ones got plain text.
+            .header("X-VeriClass-Render", "markdown")
+            .timeout(Duration.ofMinutes(10))
+            .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8))
+            .build()
+
+        val resp = http.send(request, HttpResponse.BodyHandlers.ofInputStream())
+        if (resp.statusCode() != 200) {
+            val detail = resp.body().use { it.readBytes().toString(StandardCharsets.UTF_8) }
+            throw VeriClassApiException(friendlyError(resp.statusCode(), detail))
+        }
+        // InputStreamReader buffers and decodes UTF-8 correctly across chunk
+        // boundaries (important for Hebrew briefings / multibyte tokens).
+        resp.body().use { stream ->
+            val reader = InputStreamReader(stream, StandardCharsets.UTF_8)
+            val buf = CharArray(1024)
+            while (!cancelled.get()) {
+                val n = reader.read(buf)
+                if (n == -1) break
+                if (n > 0) onToken(String(buf, 0, n))
+            }
+        }
+        return resp.headers().firstValue(REASK_HEADER).orElse(null)?.takeIf { it.isNotBlank() }
+    }
+
+    // --- probes -----------------------------------------------------------
+
+    fun pendingProbes(sessionId: String, token: String): List<Probe> {
+        val resp = sendJson(
+            "GET", "/api/probes/pending/" + encode(sessionId), body = null, token = token,
+        )
+        if (resp.statusCode() != 200) return emptyList()
+        val arr = gson.fromJson(resp.body(), Array<Probe>::class.java) ?: return emptyList()
+        return arr.toList()
+    }
+
+    fun answerProbe(probeId: Int, answer: String, token: String): ProbeAnswerResponse {
+        val resp = sendJson(
+            "POST", "/api/probes/answer",
+            body = mapOf("probe_id" to probeId, "answer" to answer),
+            token = token,
+        )
+        requireOk(resp, "Could not submit your answer")
+        return gson.fromJson(resp.body(), ProbeAnswerResponse::class.java)
+    }
+
+    // --- submit work to teacher ------------------------------------------
+
+    /**
+     * POST the student's current source file + captured console output to the
+     * teacher's dashboard, plus the real compile/run result when available (so
+     * the recommended-grade correctness score is grounded in actual execution).
+     * Blocking; call off the EDT.
+     */
+    fun submitWork(
+        token: String,
+        sessionId: String,
+        filename: String?,
+        source: String,
+        console: String?,
+        run: edu.jce.vericlass.ide.RunResult? = null,
+    ): SubmitResponse {
+        val body = mutableMapOf<String, Any>("session_id" to sessionId, "source_code" to source)
+        if (!filename.isNullOrBlank()) body["filename"] = filename
+        if (!console.isNullOrBlank()) body["console_output"] = console
+        if (run != null && run.language != "other") {
+            body["language"] = run.language
+            if (run.compileOk != null) body["compile_ok"] = run.compileOk
+            if (run.compileOutput.isNotBlank()) body["compile_output"] = run.compileOutput
+            if (run.cases.isNotEmpty()) {
+                body["run_report"] = run.cases.map {
+                    mapOf(
+                        "input" to it.input,
+                        "expected" to it.expected,
+                        "actual" to it.actual,
+                        "passed" to it.passed,
+                    )
+                }
+            }
+        }
+        val resp = sendJson("POST", "/api/submissions", body = body, token = token)
+        requireOk(resp, "Could not send your submission")
+        return gson.fromJson(resp.body(), SubmitResponse::class.java)
+    }
+
+    // --- exam / proctor ---------------------------------------------------
+
+    /**
+     * POST one queued report (proctor event, terminal line or output piece,
+     * paste) and return the HTTP status. Throws on a network failure, so the
+     * outbox ([edu.jce.vericlass.trace.ReportOutbox]) knows to retry. Call off the EDT.
+     */
+    fun postReport(path: String, body: Map<String, Any?>, token: String, timeout: Duration = REQUEST_TIMEOUT): Int =
+        sendJson("POST", path, body = body.filterValues { it != null }, token = token, timeout = timeout).statusCode()
+
+    /**
+     * Keep-alive carrying the exam client's live status (focused, full screen,
+     * open panels / windows / tabs) for the dashboard grid. Fire-and-forget: a
+     * missed one only shows as "no signal" until the next. Call off the EDT.
+     */
+    fun proctorHeartbeat(sessionId: String, token: String, status: Map<String, Any?>? = null) {
+        try {
+            val body = mutableMapOf<String, Any>("session_id" to sessionId)
+            if (status != null) body["status"] = status
+            sendJson("POST", "/api/proctor/heartbeat", body = body, token = token)
+        } catch (e: Exception) {
+            thisLogger().debug("proctor heartbeat failed", e)
+        }
+    }
+
+    // --- helpers ----------------------------------------------------------
+
+    private fun sendJson(
+        method: String,
+        path: String,
+        body: Any?,
+        token: String?,
+        timeout: Duration = REQUEST_TIMEOUT,
+    ): HttpResponse<String> {
+        val builder = HttpRequest.newBuilder(URI.create(baseUrl + path))
+            .header("Content-Type", "application/json")
+            .header(NGROK_HEADER, "true")
+            .timeout(timeout)
+        if (token != null) builder.header("Authorization", "Bearer $token")
+
+        val publisher = if (body == null) {
+            HttpRequest.BodyPublishers.noBody()
+        } else {
+            HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8)
+        }
+        when (method) {
+            "GET" -> builder.GET()
+            "POST" -> builder.POST(publisher)
+            else -> builder.method(method, publisher)
+        }
+        return http.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+    }
+
+    private fun requireOk(resp: HttpResponse<String>, context: String) {
+        if (resp.statusCode() !in 200..299) {
+            throw VeriClassApiException(friendlyError(resp.statusCode(), resp.body(), context))
+        }
+    }
+
+    private fun detailOf(body: String?): String? = try {
+        val obj = gson.fromJson(body, Map::class.java)
+        (obj?.get("detail") ?: obj?.get("error"))?.toString()
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun friendlyError(status: Int, body: String?, context: String = "Request failed"): String {
+        val detail = detailOf(body) ?: body?.take(200)
+        return "$context (HTTP $status)${if (!detail.isNullOrBlank()) ": $detail" else ""}"
+    }
+
+    private fun encode(s: String): String =
+        java.net.URLEncoder.encode(s, StandardCharsets.UTF_8).replace("+", "%20")
+}

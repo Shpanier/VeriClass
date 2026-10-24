@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="VeriExam Backend", lifespan=lifespan)
+app = FastAPI(title="VeriClass Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

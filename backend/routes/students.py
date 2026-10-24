@@ -84,10 +84,10 @@ def list_students(teacher: dict = Depends(deps.require_teacher)):
                       'focus_regained', …) or None
       last_focus_at   when that event happened
       away            True if the student is currently outside the IDE
-      terminal_alerts refused VeriExam-terminal commands + attempts to open
+      terminal_alerts refused VeriClass-terminal commands + attempts to open
                       the IDE's own Terminal during an exam
       ide_alerts      panels/windows that aren't allowed + pastes from outside
-      terminal_count  lines entered in the VeriExam terminal
+      terminal_count  lines entered in the VeriClass terminal
       paste_count     every paste the exam client saw
       exam_state, exam_state_detail   see exam_state()
       live            the exam client's latest snapshot (open panels, tabs, …)

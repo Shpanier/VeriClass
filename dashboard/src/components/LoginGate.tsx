@@ -67,7 +67,7 @@ export function LoginGate({ onLoggedIn }: Props) {
         style={{ display: "flex", flexDirection: "column", gap: 12, width: 320,
                  padding: 24, border: "1px solid #e5e7eb", borderRadius: 10 }}
       >
-        <strong style={{ fontSize: 18 }}>VeriExam · Instructor sign-in</strong>
+        <strong style={{ fontSize: 18 }}>VeriClass · Instructor sign-in</strong>
         <span style={{ color: "#6b7280", fontSize: 13 }}>כניסת מרצה — enter your instructor code</span>
         <input
           autoFocus

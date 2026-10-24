@@ -34,8 +34,8 @@ tests/test_grading.py
 crewaiagentsmemory.bundle
 OS_Lab_HE.pptx
 
-# VeriExam terminal: BusyBox binaries fetched by veriexam_plugin/packaging/fetch_busybox.sh
-veriexam_plugin/busybox/
+# VeriClass terminal: BusyBox binaries fetched by vericlass_plugin/packaging/fetch_busybox.sh
+vericlass_plugin/busybox/
 
 # Local secrets backups and tunnel logs
 .env.backup*
@@ -55,5 +55,5 @@ config/exercise_files/
 *roster*.csv
 rosters/
 
-# The exercise-writing skill is private (lecturers who want it: see README, "Writing exercises").
-.claude/skills/
+# Local Claude Code settings and the private exercise-writing skill (lecturers who want it: see README, "Writing exercises").
+.claude/

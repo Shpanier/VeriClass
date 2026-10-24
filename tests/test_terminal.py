@@ -1,4 +1,4 @@
-"""VeriExam terminal: the policy handed to the plugin, the command log, and the
+"""VeriClass terminal: the policy handed to the plugin, the command log, and the
 alert a refused command raises on the dashboard."""
 import os
 import tempfile

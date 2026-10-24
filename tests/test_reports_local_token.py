@@ -27,13 +27,13 @@ def test_local_key_is_private_and_works_only_locally(client):
     path = deps.LOCAL_TOKEN_FILE
     assert path.is_file() and stat.S_IMODE(path.stat().st_mode) == 0o600
     key = path.read_text().strip()
-    assert client.get("/api/exercises", headers={"X-VeriExam-Local-Token": key}).status_code == 200
-    assert client.get("/api/exercises", headers={"X-VeriExam-Local-Token": "wrong"}).status_code == 401
+    assert client.get("/api/exercises", headers={"X-VeriClass-Local-Token": key}).status_code == 200
+    assert client.get("/api/exercises", headers={"X-VeriClass-Local-Token": "wrong"}).status_code == 401
     # Through a tunnel (forwarding headers) the key is refused.
-    r = client.get("/api/exercises", headers={"X-VeriExam-Local-Token": key, "X-Forwarded-For": "8.8.8.8"})
+    r = client.get("/api/exercises", headers={"X-VeriClass-Local-Token": key, "X-Forwarded-For": "8.8.8.8"})
     assert r.status_code == 401
     with TestClient(app, client=("10.0.0.7", 50000)) as remote:
-        assert remote.get("/api/exercises", headers={"X-VeriExam-Local-Token": key}).status_code == 401
+        assert remote.get("/api/exercises", headers={"X-VeriClass-Local-Token": key}).status_code == 401
 
 
 def test_session_report_is_anonymized(client):
@@ -51,7 +51,7 @@ def test_session_report_is_anonymized(client):
             "commands": ["vim" if i == 0 else "ls"], "reason": "'vim' isn't allowed" if i == 0 else None,
             "exit_code": None if i == 0 else 0})
     key = deps.LOCAL_TOKEN_FILE.read_text().strip()
-    r = client.get("/api/reports/session?exercise_id=ex3-mcalc", headers={"X-VeriExam-Local-Token": key})
+    r = client.get("/api/reports/session?exercise_id=ex3-mcalc", headers={"X-VeriClass-Local-Token": key})
     rep = r.json()
     assert rep["found"] and rep["students"] >= 3
     assert rep["operating_systems"].get("windows", 0) >= 3

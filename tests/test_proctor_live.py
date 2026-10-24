@@ -71,7 +71,7 @@ def _row(client, teacher, session_id):
 
 def _beat(client, hdr, sid, **status):
     base = {"focused": True, "fullscreen": True, "fullscreen_supported": True,
-            "tool_windows": ["VeriExam", "VeriExam Terminal"], "forbidden_tool_windows": [],
+            "tool_windows": ["VeriClass", "VeriClass Terminal"], "forbidden_tool_windows": [],
             "other_windows": [], "open_files": ["main.py"], "active_file": "main.py"}
     base.update(status)
     r = client.post("/api/proctor/heartbeat", json={"session_id": sid, "status": base}, headers=hdr)

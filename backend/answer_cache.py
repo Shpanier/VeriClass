@@ -14,7 +14,7 @@ punctuation; other rewordings are a different question.
 Settings (.env):
   ANSWER_CACHE=true        false turns the cache off
   ANSWER_CACHE_DAYS=30     how long an answer is reused; 0 = until cleared
-Clear it: sqlite3 veriexam.db "DELETE FROM answer_cache"
+Clear it: sqlite3 vericlass.db "DELETE FROM answer_cache"
 """
 import hashlib
 import json

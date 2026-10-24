@@ -1,8 +1,8 @@
 """Same terminal commands, every OS: find exercise commands that behave
 differently on Windows and macOS.
 
-The VeriExam terminal runs BusyBox on Windows and Linux, and /bin/bash with the
-BSD tools on macOS (veriexam_plugin/TERMINAL.md). A command that works on the
+The VeriClass terminal runs BusyBox on Windows and Linux, and /bin/bash with the
+BSD tools on macOS (vericlass_plugin/TERMINAL.md). A command that works on the
 teacher's Mac can fail, or print something else, on a student's Windows laptop.
 
 Two levels:

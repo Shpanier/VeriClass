@@ -14,7 +14,7 @@ BACKEND = os.environ.get("BACKEND_URL", "http://127.0.0.1:8010")
 for noisy in ("httpx", "httpcore", "socketio", "engineio", "asyncio", "watchfiles", "uvicorn.access"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 
-log = logging.getLogger("veriexam.student")
+log = logging.getLogger("vericlass.student")
 
 
 # With CHAINLIT_AUTH_SECRET set (make one with `chainlit create-secret`), Chainlit
@@ -58,7 +58,7 @@ async def _chat_login():
         await cl.Message(content=f"🛠️ Dev mode: auto-login with `{dev_code}`.").send()
         code, password = dev_code, dev_code  # the default password is the code
     else:
-        code = (await _prompt("🎓 Welcome to VeriExam. Enter your username.")).upper()
+        code = (await _prompt("🎓 Welcome to VeriClass. Enter your username.")).upper()
         if not code:
             await cl.Message(content="No username received. Refresh the page to try again.").send()
             return None

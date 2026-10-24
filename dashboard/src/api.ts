@@ -26,7 +26,7 @@ import type {
   UserAccount,
 } from "./types";
 
-const TOKEN_KEY = "veriexam.teacher.token";
+const TOKEN_KEY = "vericlass.teacher.token";
 
 export const auth = {
   get: () => localStorage.getItem(TOKEN_KEY),

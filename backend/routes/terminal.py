@@ -113,7 +113,7 @@ def insert_output(c, req: TerminalOutputRequest) -> bool:
 
 @router.post("/terminal/command")
 def record_command(req: TerminalCommandRequest, user: dict = Depends(deps.current_user)):
-    """The VeriExam terminal logs every line the student enters here — run or
+    """The VeriClass terminal logs every line the student enters here — run or
     refused. A refused line (not a mere syntax error) also becomes a
     `blocked_command` proctor event, so it shows in the proctor trail and
     raises the dashboard alarm like leaving the IDE does.

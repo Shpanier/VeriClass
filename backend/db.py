@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(os.environ.get("DB_PATH", "./veriexam.db"))
+DB_PATH = Path(os.environ.get("DB_PATH", "./vericlass.db"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -170,7 +170,7 @@ CREATE TABLE IF NOT EXISTS api_audit_log (
 -- possible cheating. 'kind' is one of:
 --   exam_started | focus_lost | minimized | fullscreen_exited
 --   | focus_regained | window_restored
---   | blocked_command (a refused VeriExam-terminal line; written by the backend)
+--   | blocked_command (a refused VeriClass-terminal line; written by the backend)
 --   | stock_terminal_opened (tried to open the IDE's own Terminal in exam mode)
 --   | fullscreen_restored
 --   | tool_window_opened (a panel outside the exam allowlist; already re-hidden)
@@ -211,7 +211,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
--- VeriExam terminal log: every line a student enters in the plugin's checked
+-- VeriClass terminal log: every line a student enters in the plugin's checked
 -- terminal, whether it ran or was refused. A refused line (allowed = 0, not a
 -- syntax error) is also written to proctor_events as 'blocked_command'.
 CREATE TABLE IF NOT EXISTS terminal_commands (
@@ -247,7 +247,7 @@ CREATE TABLE IF NOT EXISTS terminal_output (
     PRIMARY KEY (session_id, client_id, seq)
 );
 
--- Every paste the exam client saw (editor, VeriExam terminal, chat box), with
+-- Every paste the exam client saw (editor, VeriClass terminal, chat box), with
 -- the text. source: 'outside' (the clipboard came from another app), 'ide'
 -- (copied inside the IDE), 'tutor' (a code block's Copy button in the chat).
 CREATE TABLE IF NOT EXISTS pastes (

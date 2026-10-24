@@ -20,7 +20,7 @@ export interface Student {
   last_focus_kind: string | null;
   last_focus_at: string | null;
   away: boolean;
-  // VeriExam terminal: refused commands + attempts to open the IDE's own
+  // VeriClass terminal: refused commands + attempts to open the IDE's own
   // Terminal, and how many lines the student entered in total.
   terminal_alerts?: number;
   terminal_count?: number;
@@ -151,7 +151,7 @@ export interface ProctorEvent {
   created_at: string;
 }
 
-// One line from a student's VeriExam terminal (GET /api/terminal/commands).
+// One line from a student's VeriClass terminal (GET /api/terminal/commands).
 export interface TerminalCommand {
   id: number;
   session_id: string;

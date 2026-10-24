@@ -39,12 +39,12 @@ def row_mac(key: str, prev_mac: str, seq: str, client_id: str, at_utc: str,
 
 
 def parse(text: str) -> list[dict]:
-    """The export's rows. Raises ValueError when it isn't a VeriExam export."""
+    """The export's rows. Raises ValueError when it isn't a VeriClass export."""
     if text.startswith("﻿"):  # Excel-friendly BOM the plugin writes
         text = text[1:]
     reader = csv.DictReader(io.StringIO(text, newline=""))
     if reader.fieldnames is None or [f.strip() for f in reader.fieldnames] != COLUMNS:
-        raise ValueError("This isn't a VeriExam trace export (unexpected columns).")
+        raise ValueError("This isn't a VeriClass trace export (unexpected columns).")
     return [dict(r) for r in reader]
 
 

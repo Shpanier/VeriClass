@@ -19,7 +19,7 @@ def login(req: LoginRequest, request: Request):
     if not req.password:
         raise HTTPException(
             status_code=401,
-            detail="Enter your password too. (No password field? Update the VeriExam plugin.)",
+            detail="Enter your password too. (No password field? Update the VeriClass plugin.)",
         )
     ip = deps.client_ip(request)
     result = auth.login_with_code(

@@ -21,7 +21,7 @@ DASH_PORT=5173
 
 # Every window we open gets its tab's custom title prefixed with this tag, so a
 # later run can find and close the previous run's windows (and only those).
-WIN_TAG="VERIEXAM-DEV"
+WIN_TAG="VERICLASS-DEV"
 
 kill_port() {
   local port=$1
@@ -121,7 +121,7 @@ cat <<MSG
     student app http://127.0.0.1:$STUDENT_PORT
     dashboard   http://127.0.0.1:$DASH_PORT  (opening in your browser…)
 
-    Alternative student client: the CLion / PyCharm plugin (veriexam_plugin/).
+    Alternative student client: the CLion / PyCharm plugin (vericlass_plugin/).
     Behavior is set by STUDENT_CLIENT_MODE in .env (chat | ide).
-    Run it with:  cd veriexam_plugin && ./gradlew :clion:runIde   (or :pycharm:runIde)
+    Run it with:  cd vericlass_plugin && ./gradlew :clion:runIde   (or :pycharm:runIde)
 MSG

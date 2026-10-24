@@ -16,7 +16,7 @@ from backend.routes import review as review_mod
 
 REVIEW_TIMEOUT_SECONDS = 600  # how long the student request waits for the teacher
 
-log = logging.getLogger("veriexam.ask")
+log = logging.getLogger("vericlass.ask")
 
 router = APIRouter()
 
@@ -40,7 +40,7 @@ class AskRequest(BaseModel):
 
 
 # Sent with replies that can be asked again; the value is the button's model name.
-REASK_HEADER = "X-VeriExam-Reask"
+REASK_HEADER = "X-VeriClass-Reask"
 _REASK_INSTRUCTION = (
     "The student found a shorter answer to this question not detailed enough. Give a "
     "complete, detailed explanation, still following every rule above."
@@ -63,11 +63,11 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
         raise HTTPException(400, "Request looks like prompt injection — refused.")
 
     ex = exercises.get(s["exercise"])
-    environment.remember_os(req.session_id, req.client_os or request.headers.get("x-veriexam-client-os"))
+    environment.remember_os(req.session_id, req.client_os or request.headers.get("x-vericlass-client-os"))
     # Older IDE plugins (Java HTTP client) showed replies as plain text; newer ones
-    # announce Markdown support with X-VeriExam-Render.
+    # announce Markdown support with X-VeriClass-Render.
     plain = ("java" in request.headers.get("user-agent", "").lower()
-             and request.headers.get("x-veriexam-render", "").lower() != "markdown")
+             and request.headers.get("x-vericlass-render", "").lower() != "markdown")
     sys_prompt = prompting.system_prompt_for(s, plain)
     if req.reask:
         return _reask(req, s, ex, sys_prompt)

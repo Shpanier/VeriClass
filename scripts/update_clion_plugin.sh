@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────
-#  update_clion_plugin.sh — install/update the VeriExam CLion plugin.
+#  update_clion_plugin.sh — install/update the VeriClass CLion plugin.
 #
 #  Thin wrapper around update_plugin.sh, pinned to the CLion product. It pulls
 #  the CLion zip the build machine published and installs it into CLion only.

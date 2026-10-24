@@ -21,7 +21,7 @@ import { LanguageToggle, useLang } from "./i18n";
 type Tab = "monitor" | "exercises" | "courses";
 
 // The exercise the live view follows, remembered across reloads.
-const LIVE_KEY = "veriexam.liveExercise";
+const LIVE_KEY = "vericlass.liveExercise";
 
 function savedLiveId(): string | null {
   try { return localStorage.getItem(LIVE_KEY); } catch { return null; }

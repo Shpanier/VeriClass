@@ -53,8 +53,8 @@ def _folder(name: str) -> Path:
 
 
 def test_data_folder_is_the_test_copy():
-    # Never the lecturer's real ../VeriExPrivateData (tests/conftest.py).
-    assert "veriexam-data-" in str(packages.DATA_DIR)
+    # Never the lecturer's real ../VeriClassPrivateData (tests/conftest.py).
+    assert "vericlass-data-" in str(packages.DATA_DIR)
 
 
 def test_package_loads_with_teacher_fields_and_bank(client):
@@ -91,7 +91,7 @@ def test_downloads(client):
     for secret in ("solution.py", "teacher.yaml", "exercise.yaml", "source.md"):
         assert client.get(f"/api/files/{secret}").status_code == 404
     # Nothing outside a package's files/: not the server's own folder or database.
-    for other in ("veriexam.db", "requirements.txt", "README.md", ".env"):
+    for other in ("vericlass.db", "requirements.txt", "README.md", ".env"):
         assert client.get(f"/api/files/{other}").status_code == 404
 
 

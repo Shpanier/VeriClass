@@ -54,7 +54,7 @@ def client_config(exercise_id: Optional[str] = None):
                         full screen, open panels/windows/tabs); it also sends one
                         on every change. HEARTBEAT_MS in .env, default 10 s.
       exam_allowed_tool_windows — panels allowed during the exam besides the
-                        VeriExam chat and the VeriExam Terminal (every other one
+                        VeriClass chat and the VeriClass Terminal (every other one
                         is closed and reported). EXAM_ALLOWED_TOOL_WINDOWS in
                         .env, comma-separated tool window ids, e.g. "Run".
     """

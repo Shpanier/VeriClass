@@ -1,7 +1,7 @@
 """Run an exercise's terminal commands on macOS and in BusyBox, and show what differs.
 
 Usage:
-    python scripts/check_exercise_os.py ../VeriExPrivateData/exercises/lab1-linux-git
+    python scripts/check_exercise_os.py ../VeriClassPrivateData/exercises/lab1-linux-git
     python scripts/check_exercise_os.py config/exercises/*.yaml --no-docker
 
 Takes exercise package folders (backend/packages.py, teacher.yaml merged in) or

@@ -84,7 +84,7 @@ export function isLeaveKind(kind: string | null): boolean {
 
 const TERMINAL_ALERT_KINDS = new Set(["blocked_command", "stock_terminal_opened"]);
 
-/** A VeriExam-terminal violation: an alert, but not "outside the IDE". */
+/** A VeriClass-terminal violation: an alert, but not "outside the IDE". */
 export function isTerminalAlertKind(kind: string | null): boolean {
   return kind != null && TERMINAL_ALERT_KINDS.has(kind);
 }
