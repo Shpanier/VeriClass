@@ -14,11 +14,13 @@ session_id usually arrives in the request body, which a dependency can't see
 without re-reading it.
 """
 import os
+import secrets
+from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, Header, HTTPException, Request
 
-from backend import auth, db
+from backend import auth, db, packages
 
 
 def _token_from_header(authorization: Optional[str]) -> str:
@@ -60,8 +62,46 @@ def teacher_blocked(role: str, request: Request) -> bool:
     return TEACHER_LOCAL_ONLY and role == "teacher" and not is_local_request(request)
 
 
-def current_user(request: Request, authorization: Optional[str] = Header(None)) -> dict:
+# The lecturer's own tools on this machine (the MCP server, veriexam_mcp/)
+# authenticate with a random key the server keeps in the private data folder,
+# readable only by the lecturer's account: no password to store anywhere.
+LOCAL_TOKEN_FILE = packages.DATA_DIR / ".local-token"
+
+
+def ensure_local_token() -> str:
+    """Create the local tools' key on first start (mode 600)."""
+    if LOCAL_TOKEN_FILE.is_file():
+        return LOCAL_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    LOCAL_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_urlsafe(32)
+    fd = os.open(LOCAL_TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(token)
+    return token
+
+
+def _local_tool_user(request: Request, token: str) -> Optional[dict]:
+    """The lecturer, for a request made on this machine with the local key."""
+    try:
+        expected = LOCAL_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not expected or not is_local_request(request) or not secrets.compare_digest(token, expected):
+        return None
+    with db.conn() as c:
+        row = c.execute("SELECT id, username FROM users WHERE role = 'teacher' ORDER BY id LIMIT 1").fetchone()
+    return {"id": row["id"] if row else 0, "username": row["username"] if row else "local tools",
+            "role": "teacher", "via": "local-token"}
+
+
+def current_user(request: Request, authorization: Optional[str] = Header(None),
+                 x_veriexam_local_token: Optional[str] = Header(None)) -> dict:
     """Any authenticated user. Returns {id, username, role}."""
+    if not authorization and x_veriexam_local_token:
+        user = _local_tool_user(request, x_veriexam_local_token.strip())
+        if user is None:
+            raise HTTPException(401, "Invalid local key (only tools on the lecturer's computer may use it)")
+        return user
     user = auth.user_for_token(_token_from_header(authorization))
     if user is None:
         raise HTTPException(401, "Invalid token")

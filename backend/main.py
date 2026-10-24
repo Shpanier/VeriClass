@@ -11,7 +11,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend import db, exercises
+from backend import db, deps, exercises
 from backend.routes import (
     ask,
     client_config,
@@ -31,6 +31,7 @@ from backend.routes import (
     submissions,
     terminal as terminal_routes,
     trace as trace_routes,
+    reports as report_routes,
 )
 
 # Silence the noisy per-request access log (polling hits /api/students and
@@ -46,6 +47,7 @@ EXERCISES_DIR = Path(__file__).parent.parent / "config" / "exercises"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_schema()
+    deps.ensure_local_token()
     loaded = exercises.load_all(EXERCISES_DIR)
     if not loaded:
         raise RuntimeError(
@@ -85,6 +87,7 @@ app.include_router(step_routes.router, prefix="/api")
 app.include_router(terminal_routes.router, prefix="/api")
 app.include_router(trace_routes.router, prefix="/api")
 app.include_router(course_routes.router, prefix="/api")
+app.include_router(report_routes.router, prefix="/api")
 
 
 @app.get("/healthz")
