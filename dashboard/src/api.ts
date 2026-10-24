@@ -1,6 +1,8 @@
 import type {
   ActiveExercise,
   AnswerLevel,
+  Attendance,
+  Meeting,
   Course,
   ExerciseSummary,
   FullExercise,
@@ -227,6 +229,14 @@ export const api = {
   deleteCourse: (courseId: string) =>
     j<{ ok: boolean }>(`/api/courses/${encodeURIComponent(courseId)}`, { method: "DELETE" }),
   users: () => j<UserAccount[]>("/api/users"),
+  meetings: (courseId: string) => j<Meeting[]>(`/api/courses/${encodeURIComponent(courseId)}/meetings`),
+  addMeeting: (courseId: string, date: string, exerciseId: string, title: string) =>
+    j<Meeting>(`/api/courses/${encodeURIComponent(courseId)}/meetings`, {
+      method: "POST",
+      body: JSON.stringify({ date, exercise_id: exerciseId, title: title || null }),
+    }),
+  deleteMeeting: (id: number) => j<{ ok: boolean }>(`/api/meetings/${id}`, { method: "DELETE" }),
+  attendance: (id: number) => j<Attendance>(`/api/meetings/${id}/attendance`),
   importStudents: (contentBase64: string, courseId: string | null, dryRun: boolean) =>
     j<RosterResult>("/api/students/import", {
       method: "POST",

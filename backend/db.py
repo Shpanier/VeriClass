@@ -74,6 +74,19 @@ CREATE TABLE IF NOT EXISTS course_members (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+-- A course's meetings: on that date the course's students open that exercise
+-- without choosing (backend/courses.py), and attendance is counted from the
+-- sessions of that day.
+CREATE TABLE IF NOT EXISTS course_meetings (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_id     TEXT NOT NULL,
+    meeting_date  TEXT NOT NULL,          -- YYYY-MM-DD, the server's local date
+    exercise_id   TEXT NOT NULL,
+    title         TEXT,
+    created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (course_id) REFERENCES courses(course_id)
+);
+
 -- Teacher-authored exercises. Bundled exercises still live as YAML under
 -- config/exercises/; these are the ones created from the instructor console.
 -- Top-level fields mirror the YAML; variants + optional lists are kept in the

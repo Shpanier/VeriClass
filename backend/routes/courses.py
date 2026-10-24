@@ -58,6 +58,47 @@ def delete_course(course_id: str, teacher: dict = Depends(deps.require_teacher))
     return {"ok": True}
 
 
+class MeetingRequest(BaseModel):
+    date: str            # YYYY-MM-DD
+    exercise_id: str
+    title: Optional[str] = None
+
+
+@router.get("/courses/{course_id}/meetings")
+def list_meetings(course_id: str, teacher: dict = Depends(deps.require_teacher)):
+    try:
+        return courses.meetings(course_id)
+    except courses.CourseError as e:
+        _raise(e)
+
+
+@router.post("/courses/{course_id}/meetings", status_code=201)
+def add_meeting(course_id: str, req: MeetingRequest, teacher: dict = Depends(deps.require_teacher)):
+    """On that date the course's students open this exercise (the course
+    starts offering it if it didn't)."""
+    try:
+        return courses.add_meeting(course_id, req.date, req.exercise_id, req.title)
+    except courses.CourseError as e:
+        _raise(e)
+
+
+@router.delete("/meetings/{meeting_id}")
+def delete_meeting(meeting_id: int, teacher: dict = Depends(deps.require_teacher)):
+    try:
+        courses.delete_meeting(meeting_id)
+    except courses.CourseError as e:
+        _raise(e)
+    return {"ok": True}
+
+
+@router.get("/meetings/{meeting_id}/attendance")
+def meeting_attendance(meeting_id: int, teacher: dict = Depends(deps.require_teacher)):
+    try:
+        return courses.attendance(meeting_id)
+    except courses.CourseError as e:
+        _raise(e)
+
+
 @router.get("/users")
 def list_users(teacher: dict = Depends(deps.require_teacher)):
     """Every account, for picking course members. `custom_password` is False

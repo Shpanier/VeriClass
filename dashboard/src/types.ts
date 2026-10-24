@@ -429,6 +429,38 @@ export interface RosterResult {
   codes_csv?: string; // after an import (not a preview)
 }
 
+// A course meeting (GET /api/courses/{id}/meetings): on its date the course's
+// students open its exercise without choosing.
+export interface Meeting {
+  id: number;
+  course_id: string;
+  meeting_date: string; // YYYY-MM-DD
+  exercise_id: string;
+  exercise_title: string | null;
+  title: string | null;
+  members: number;
+  attended: number;
+}
+
+export interface AttendanceRow {
+  user_id: number;
+  username: string;
+  email: string | null;
+  group: string | null;
+  attended: boolean;
+  first_seen: string | null;
+  last_seen: string | null;
+  messages: number;
+  steps_approved: number;
+  step_submissions: number;
+}
+
+export interface Attendance {
+  meeting: Meeting;
+  rows: AttendanceRow[];
+  counts: { members: number; attended: number };
+}
+
 // One account (GET /api/users). custom_password is false while the password is
 // still the login code.
 export interface UserAccount {

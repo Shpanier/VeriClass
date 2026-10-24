@@ -8,6 +8,7 @@ and one exercise there is nothing to pick, so the clients skip the picker.
 Students who are in no course at all get the global active exercise, as before
 courses existed (exercises.active()). Teachers may open any exercise, to try it.
 """
+import datetime
 import re
 from typing import Any, Optional
 
@@ -76,8 +77,13 @@ def for_user(user_id: int, role: str) -> list[dict[str, Any]]:
             continue
         ids = [e["exercise_id"] for e in offered]
         default = r["default_exercise"] if r["default_exercise"] in ids else ids[0]
+        # A meeting today: its exercise is preselected, and the plugin (0.4.3+)
+        # opens it without asking when this is the student's only course.
+        today = today_exercise(r["course_id"])
+        today = today if today in ids else None
         out.append({"course_id": r["course_id"], "name": r["name"],
-                    "default_exercise": default, "exercises": offered})
+                    "default_exercise": today or default, "exercises": offered,
+                    "today_exercise": today})
     return out
 
 
@@ -188,7 +194,117 @@ def delete(course_id: str) -> None:
             raise CourseError(404, f"Unknown course '{course_id}'.")
         c.execute("DELETE FROM course_exercises WHERE course_id = ?", (course_id,))
         c.execute("DELETE FROM course_members WHERE course_id = ?", (course_id,))
+        c.execute("DELETE FROM course_meetings WHERE course_id = ?", (course_id,))
         c.execute("DELETE FROM courses WHERE course_id = ?", (course_id,))
+
+
+# --- meetings and attendance --------------------------------------------------------
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _today() -> str:
+    """The server's local date (the lecturer's machine, so the class's date)."""
+    return datetime.date.today().isoformat()
+
+
+def today_exercise(course_id: str) -> Optional[str]:
+    with db.conn() as c:
+        row = c.execute(
+            "SELECT exercise_id FROM course_meetings WHERE course_id = ? AND meeting_date = ? "
+            "ORDER BY id DESC LIMIT 1", (course_id, _today()),
+        ).fetchone()
+    return row["exercise_id"] if row else None
+
+
+def meetings(course_id: str) -> list[dict[str, Any]]:
+    """The course's meetings, oldest first, each with how many students came."""
+    with db.conn() as c:
+        if not c.execute("SELECT 1 FROM courses WHERE course_id = ?", (course_id,)).fetchone():
+            raise CourseError(404, f"Unknown course '{course_id}'.")
+        members = c.execute("SELECT COUNT(*) AS n FROM course_members WHERE course_id = ?",
+                            (course_id,)).fetchone()["n"]
+        rows = [dict(r) for r in c.execute(
+            "SELECT id, course_id, meeting_date, exercise_id, title FROM course_meetings "
+            "WHERE course_id = ? ORDER BY meeting_date, id", (course_id,))]
+    for m in rows:
+        m["members"] = members
+        m["attended"] = sum(1 for r in attendance(m["id"])["rows"] if r["attended"])
+        entry = _exercise_entry(m["exercise_id"])
+        m["exercise_title"] = entry["title_en"] if entry else None
+    return rows
+
+
+def add_meeting(course_id: str, meeting_date: str, exercise_id: str, title: Optional[str] = None) -> dict[str, Any]:
+    """A meeting on [meeting_date] with [exercise_id]; the course starts offering
+    the exercise if it didn't."""
+    if not _DATE_RE.match(meeting_date or ""):
+        raise CourseError(400, "The date must look like 2026-11-05.")
+    try:
+        datetime.date.fromisoformat(meeting_date)
+    except ValueError:
+        raise CourseError(400, f"There is no date {meeting_date}.")
+    if _exercise_entry(exercise_id) is None:
+        raise CourseError(400, f"Unknown exercise '{exercise_id}'.")
+    with db.conn() as c:
+        if not c.execute("SELECT 1 FROM courses WHERE course_id = ?", (course_id,)).fetchone():
+            raise CourseError(404, f"Unknown course '{course_id}'.")
+        c.execute("INSERT OR IGNORE INTO course_exercises (course_id, exercise_id) VALUES (?, ?)",
+                  (course_id, exercise_id))
+        c.execute("UPDATE courses SET default_exercise = COALESCE(default_exercise, ?) WHERE course_id = ?",
+                  (exercise_id, course_id))
+        mid = c.execute(
+            "INSERT INTO course_meetings (course_id, meeting_date, exercise_id, title) VALUES (?, ?, ?, ?)",
+            (course_id, meeting_date, exercise_id, (title or "").strip() or None),
+        ).lastrowid
+    return next(m for m in meetings(course_id) if m["id"] == mid)
+
+
+def delete_meeting(meeting_id: int) -> None:
+    with db.conn() as c:
+        if c.execute("DELETE FROM course_meetings WHERE id = ?", (meeting_id,)).rowcount == 0:
+            raise CourseError(404, "Unknown meeting.")
+
+
+def attendance(meeting_id: int) -> dict[str, Any]:
+    """Each member of the meeting's course: whether they opened the meeting's
+    exercise that day, when, and how far they got."""
+    with db.conn() as c:
+        m = c.execute("SELECT * FROM course_meetings WHERE id = ?", (meeting_id,)).fetchone()
+        if m is None:
+            raise CourseError(404, "Unknown meeting.")
+        m = dict(m)
+        rows = []
+        for u in c.execute(
+            "SELECT u.id, u.username, u.email, u.group_name FROM course_members cm JOIN users u ON u.id = cm.user_id "
+            "WHERE cm.course_id = ? ORDER BY u.username", (m["course_id"],),
+        ).fetchall():
+            ses = c.execute(
+                "SELECT id, started_at, last_active_at FROM sessions WHERE user_id = ? AND exercise = ? "
+                "AND (date(started_at, 'localtime') = ? OR date(last_active_at, 'localtime') = ?)",
+                (u["id"], m["exercise_id"], m["meeting_date"], m["meeting_date"]),
+            ).fetchall()
+            ids = [s["id"] for s in ses]
+            marks = ",".join("?" * len(ids))
+            questions = approved = submissions = 0
+            if ids:
+                questions = c.execute(
+                    f"SELECT COUNT(*) AS n FROM messages WHERE role = 'user' AND session_id IN ({marks}) "
+                    "AND date(created_at, 'localtime') = ?", (*ids, m["meeting_date"])).fetchone()["n"]
+                approved = c.execute(
+                    f"SELECT COUNT(DISTINCT step) AS n FROM step_checks WHERE status = 'approved' "
+                    f"AND session_id IN ({marks})", ids).fetchone()["n"]
+                submissions = c.execute(
+                    f"SELECT COUNT(*) AS n FROM step_checks WHERE session_id IN ({marks})", ids).fetchone()["n"]
+            rows.append({
+                "user_id": u["id"], "username": u["username"], "email": u["email"], "group": u["group_name"],
+                "attended": bool(ses),
+                "first_seen": min((s["started_at"] for s in ses), default=None),
+                "last_seen": max((s["last_active_at"] for s in ses), default=None),
+                "messages": questions, "steps_approved": approved, "step_submissions": submissions,
+            })
+    return {"meeting": m, "rows": rows,
+            "counts": {"members": len(rows), "attended": sum(r["attended"] for r in rows)}}
 
 
 def add_members(course_id: str, user_ids: list[int]) -> None:

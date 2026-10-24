@@ -5,6 +5,7 @@ import { useLang } from "../i18n";
 import { Button } from "./ui/Button";
 import { controlStyle } from "./ui/Field";
 import { ImportStudentsModal } from "./ImportStudentsModal";
+import { MeetingsSection } from "./MeetingsSection";
 
 // The "Courses" tab: which students are in which course, which exercises each
 // course offers, and the one preselected after login (backend/courses.py).
@@ -275,6 +276,8 @@ function CourseCard({
           </div>
         </div>
       </div>
+
+      <MeetingsSection courseId={course.course_id} exercises={exercises} onChanged={onChanged} />
 
       {error && <p style={{ color: "#b91c1c", fontSize: 13 }}>{error}</p>}
       <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
