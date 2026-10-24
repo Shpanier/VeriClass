@@ -6,7 +6,12 @@ import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { controlStyle } from "./ui/Field";
 
-const today = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD, local
+// YYYY-MM-DD, local. Not toLocaleDateString: it builds an Intl formatter on every
+// call, and this runs on every render of every course card.
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 // A course's meetings (backend/courses.py): on a meeting's date the course's
 // students open its exercise without choosing; attendance comes from the
@@ -18,7 +23,7 @@ export function MeetingsSection({ courseId, exercises, onChanged }: {
 }) {
   const { t, lang } = useLang();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [date, setDate] = useState(today());
+  const [date, setDate] = useState(today);
   const [exerciseId, setExerciseId] = useState(exercises[0]?.exercise_id ?? "");
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +53,7 @@ export function MeetingsSection({ courseId, exercises, onChanged }: {
     }
   };
 
+  const now = today();
   const exTitle = (id: string) => {
     const ex = exercises.find((e) => e.exercise_id === id);
     return ex ? (lang === "he" ? ex.title_he ?? ex.title_en : ex.title_en) : id;
@@ -61,7 +67,7 @@ export function MeetingsSection({ courseId, exercises, onChanged }: {
       {meetings.map((m) => (
         <div key={m.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, padding: "3px 0", flexWrap: "wrap" }}>
           <code dir="ltr">{m.meeting_date}</code>
-          {m.meeting_date === today() && (
+          {m.meeting_date === now && (
             <span style={{ fontSize: 11, background: "#dcfce7", color: "#166534", padding: "1px 6px", borderRadius: 999 }}>
               {t("todayLabel")}
             </span>

@@ -82,6 +82,27 @@ def test_import_students_never_returns_names_or_codes(tools):
     assert "Hidden Person" in codes.read_text(encoding="utf-8-sig")
 
 
+def test_same_second_does_not_clash(tools):
+    """Imports, pushes and exports right after each other each get their own
+    file or folder (the names carry only the second)."""
+    csv = Path(tempfile.mkdtemp()) / "pair.csv"
+    csv.write_text("name\nFirst Quick\n", encoding="utf-8")
+    one = tools.import_students(str(csv), dry_run=False)
+    csv.write_text("name\nSecond Quick\n", encoding="utf-8")
+    two = tools.import_students(str(csv), dry_run=False)
+    assert one["codes_file"] != two["codes_file"]
+    assert "Second Quick" in Path(two["codes_file"]).read_text(encoding="utf-8-sig")
+
+    folder = Path(tools.export_exercise("pkg-demo")["folder"])
+    assert tools.export_exercise("pkg-demo")["folder"] != str(folder)
+    text = (folder / "exercise.yaml").read_text(encoding="utf-8").replace("pkg-demo", "mcp-quick")
+    (folder / "exercise.yaml").write_text(text, encoding="utf-8")
+    for _ in range(3):
+        assert tools.push_exercise(str(folder))["ok"]
+    kept = [p for p in (packages.exercises_dir() / ".previous").iterdir() if p.name.startswith("mcp-quick-")]
+    assert len(kept) == 2
+
+
 def test_session_report_is_saved(tools):
     rep = tools.session_report(exercise_id="ex3-mcalc")
     if rep.get("found"):

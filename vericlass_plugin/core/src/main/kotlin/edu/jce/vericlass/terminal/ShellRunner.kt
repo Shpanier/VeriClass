@@ -164,6 +164,9 @@ class ShellRunner(private val shell: ShellSpec, private val stateDir: File) {
         env["PAGER"] = "cat"
         env["GIT_PAGER"] = "cat"
         env["GIT_EDITOR"] = "echo 'VeriClass: use git commit -m \"message\"' >&2; false"
+        // A merge that isn't a fast-forward would open the editor for its message
+        // (and stop with "Not committing merge"): take git's default message.
+        env["GIT_MERGE_AUTOEDIT"] = "no"
         // Same `sort` order on every machine, so expected outputs match.
         env["LC_COLLATE"] = "C"
         if (!ShellLocator.isWindows && env["LANG"].isNullOrBlank()) env["LANG"] = "en_US.UTF-8"

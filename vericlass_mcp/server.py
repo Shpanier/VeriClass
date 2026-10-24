@@ -20,7 +20,6 @@ import json
 import os
 import shutil
 import sys
-import time
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
@@ -246,7 +245,7 @@ def export_exercise(exercise_id: str) -> dict:
     """Copy an installed exercise into drafts/ (a new folder) to edit it there,
     then push_exercise it again."""
     data = _call("GET", f"/api/exercises/{exercise_id}/export")
-    target = _drafts() / f"{exercise_id}-edit-{time.strftime('%Y%m%d-%H%M%S')}"
+    target = packages.stamped(_drafts(), f"{exercise_id}-edit")
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         z.extractall(target)
     inner = target / exercise_id
@@ -322,7 +321,7 @@ def import_students(csv_path: str, course_id: Optional[str] = None, dry_run: boo
     if not dry_run and r.get("codes_csv"):
         codes = packages.DATA_DIR / "codes"
         codes.mkdir(parents=True, exist_ok=True)
-        path = codes / f"login-codes-{course_id or 'students'}-{time.strftime('%Y%m%d-%H%M%S')}.csv"
+        path = packages.stamped(codes, f"login-codes-{course_id or 'students'}", ".csv")
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8-sig", newline="") as f:
             f.write(r["codes_csv"])

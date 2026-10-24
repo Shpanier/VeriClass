@@ -53,6 +53,16 @@ def exercises_dir() -> Path:
     return DATA_DIR / "exercises"
 
 
+def stamped(folder: Path, name: str, suffix: str = "") -> Path:
+    """folder/<name>-<date-time><suffix> that doesn't exist yet: a second one in
+    the same second gets -2, -3, ... instead of overwriting the first."""
+    base = f"{name}-{time.strftime('%Y%m%d-%H%M%S')}"
+    path, n = folder / f"{base}{suffix}", 2
+    while path.exists():
+        path, n = folder / f"{base}-{n}{suffix}", n + 1
+    return path
+
+
 def package_dirs() -> list[Path]:
     root = exercises_dir()
     if not root.is_dir():
@@ -265,7 +275,7 @@ def install_folder(src: Path, replace: bool = True) -> dict[str, Any]:
         shutil.copytree(src, staging, dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns(".git", "__pycache__", ".DS_Store", "*.pyc"))
         if target.exists():
-            keep = exercises_dir() / ".previous" / f"{target.name}-{time.strftime('%Y%m%d-%H%M%S')}"
+            keep = stamped(exercises_dir() / ".previous", target.name)
             keep.parent.mkdir(parents=True, exist_ok=True)
             target.rename(keep)
         staging.rename(target)
@@ -421,7 +431,7 @@ def write_back(current: dict[str, Any], payload: dict[str, Any]) -> None:
         doc["steps"] = new_steps
         teacher["steps"] = t_new
 
-    keep = exercises_dir() / ".previous" / f"{folder.name}-{time.strftime('%Y%m%d-%H%M%S')}"
+    keep = stamped(exercises_dir() / ".previous", folder.name)
     keep.mkdir(parents=True, exist_ok=True)
     for p in (ex_path, t_path):
         if p.is_file():
