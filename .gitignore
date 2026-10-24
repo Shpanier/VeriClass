@@ -54,3 +54,6 @@ config/exercise_files/
 *Login_Codes*
 *roster*.csv
 rosters/
+
+# The exercise-writing skill is private (lecturers who want it: see README, "Writing exercises").
+.claude/skills/

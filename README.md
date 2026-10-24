@@ -97,13 +97,21 @@ This is the assessment backbone: probes test whether the student
 Global toggle in the dashboard header. When on:
 
 1. Student asks a question.
-2. The backend generates **three answer variants** in one LLM call:
+2. The backend drafts **four answers** in one LLM call, each in English and Hebrew:
    - **Nudge** — one Socratic line, no answer
    - **Normal** — guidance plus a small pointer, no full solution
    - **Normal + more** — same, with an extra explanation or analogy
-3. The question and all three variants appear in the instructor's review
-   queue. The student sees *"Your teacher is reviewing your question…"*.
-4. The instructor picks one. That text streams to the student.
+   - **Direct** — not Socratic: the plain answer to what was asked, with a
+     short example (never the whole step's solution)
+3. The question and the four answers appear in the instructor's review
+   queue, opened in the language the student wrote in. The student sees
+   *"Your teacher is reviewing your question…"*. If the drafts aren't good
+   enough, **Redo with Sonnet 5.5 / Opus 5.5** drafts them again with a
+   stronger model (`CLAUDE_STRONG_MODEL`, `CLAUDE_BEST_MODEL`). When the
+   question is close to one in the exercise's **question bank**, the bank's
+   ready answer is shown too.
+4. The instructor picks one (and may edit it). It is stored, then streamed to
+   the student, so a dropped connection doesn't lose it.
 5. The chosen level is logged on `messages.answer_level` for later
    correlation with the student's grade.
 
@@ -229,6 +237,19 @@ A student can be in several courses, and a course can offer several exercises.
 In the dashboard's **Courses** tab, create a course, tick the exercises students
 may open, pick the **default** (preselected) one, and tick its students.
 `add_students.py --course devops-2026` adds new students straight to a course.
+
+**Students from a CSV file.** In the Courses tab, *Import students (CSV)* reads a
+list by column names, in English or Hebrew: name (or first + last name), and
+optionally email, student id, course and group. A Moodle participants export
+and a Hebrew CSV saved from Excel work as they are. Preview first, then
+import; the new login codes download as a CSV. The same from the command line:
+`python scripts/add_students.py --csv class.csv --course dl-2026 --codes-out codes.csv`,
+or the MCP tool `import_students`. Students already in the system are matched
+by email or ID, so importing a list again creates nobody twice.
+
+**Meetings.** Each course can list its meetings (a date and an exercise). On
+that date its students open the meeting's exercise without choosing, and the
+course card shows the attendance of every meeting.
 
 After logging in, a student picks a course, then one of its exercises. With one
 course offering one exercise there is nothing to pick, and the exercise opens
@@ -383,9 +404,41 @@ details in [`veriexam_plugin/README.md`](veriexam_plugin/README.md) →
 
 ---
 
-## Designing new exercises
+## Writing exercises
 
-Exercises are YAML files in `config/exercises/`. Minimum shape:
+Each lecturer runs their own VeriExam server. Exercises are **packages**:
+folders in a private data folder next to the code (`VERIEXAM_DATA_DIR`, default
+`../VeriExPrivateData`), which never goes into git:
+
+```
+VeriExPrivateData/exercises/<exercise_id>/
+  exercise.yaml   what students and the tutor see (brief, steps, tutor notes, terminal rules)
+  teacher.yaml    teacher-only: each step's expected answer, reference commands, evidence rules
+  faq.yaml        the question bank: likely questions per step with four ready answers
+  files/          what students download (served at /api/files/<name>)
+  solution/       the lecturer's solution; never served
+```
+
+The folder is the source of truth: the server loads it, and the dashboard's
+edits are written back into it. Three ways to add or change an exercise:
+
+1. **In your own Claude Code session** (no server tokens). The MCP server in
+   `veriexam_mcp/` gives Claude tools for your server: start an exercise in
+   `drafts/`, check it (`validate_exercise`), install it (`push_exercise`,
+   optionally into a course or as a dated meeting), import students, read an
+   anonymized class report. Register it once with `scripts/install_mcp.sh`.
+   The exercise-writing **skill** that turns slides, a Word file of an earlier
+   exercise or an idea into a finished package (with a question bank of about
+   50 questions, made by simulating students) is not part of this repository.
+   **Lecturers who want it: email me at shpanier@gmail.com.**
+2. **Upload a zipped package** in the dashboard's Exercises tab.
+3. **Edit in the dashboard**: texts, steps, expected answers, tutor notes, the
+   terminal hint and the check command (no model involved). *Export* gives any
+   exercise as a package zip.
+
+`scripts/to_package.py` turns a one-file exercise into a package. Simple
+coding exercises with per-student **variants** can still be YAML files in
+`config/exercises/` (the demos ex3–ex5) or made with *New exercise*:
 
 ```yaml
 exercise_id: ex4-myexercise
@@ -505,6 +558,9 @@ scripts/
 | `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only).   |
 | `STUDENT_CLIENT_MODE` | CLion plugin behavior: `chat` (default) or `ide`. Ignored by Chainlit. |
 | `SCAFFOLD_FILENAME`   | File the plugin's `ide` mode scaffolds into the project. Default `mcalc.c`. |
+| `VERIEXAM_DATA_DIR`   | The private data folder (exercise packages, login codes, reports). Default `../VeriExPrivateData`. |
+| `CLAUDE_STRONG_MODEL`, `CLAUDE_BEST_MODEL` | The review queue's *Redo with* models (Sonnet 5.5, Opus 5.5). |
+| `BANK_MATCH_THRESHOLD`, `BANK_AUTO_ANSWER`, `BANK_AUTO_THRESHOLD` | When the question bank's answer is shown, or (review mode off) sent directly. |
 
 `config/cloud_llm.yaml` sets the Gemini model and timeout the agent layer
 uses. Everything runs on the single `GEMINI_API_KEY`.
