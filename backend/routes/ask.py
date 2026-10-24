@@ -21,6 +21,14 @@ log = logging.getLogger("veriexam.ask")
 router = APIRouter()
 
 
+class Attachment(BaseModel):
+    """What the plugin (0.4.3+) attaches to a step submission ("Done with step N")."""
+    filename: Optional[str] = None
+    source: Optional[str] = None        # the open editor's file
+    console: Optional[str] = None       # the Run console's text
+    check_output: Optional[str] = None  # the exercise's check command, run on submit
+
+
 class AskRequest(BaseModel):
     session_id: str
     message: str
@@ -28,6 +36,7 @@ class AskRequest(BaseModel):
     reask: bool = False
     # Plugin 0.4.3+: the student's OS, e.g. "Windows 11 amd64" (also sent as a header).
     client_os: Optional[str] = None
+    attachment: Optional[Attachment] = None
 
 
 # Sent with replies that can be asked again; the value is the button's model name.
@@ -303,7 +312,8 @@ async def _gen_step(req: "AskRequest", s, ex, plain: bool = False):
             yield chunk
         return
 
-    check_id = steps.submit(sid, cur, req.message)
+    check_id = steps.submit(sid, cur, req.message,
+                            req.attachment.model_dump() if req.attachment else None)
     yield (f"📋 Sent to your teacher. Please wait: step {cur + 1 if cur < total else cur} "
            "will appear right here when your teacher approves step "
            f"{cur}. (You can keep working on your code meanwhile.)\n\n")

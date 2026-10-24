@@ -23,6 +23,7 @@ def pending_step_checks(teacher: dict = Depends(deps.require_teacher)):
         ex = exercises.get(r["exercise"])
         st = steps.steps_of(ex)
         step = st[r["step"] - 1] if 0 < r["step"] <= len(st) else {}
+        questions = steps.question_count(step) if step else None
         items.append({
             "id": r["id"],
             "session_id": r["session_id"],
@@ -34,6 +35,18 @@ def pending_step_checks(teacher: dict = Depends(deps.require_teacher)):
             "answer": r["answer"],
             "expected": step.get("expected", ""),
             "created_at": r["created_at"],
+            # How many questions the step asks, and roughly how many this answers.
+            "questions": questions,
+            "answered": steps.answered_count(r["answer"], questions),
+            # The student's terminal lines and the step's evidence rules.
+            "evidence": steps.evidence(r["session_id"], step),
+            # The plugin's attachment: open file, Run console, check output.
+            "code": {
+                "filename": r["code_filename"],
+                "source": r["code_text"],
+                "console": r["console_text"],
+                "check_output": r["check_output"],
+            } if (r["code_text"] or r["console_text"] or r["check_output"]) else None,
         })
     # Show the panel when any exercise students can open has steps: the global
     # active one, or one offered in a course.

@@ -135,8 +135,17 @@ def mark_delivered(check_id: int) -> None:
         c.execute("UPDATE step_checks SET delivered = 1 WHERE id = ?", (check_id,))
 
 
-def submit(session_id: str, step: int, answer: str) -> int:
-    """Store (or extend) the pending check for this step; returns its id."""
+# What a step submission may carry from the plugin (0.4.3+): the open file, the
+# Run console, and the output of the exercise's check command. Stored sizes.
+_CODE_MAX = 200_000
+_CONSOLE_MAX = 50_000
+_CHECK_MAX = 20_000
+
+
+def submit(session_id: str, step: int, answer: str,
+           attachment: Optional[dict[str, Any]] = None) -> int:
+    """Store (or extend) the pending check for this step; returns its id. The
+    newest attachment replaces an earlier one."""
     with db.conn() as c:
         row = c.execute(
             "SELECT id, answer FROM step_checks WHERE session_id = ? AND step = ? "
@@ -148,12 +157,143 @@ def submit(session_id: str, step: int, answer: str) -> int:
                 "UPDATE step_checks SET answer = ? WHERE id = ?",
                 (row["answer"] + "\n\n" + answer, row["id"]),
             )
-            return row["id"]
-        cur = c.execute(
-            "INSERT INTO step_checks (session_id, step, answer) VALUES (?, ?, ?)",
-            (session_id, step, answer),
-        )
-        return cur.lastrowid
+            check_id = row["id"]
+        else:
+            check_id = c.execute(
+                "INSERT INTO step_checks (session_id, step, answer) VALUES (?, ?, ?)",
+                (session_id, step, answer),
+            ).lastrowid
+        a = attachment or {}
+        if any((a.get(k) or "").strip() for k in ("source", "console", "check_output")):
+            c.execute(
+                "UPDATE step_checks SET code_filename = ?, code_text = ?, console_text = ?, "
+                "check_output = ? WHERE id = ?",
+                ((a.get("filename") or "")[:200] or None, (a.get("source") or "")[:_CODE_MAX] or None,
+                 (a.get("console") or "")[-_CONSOLE_MAX:] or None,
+                 (a.get("check_output") or "")[-_CHECK_MAX:] or None, check_id),
+            )
+        return check_id
+
+
+# --- helping the teacher decide ----------------------------------------------
+# In October 2026, 7 of 8 approvals in one class went to pairs whose log file was
+# broken, and 2 of 4 in another to answers covering one question of six. These
+# give the teacher the facts next to each submission.
+
+_ITEM = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+")
+_ASK_LINE = re.compile(r"^\s*(?:\*\*)?(?:ענו|answer)\b", re.I)
+
+
+def question_count(step: dict[str, Any]) -> Optional[int]:
+    """How many questions a step asks: `questions: N` in the exercise (teacher
+    file), else the items of the last list in its text (after a line starting
+    "Answer"/"ענו", when there is one). None when it can't tell."""
+    if isinstance(step.get("questions"), int) and step["questions"] > 0:
+        return step["questions"]
+    lines, in_code = [], False
+    for line in (step.get("text") or "").splitlines():
+        if line.strip().startswith("```"):
+            in_code = not in_code
+            continue
+        if not in_code:
+            lines.append(line)
+    start = max((i for i, ln in enumerate(lines) if _ASK_LINE.match(ln)), default=None)
+    seg = lines[start + 1:] if start is not None else lines
+    blocks: list[int] = []
+    in_block = False
+    for line in seg:
+        if _ITEM.match(line):
+            if not in_block:
+                blocks.append(0)
+                in_block = True
+            blocks[-1] += 1
+        elif not line.strip() or (in_block and line[:1] in (" ", "\t")):
+            continue  # a blank line, or an item's continuation line
+        else:
+            in_block = False
+    if blocks:
+        return blocks[-1]
+    if start is not None:
+        return max(1, lines[start].count("?"))
+    return None
+
+
+# An answer's numbering: "1.", "2)", "q3 -", "שאלה 4:", "סעיף 5", or a number
+# glued to the text right after the colon ("1רשומה…").
+_MARK = re.compile(
+    r"(?:^|[\s:;,])(?:[qQ]\s*|שאלה\s*|סעיף\s*)?(\d{1,2})(?:\s*[.):\-–]|(?=[֐-׿A-Za-z]))"
+)
+_DONE_PREFIX = re.compile(
+    r"^.*?(?:" + _DONE_EN.pattern + "|" + _DONE_HE.pattern + r")[^\n:]*:?", re.I | re.S
+)
+_ANSWERS_WORD = re.compile(r"^\s*(?:התשובות שלנו|התשובות שלי|our answers|my answers|answers)\s*:?", re.I)
+
+
+def answered_count(answer: str, questions: Optional[int]) -> Optional[int]:
+    """Roughly how many of the step's questions the submission answers: the
+    distinct question numbers it uses, else its non-empty lines. An estimate."""
+    if not questions:
+        return None
+    body = _DONE_PREFIX.sub("", answer or "", count=1)
+    body = _ANSWERS_WORD.sub("", body.strip(), count=1).strip()
+    if not body:
+        return 0
+    marks = {int(m) for m in _MARK.findall(body) if 1 <= int(m) <= questions}
+    if marks:
+        return len(marks)
+    lines = [ln for ln in body.splitlines() if ln.strip()]
+    return min(len(lines), questions)
+
+
+_EVIDENCE_RECENT = 6
+_EVIDENCE_OUTPUT = 400
+
+
+def evidence(session_id: str, step: dict[str, Any]) -> dict[str, Any]:
+    """Terminal facts for a step submission: the step's `evidence` rules (teacher
+    file: the last command matching `command`, and whether its output matches
+    `expect`), and the session's last few terminal lines since its previous
+    decided step."""
+    with db.conn() as c:
+        since = c.execute(
+            "SELECT MAX(decided_at) AS t FROM step_checks WHERE session_id = ? AND status != 'pending'",
+            (session_id,),
+        ).fetchone()["t"]
+        recent = c.execute(
+            "SELECT line, allowed, exit_code, output_tail, created_at FROM terminal_commands "
+            "WHERE session_id = ? AND created_at >= COALESCE(?, '') ORDER BY id DESC LIMIT ?",
+            (session_id, since, _EVIDENCE_RECENT),
+        ).fetchall()
+        rules = []
+        for rule in step.get("evidence") or []:
+            try:
+                pattern = re.compile(rule["command"])
+                expect = re.compile(rule["expect"], re.M) if rule.get("expect") else None
+            except (re.error, KeyError, TypeError):
+                continue
+            hit = None
+            for r in c.execute(
+                "SELECT line, exit_code, output_tail, created_at FROM terminal_commands "
+                "WHERE session_id = ? AND allowed = 1 ORDER BY id DESC LIMIT 400", (session_id,),
+            ):
+                if pattern.search(r["line"]):
+                    hit = r
+                    break
+            rules.append({
+                "label": rule.get("label") or rule["command"],
+                "found": hit is not None,
+                "line": hit["line"] if hit else None,
+                "output": (hit["output_tail"] or "")[-_EVIDENCE_OUTPUT:] if hit else None,
+                "ok": (bool(expect.search(hit["output_tail"] or "")) if expect else None) if hit else False,
+            })
+    return {
+        "rules": rules,
+        "recent": [
+            {"line": r["line"], "allowed": bool(r["allowed"]), "exit_code": r["exit_code"],
+             "output": (r["output_tail"] or "")[-_EVIDENCE_OUTPUT:], "at": r["created_at"]}
+            for r in reversed(recent)
+        ],
+    }
 
 
 def get(check_id: int) -> Optional[dict[str, Any]]:

@@ -362,6 +362,14 @@ def init_schema() -> None:
             "course_id": "TEXT",  # the course the student picked (NULL: no courses set up)
             "client_os": "TEXT",  # e.g. "Windows 11 amd64", from the plugin (0.4.3+)
         })
+        # A step submission's attachment from the plugin (0.4.3+): the open file,
+        # the Run console and the output of the exercise's check command.
+        _add_missing_columns(c, "step_checks", {
+            "code_filename": "TEXT",
+            "code_text": "TEXT",
+            "console_text": "TEXT",
+            "check_output": "TEXT",
+        })
         # NULL = the password is still the login code (backend/passwords.py).
         _add_missing_columns(c, "users", {"password_hash": "TEXT"})
         for table in ("terminal_commands", "proctor_events"):

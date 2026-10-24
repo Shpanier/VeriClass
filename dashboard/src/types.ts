@@ -337,6 +337,19 @@ export interface StepCheck {
   answer: string;
   expected: string;
   created_at: string;
+  /** How many questions the step asks, and roughly how many this answer covers. */
+  questions: number | null;
+  answered: number | null;
+  evidence: StepEvidence;
+  /** What the plugin attached (0.4.3+): the open file, Run console, check output. */
+  code: { filename: string | null; source: string | null; console: string | null; check_output: string | null } | null;
+}
+
+export interface StepEvidence {
+  // The step's evidence rules (teacher file): the last matching command, and whether its output fits.
+  rules: { label: string; found: boolean; line: string | null; output: string | null; ok: boolean | null }[];
+  // The session's last terminal lines since its previous decided step.
+  recent: { line: string; allowed: boolean; exit_code: number | null; output: string; at: string }[];
 }
 
 export interface StepChecksResponse {
