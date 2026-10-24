@@ -210,11 +210,33 @@ export interface ExerciseSummary {
   title_he?: string | null;
   default_mode: string;
   variant_count: number;
-  source: "yaml" | "console";
+  // package: a folder in the private data folder (backend/packages.py).
+  source: "yaml" | "console" | "package";
   edited: boolean; // a built-in (yaml) exercise that a teacher has overridden
   is_active: boolean;
   // Terminal commands that break on Windows or macOS (backend/portability.py).
   os_errors?: number;
+  steps?: number;
+  bank_questions?: number;
+  folder?: string | null;
+}
+
+// One step of a step-by-step lab, as the teacher edits it (expected/questions are teacher-only).
+export interface StepDraft {
+  title: string;
+  text: string;
+  minutes?: number | null;
+  expected?: string | null;
+  questions?: number | null;
+}
+
+// POST /api/exercises/import or /install: a package checked (and installed if ok).
+export interface PackageResult {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  summary: { exercise_id?: string; title_en?: string; steps?: number; bank_questions?: number; folder?: string };
+  installed_to?: string;
 }
 
 // The full exercise (GET /api/exercises/{id}) — used to prefill edit/duplicate.
@@ -228,8 +250,20 @@ export interface FullExercise {
   welcome_suggestions: string[];
   required_error_strings: string[];
   param_labels: ParamLabel[];
-  source: "yaml" | "console";
+  source: "yaml" | "console" | "package";
   edited: boolean;
+  scaffold_filename?: string | null;
+  terminal?: Record<string, unknown> | null;
+  tutor_notes?: string | null;
+  language?: string | null;
+  course_name?: string | null;
+  check_command?: string | null;
+  steps?: StepDraft[];
+  /** No variants: every student gets the same exercise. */
+  implicit_variant?: boolean;
+  bank_questions?: number;
+  download_name?: string | null;
+  folder?: string | null;
 }
 
 // The payload the authoring form POSTs (create) or PUTs (edit).
@@ -243,6 +277,12 @@ export interface NewExercise {
   welcome_suggestions?: string[];
   required_error_strings?: string[];
   param_labels?: ParamLabel[];
+  terminal?: Record<string, unknown> | null;
+  tutor_notes?: string;
+  language?: string;
+  course_name?: string;
+  check_command?: string;
+  steps?: StepDraft[];
 }
 
 export interface ProbeSuggestion {

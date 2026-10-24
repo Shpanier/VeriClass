@@ -183,3 +183,19 @@ def test_bank_from_the_package(client):
     assert m and m["id"] == "q01"
     m = bank.match_for_session(sid, "איך סופרים את השורות בקובץ CSV")
     assert m and m["id"] == "q01"
+
+
+def test_duplicate_keeps_steps_and_tutor_notes(client):
+    # The dashboard's Duplicate used to lose a lab's steps and tutor notes.
+    th = _th(client)
+    full = client.get(f"/api/exercises/{PKG}", headers=th).json()
+    dup = {k: full[k] for k in ("title_en", "default_mode", "brief_md", "variants", "steps", "tutor_notes",
+                                "check_command", "language")}
+    dup["exercise_id"] = "pkg-demo-copy"
+    r = client.post("/api/exercises", json=dup, headers=th)
+    assert r.status_code == 200, r.text
+    ex = exercises.get("pkg-demo-copy")
+    assert len(ex["steps"]) == 2 and ex["steps"][1]["expected"] == full["steps"][1]["expected"]
+    assert ex["tutor_notes"] == full["tutor_notes"] and ex["check_command"] == "python checks.py"
+    with db.conn() as c:
+        c.execute("DELETE FROM exercises WHERE exercise_id = 'pkg-demo-copy'")

@@ -7,6 +7,7 @@ import type {
   GradeRecommendation,
   Lang,
   NewExercise,
+  PackageResult,
   Paste,
   PendingReview,
   ProbeSuggestion,
@@ -122,6 +123,26 @@ export const api = {
     }),
   disableActiveExercise: () =>
     j<{ exercise_id: null }>("/api/exercises/active", { method: "DELETE" }),
+  importExercise: (zipBase64: string) =>
+    j<PackageResult>("/api/exercises/import", {
+      method: "POST",
+      body: JSON.stringify({ zip_base64: zipBase64, replace: true }),
+    }),
+  reloadExercises: () =>
+    j<{ exercises: ExerciseSummary[]; load_errors: { folder: string; error: string }[] }>(
+      "/api/exercises/reload", { method: "POST" }),
+  exercisesStatus: () =>
+    j<{ data_dir: string; exercises_dir: string; load_errors: { folder: string; error: string }[] }>(
+      "/api/exercises-status"),
+  // A zip: not JSON, so fetched directly (with the token).
+  exportExercise: async (id: string): Promise<Blob> => {
+    const token = auth.get();
+    const r = await fetch(`/api/exercises/${encodeURIComponent(id)}/export`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.blob();
+  },
   students: () => j<Student[]>("/api/students"),
   sessionDetail: (sessionId: string) =>
     j<SessionDetail>(`/api/students/${sessionId}/messages`),

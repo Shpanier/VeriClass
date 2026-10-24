@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import type { FullExercise, NewExercise, ParamLabel } from "../types";
+import type { FullExercise, NewExercise, ParamLabel, StepDraft } from "../types";
 import { scanBriefRefs, substituteBrief, type BriefRef } from "../params";
 import { useLang } from "../i18n";
 import { Modal } from "./ui/Modal";
@@ -25,6 +25,20 @@ interface ParamLabelDraft {
 }
 
 type Mode = "create" | "edit" | "duplicate";
+
+// A step as typed: numbers stay text until saved.
+interface StepRow {
+  title: string;
+  text: string;
+  minutes: string;
+  expected: string;
+  questions: string;
+}
+const toRow = (s: StepDraft): StepRow => ({
+  title: s.title ?? "", text: s.text ?? "", minutes: s.minutes != null ? String(s.minutes) : "",
+  expected: s.expected ?? "", questions: s.questions != null ? String(s.questions) : "",
+});
+const blankStep = (): StepRow => ({ title: "", text: "", minutes: "", expected: "", questions: "" });
 
 const blankVariant = (): VariantDraft => ({ id: "", paramsText: "{}", tests: [{ input: "", expected_output: "" }] });
 
@@ -64,8 +78,29 @@ export function ExerciseFormModal({
     () => (initial?.param_labels ?? []).map((p) => ({ key: p.key, label: p.label ?? "", note: p.note ?? "" }))
   );
   const [variants, setVariants] = useState<VariantDraft[]>(() => initVariants(initial));
+  // No variants (everyone gets the same exercise): the section stays folded until asked for.
+  const [showVariants, setShowVariants] = useState(!initial?.implicit_variant);
+  const [steps, setSteps] = useState<StepRow[]>(() => (initial?.steps ?? []).map(toRow));
+  const [tutorNotes, setTutorNotes] = useState(initial?.tutor_notes ?? "");
+  const [language, setLanguage] = useState(initial?.language ?? "");
+  const [courseName, setCourseName] = useState(initial?.course_name ?? "");
+  const [checkCommand, setCheckCommand] = useState(initial?.check_command ?? "");
+  const [blockedHint, setBlockedHint] = useState(
+    typeof initial?.terminal?.blocked_hint === "string" ? (initial.terminal.blocked_hint as string) : "");
+  const [preview, setPreview] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const patchStep = (i: number, patch: Partial<StepRow>) =>
+    setSteps((xs) => xs.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+  const moveStep = (i: number, d: -1 | 1) =>
+    setSteps((xs) => {
+      const j = i + d;
+      if (j < 0 || j >= xs.length) return xs;
+      const next = [...xs];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
 
   const patchVariant = (i: number, patch: Partial<VariantDraft>) =>
     setVariants((vs) => vs.map((v, idx) => (idx === i ? { ...v, ...patch } : v)));
@@ -114,7 +149,10 @@ export function ExerciseFormModal({
 
     const seen = new Set<string>();
     const built: NewExercise["variants"] = [];
-    for (const v of variants) {
+    // An exercise without variants keeps its implicit one unless variants were opened.
+    const variantDrafts = !showVariants && initial?.implicit_variant ? [] : variants;
+    if (variantDrafts.length === 0 && initial?.implicit_variant) built.push(...initial.variants);
+    for (const v of variantDrafts) {
       const vid = v.id.trim();
       if (!vid) return { error: t("errVariantId") };
       if (seen.has(vid)) return { error: t("errDupVariant") };
@@ -135,6 +173,20 @@ export function ExerciseFormModal({
     }
 
     const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
+    const builtSteps: StepDraft[] = [];
+    for (const [i, st] of steps.entries()) {
+      if (!st.title.trim() && !st.text.trim()) continue;
+      if (!st.title.trim() || !st.text.trim()) return { error: `${t("previewStep", { n: i + 1 })}: ${t("fldStepTitle")} / ${t("fldStepText")}` };
+      const minutes = st.minutes.trim() ? Number(st.minutes) : null;
+      const questions = st.questions.trim() ? Math.round(Number(st.questions)) : null;
+      if ((minutes !== null && Number.isNaN(minutes)) || (questions !== null && Number.isNaN(questions))) {
+        return { error: `${t("previewStep", { n: i + 1 })}: ${t("fldStepMinutes")} / ${t("fldStepQuestions")}` };
+      }
+      builtSteps.push({ title: st.title.trim(), text: st.text, minutes, expected: st.expected, questions });
+    }
+    const terminal = initial?.terminal || blockedHint.trim()
+      ? { ...(initial?.terminal ?? {}), blocked_hint: blockedHint.trim() || undefined }
+      : null;
     return {
       exercise_id: id,
       title_en: titleEn.trim(),
@@ -147,6 +199,12 @@ export function ExerciseFormModal({
       param_labels: paramLabels
         .filter((p) => p.key.trim() !== "")
         .map((p) => ({ key: p.key.trim(), label: p.label.trim() || undefined, note: p.note.trim() || undefined })),
+      terminal,
+      tutor_notes: tutorNotes,
+      language: language.trim() || undefined,
+      course_name: courseName.trim() || undefined,
+      check_command: checkCommand.trim() || undefined,
+      steps: builtSteps.length || initial?.steps?.length ? builtSteps : undefined,
     };
   };
 
@@ -175,9 +233,20 @@ export function ExerciseFormModal({
   const title =
     mode === "edit" ? t("editExerciseTitle") : mode === "duplicate" ? t("duplicateExerciseTitle") : t("newExerciseTitle");
 
+  const field: React.CSSProperties = {
+    width: "100%", padding: "5px 7px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 13,
+    boxSizing: "border-box", fontFamily: "inherit",
+  };
+
   return (
-    <Modal onClose={onClose} width={760}>
+    <Modal onClose={onClose} width={860}>
       <h3 style={{ marginTop: 0 }}>{title}</h3>
+      {mode === "edit" && initial?.source === "package" && initial.folder && (
+        <div style={{ fontSize: 12, color: "#115e59", background: "#f0fdfa", border: "1px solid #99f6e4",
+                      borderRadius: 6, padding: "6px 10px", marginBottom: 12 }} dir="auto">
+          {t("savedToFolder", { f: initial.folder })}
+        </div>
+      )}
 
       {idLocked ? (
         <label style={{ display: "block", marginBottom: 12 }}>
@@ -237,6 +306,67 @@ export function ExerciseFormModal({
         </div>
       )}
       <Field label={t("fldWelcome")} value={welcome} onChange={setWelcome} textarea minHeight={60} />
+      <Field label={t("fldTutorNotes")} value={tutorNotes} onChange={setTutorNotes} textarea minHeight={80} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
+        <Field label={t("fldLanguage")} value={language} onChange={setLanguage} monospace />
+        <Field label={t("fldCourseName")} value={courseName} onChange={setCourseName} />
+        <Field label={t("fldCheckCommand")} value={checkCommand} onChange={setCheckCommand} monospace />
+      </div>
+      <Field label={t("fldBlockedHint")} value={blockedHint} onChange={setBlockedHint} />
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+        <strong style={{ fontSize: 14 }}>{t("stepsSection")}</strong>
+        <span style={{ display: "flex", gap: 6 }}>
+          {steps.length > 0 && (
+            <Button onClick={() => setPreview(preview === null ? 0 : null)}>{t("previewStudent")}</Button>
+          )}
+          <Button onClick={() => setSteps((xs) => [...xs, blankStep()])}>{t("addStep")}</Button>
+        </span>
+      </div>
+      {preview !== null && steps[preview] && (
+        <div style={{ border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 8, padding: 12, marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+            {steps.map((_, i) => (
+              <button key={i} onClick={() => setPreview(i)} style={{
+                padding: "2px 8px", borderRadius: 4, fontSize: 12, cursor: "pointer",
+                border: "1px solid #d97706", background: i === preview ? "#d97706" : "white",
+                color: i === preview ? "white" : "#92400e",
+              }}>{t("previewStep", { n: i + 1 })}</button>
+            ))}
+          </div>
+          <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }} dir="auto">
+            <strong>{`Step ${preview + 1} of ${steps.length}: ${steps[preview].title}`}</strong>
+            {"\n\n"}{steps[preview].text}
+          </div>
+        </div>
+      )}
+      {steps.map((st, i) => (
+        <div key={i} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+            <strong style={{ fontSize: 12, color: "#6b7280", minWidth: 24 }}>{i + 1}</strong>
+            <input value={st.title} dir="auto" placeholder={t("fldStepTitle")} aria-label={t("fldStepTitle")}
+                   onChange={(e) => patchStep(i, { title: e.target.value })} style={{ ...field, flex: 1 }} />
+            <input value={st.minutes} placeholder={t("fldStepMinutes")} aria-label={t("fldStepMinutes")}
+                   onChange={(e) => patchStep(i, { minutes: e.target.value })} style={{ ...field, width: 70, flex: "none" }} />
+            <button onClick={() => moveStep(i, -1)} aria-label={t("moveUp")} style={iconBtn}>↑</button>
+            <button onClick={() => moveStep(i, 1)} aria-label={t("moveDown")} style={iconBtn}>↓</button>
+            <button onClick={() => setSteps((xs) => xs.filter((_, idx) => idx !== i))} aria-label={t("remove")}
+                    style={{ ...iconBtn, color: "#b91c1c" }}>✕</button>
+          </div>
+          <textarea value={st.text} dir="auto" placeholder={t("fldStepText")} aria-label={t("fldStepText")}
+                    onChange={(e) => patchStep(i, { text: e.target.value })}
+                    style={{ ...field, minHeight: 110, fontFamily: "ui-monospace, monospace", fontSize: 12 }} />
+          <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "flex-start" }}>
+            <textarea value={st.expected} dir="auto" placeholder={t("fldStepExpected")} aria-label={t("fldStepExpected")}
+                      onChange={(e) => patchStep(i, { expected: e.target.value })}
+                      style={{ ...field, minHeight: 70, background: "#fef3c7", flex: 1 }} />
+            <input value={st.questions} placeholder={t("fldStepQuestions")} aria-label={t("fldStepQuestions")}
+                   title={t("fldStepQuestions")}
+                   onChange={(e) => patchStep(i, { questions: e.target.value })} style={{ ...field, width: 90, flex: "none" }} />
+          </div>
+        </div>
+      ))}
+
       <Field label={t("fldErrorStrings")} value={errorStrings} onChange={setErrorStrings} textarea monospace minHeight={60} />
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, marginBottom: 4 }}>
@@ -281,10 +411,17 @@ export function ExerciseFormModal({
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, marginBottom: 8 }}>
         <strong style={{ fontSize: 14 }}>{t("variantsSection")}</strong>
-        <Button onClick={() => setVariants((vs) => [...vs, blankVariant()])}>{t("addVariant")}</Button>
+        {showVariants ? (
+          <Button onClick={() => setVariants((vs) => [...vs, blankVariant()])}>{t("addVariant")}</Button>
+        ) : (
+          <Button onClick={() => { setShowVariants(true); setVariants([blankVariant()]); }}>{t("addVariantsBtn")}</Button>
+        )}
       </div>
+      {!showVariants && (
+        <p style={{ fontSize: 12, color: "#6b7280", marginTop: 0 }} dir="auto">{t("noVariantsNote")}</p>
+      )}
 
-      {variants.map((v, i) => (
+      {showVariants && variants.map((v, i) => (
         <div key={i} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, marginBottom: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
             <div style={{ flex: 1 }}>
@@ -372,3 +509,8 @@ export function ExerciseFormModal({
     </Modal>
   );
 }
+
+const iconBtn: React.CSSProperties = {
+  border: "1px solid #e5e7eb", background: "white", borderRadius: 4, cursor: "pointer", fontSize: 12,
+  padding: "2px 6px",
+};
