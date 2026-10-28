@@ -6,7 +6,8 @@ edits back into it, and nothing in it goes to git.
     VeriClassPrivateData/exercises/<exercise_id>/
       exercise.yaml   what students and the tutor see (same keys as config/exercises/*.yaml;
                       `variants` is optional)
-      teacher.yaml    teacher-only, per step: expected, os_check, evidence, questions; and notes
+      teacher.yaml    teacher-only, per step: expected, os_check, evidence, questions, and for a
+                      class-paced lab (backend/pacing.py) expect_output and quiz; and notes
       faq.yaml        the question bank (backend/bank.py), optional
       files/          what students download: served as one zip (`download:` in exercise.yaml,
                       default <exercise_id>.zip) and file by file, at /api/files/<name>
@@ -42,7 +43,7 @@ TEACHER_FILE = "teacher.yaml"
 FAQ_FILE = "faq.yaml"
 FILES_DIR = "files"
 # Teacher-only step keys: kept in teacher.yaml, never sent to students or the tutor.
-TEACHER_STEP_KEYS = ("expected", "os_check", "evidence", "questions")
+TEACHER_STEP_KEYS = ("expected", "os_check", "evidence", "questions", "expect_output", "quiz")
 # The question bank the exercise skill aims for.
 BANK_TARGET = 50
 _ZIP_MAX = 50_000_000
@@ -190,12 +191,26 @@ def validate_package(path: Path) -> dict[str, Any]:
                 errors.append(f"step {i}: evidence rule is broken ({e})")
         if st.get("minutes") is not None and not isinstance(st.get("minutes"), (int, float)):
             errors.append(f"step {i}: minutes must be a number")
+        for rule in st.get("expect_output") or []:
+            pattern = rule.get("match") if isinstance(rule, dict) else rule
+            try:
+                re.compile(pattern)
+            except (re.error, TypeError) as e:
+                errors.append(f"step {i}: expect_output pattern {pattern!r} is broken ({e})")
+        for q in st.get("quiz") or []:
+            if not (isinstance(q, str) and q.strip()) and not (isinstance(q, dict) and str(q.get("q") or "").strip()):
+                errors.append(f"step {i}: a quiz question needs `q:` (the question)")
+            elif isinstance(q, str) or not str(q.get("answer") or "").strip():
+                warnings.append(f"step {i}: a quiz question has no `answer:`; the grader will have no model answer")
         if textutil.has_hebrew(st.get("text", "")):
             bare = _bare_identifiers(st["text"])
             if bare:
                 warnings.append(f"step {i}: put code names in backticks so the chat lays out the Hebrew "
                                 f"right-to-left: {', '.join(sorted(bare)[:5])}")
-    for w in portability.lint_exercise(ex, set(terminal.policy_for(ex)["allow"])):
+    # A Codespace is the same Linux for everyone: no Windows/macOS differences.
+    lint = [] if ex.get("workspace") == "codespace" else portability.lint_exercise(
+        ex, set(terminal.policy_for(ex)["allow"]))
+    for w in lint:
         (errors if w["level"] == "error" else warnings).append(
             f"step {w['step']}: `{w['line']}` — {w['message']}")
     if ex.get("check_command") and not str(ex["check_command"]).split()[0] in ("python", "python3", "py"):
@@ -210,6 +225,12 @@ def validate_package(path: Path) -> dict[str, Any]:
     if "checks.py" in files and not ex.get("check_command"):
         warnings.append("files/checks.py exists but no check_command: add `check_command: python checks.py` "
                         "to attach its output to every step submission")
+    if ex.get("pacing") == "class":
+        if not any(s.get("expect_output") for s in steps):
+            warnings.append("pacing: class, but no step has expect_output: students finish steps "
+                            "without pasting any output")
+        if not ex.get("open_steps"):
+            warnings.append("open_steps is 0: students see nothing until the teacher opens step 1")
     if steps and len(faq) < BANK_TARGET:
         warnings.append(f"the question bank has {len(faq)} question(s); the exercise skill aims for {BANK_TARGET}")
     minutes = sum(float(s.get("minutes") or 0) for s in steps)
@@ -227,6 +248,10 @@ def validate_package(path: Path) -> dict[str, Any]:
         "download": ex.get("download_name"),
         "variants": 0 if ex.get("implicit_variant") else len(ex["variants"]),
         "check_command": ex.get("check_command"),
+        "pacing": ex.get("pacing"),
+        "open_steps": ex.get("open_steps"),
+        "checked_steps": sum(1 for s in steps if s.get("expect_output")),
+        "quiz_questions": sum(len(s.get("quiz") or []) for s in steps),
     }
     return {"ok": not errors, "errors": errors, "warnings": warnings, "summary": summary}
 

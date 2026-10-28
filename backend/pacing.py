@@ -1,0 +1,364 @@
+"""Class-paced labs: the teacher opens steps for the whole class, and students
+move on their own inside what is open. Made for the chat-only setup: students
+work in a GitHub Codespace and the student chat (student_app) is the only chat
+they use.
+
+An exercise opts in with `pacing: class` in exercise.yaml. Steps 1..open_steps
+are open from the start (the setup part, done at each student's own pace); the
+teacher opens the rest from the dashboard, one or several at a time, per course.
+
+A student finishes a step by pasting its output into the chat. The server
+checks it against the step's `expect_output` patterns (teacher.yaml) and moves
+the student on, or tells them what is missing; they may continue anyway, and
+the teacher sees it. A step without patterns needs no output.
+
+A finished step's `quiz` questions (teacher.yaml) are asked as probes, but only
+the ones the teacher approved in the dashboard, and the next step waits until
+they are answered. Approvals are keyed by the question's text, so a question
+changed in the package needs a new approval.
+"""
+import hashlib
+import json
+import re
+from typing import Any, Optional
+
+from backend import db, steps, textutil
+
+# Stored size of a pasted output (the teacher sees the end of a long one).
+_OUTPUT_MAX = 50_000
+
+
+def is_paced(ex: Optional[dict[str, Any]]) -> bool:
+    return (ex or {}).get("pacing") == "class"
+
+
+def total(ex: dict[str, Any]) -> int:
+    return len(steps.steps_of(ex))
+
+
+def open_from_start(ex: dict[str, Any]) -> int:
+    """Steps open before the teacher opens anything (open_steps, at most all)."""
+    return max(0, min(int(ex.get("open_steps") or 0), total(ex)))
+
+
+def label(ex: dict[str, Any], n: int) -> str:
+    """The step's name in messages: its `label` (e.g. "B3"), else its number."""
+    st = steps.steps_of(ex)
+    if 1 <= n <= len(st) and st[n - 1].get("label"):
+        return str(st[n - 1]["label"])
+    return str(n)
+
+
+def hebrew(ex: dict[str, Any]) -> bool:
+    """Write the chat's own lines (headers, buttons) in Hebrew?"""
+    st = steps.steps_of(ex)
+    return textutil.has_hebrew((st[0].get("title", "") if st else "") + ex.get("brief_md", ""))
+
+
+# --- what is open ------------------------------------------------------------------
+
+def _course(course_id: Optional[str]) -> str:
+    return course_id or ""
+
+
+def released(ex: dict[str, Any], course_id: Optional[str]) -> int:
+    """Steps 1..N are open to this course's students."""
+    with db.conn() as c:
+        row = c.execute(
+            "SELECT released FROM step_release WHERE course_id = ? AND exercise_id = ?",
+            (_course(course_id), ex["exercise_id"]),
+        ).fetchone()
+    base = open_from_start(ex)
+    return max(base, min(row["released"], total(ex))) if row else base
+
+
+def set_released(ex: dict[str, Any], course_id: Optional[str], n: int) -> int:
+    """Open steps 1..n to the course (or close back to n). Never below the steps
+    open from the start, never past the last step. Returns the value stored."""
+    n = max(open_from_start(ex), min(int(n), total(ex)))
+    with db.conn() as c:
+        c.execute(
+            "INSERT INTO step_release (course_id, exercise_id, released) VALUES (?, ?, ?) "
+            "ON CONFLICT(course_id, exercise_id) DO UPDATE SET released = excluded.released, "
+            "updated_at = CURRENT_TIMESTAMP",
+            (_course(course_id), ex["exercise_id"], n),
+        )
+    return n
+
+
+# --- checking a pasted output ----------------------------------------------------------
+
+def output_rules(step: dict[str, Any]) -> list[dict[str, str]]:
+    """The step's expect_output as [{match, hint}]: a bare string is a pattern
+    whose hint is the pattern itself."""
+    out = []
+    for r in step.get("expect_output") or []:
+        if isinstance(r, str):
+            r = {"match": r}
+        out.append({"match": r["match"], "hint": r.get("hint") or r["match"]})
+    return out
+
+
+def check_output(step: dict[str, Any], output: str) -> list[str]:
+    """Hints of the patterns the output doesn't match (empty: all match).
+    Patterns are regular expressions, searched line by line (re.M)."""
+    text = (output or "").replace("\r\n", "\n").replace(" ", " ")
+    return [r["hint"] for r in output_rules(step) if not re.search(r["match"], text, re.M)]
+
+
+# --- quiz questions ------------------------------------------------------------------
+
+def quiz_key(question: str) -> str:
+    return hashlib.sha1(" ".join(question.split()).encode("utf-8")).hexdigest()[:12]
+
+
+def _approvals(exercise_id: str) -> dict[str, dict[str, Any]]:
+    with db.conn() as c:
+        return {r["quiz_key"]: dict(r) for r in c.execute(
+            "SELECT quiz_key, approved, body FROM quiz_approvals WHERE exercise_id = ?", (exercise_id,))}
+
+
+def quiz_items(ex: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every quiz question of the exercise, in step order, with the teacher's
+    approval and wording."""
+    approvals = _approvals(ex["exercise_id"])
+    items = []
+    for n, st in enumerate(steps.steps_of(ex), 1):
+        for q in st.get("quiz") or []:
+            if isinstance(q, str):
+                q = {"q": q}
+            key = quiz_key(q["q"])
+            a = approvals.get(key) or {}
+            items.append({
+                "key": key, "step": n, "label": label(ex, n), "q": q["q"],
+                "answer": q.get("answer") or "",
+                "approved": bool(a.get("approved")),
+                "body": a.get("body") or q["q"],
+            })
+    return items
+
+
+def set_quiz(ex: dict[str, Any], key: str, approved: bool, body: Optional[str] = None) -> dict[str, Any]:
+    """Approve (or withdraw) a quiz question, optionally with new wording.
+    Raises KeyError for a key the exercise doesn't have."""
+    item = next((i for i in quiz_items(ex) if i["key"] == key), None)
+    if item is None:
+        raise KeyError(key)
+    body = (body or "").strip() or None
+    if body == item["q"]:
+        body = None
+    with db.conn() as c:
+        c.execute(
+            "INSERT INTO quiz_approvals (exercise_id, quiz_key, approved, body) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(exercise_id, quiz_key) DO UPDATE SET approved = excluded.approved, "
+            "body = COALESCE(excluded.body, quiz_approvals.body), updated_at = CURRENT_TIMESTAMP",
+            (ex["exercise_id"], key, int(approved), body),
+        )
+    return next(i for i in quiz_items(ex) if i["key"] == key)
+
+
+def quiz_reference(ex: dict[str, Any], key: str) -> Optional[str]:
+    """The teacher's model answer of a quiz question, for the grader."""
+    item = next((i for i in quiz_items(ex) if i["key"] == key), None)
+    return (item or {}).get("answer") or None
+
+
+def pending_quiz(session_id: str) -> list[dict[str, Any]]:
+    with db.conn() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT id, body, quiz_step FROM probes WHERE session_id = ? AND status = 'pending' "
+            "AND quiz_key IS NOT NULL ORDER BY id", (session_id,))]
+
+
+# --- a student's progress ----------------------------------------------------------------
+
+def step_text(ex: dict[str, Any], n: int) -> str:
+    """The step as the chat shows it: a header line, then the step's text."""
+    st = steps.steps_of(ex)[n - 1]
+    he = hebrew(ex)
+    head = f"### {'שלב' if he else 'Step'} {label(ex, n)} · {st['title']}"
+    if st.get("minutes"):
+        head += f"\n_{'זמן' if he else 'Time'}: {st['minutes']} {'דקות' if he else 'minutes'}_"
+    return head + "\n\n" + st["text"].strip()
+
+
+def state(session: dict[str, Any], ex: dict[str, Any]) -> dict[str, Any]:
+    """Where the student is: the step they work on (when it is open to them),
+    or what they are waiting for."""
+    sid = session["id"]
+    n_total = total(ex)
+    cur = steps.current_step(sid)
+    rel = released(ex, session.get("course_id"))
+    quiz = pending_quiz(sid)
+    out: dict[str, Any] = {
+        "total": n_total,
+        "current": cur,
+        "current_label": label(ex, cur) if cur <= n_total else None,
+        "released": rel,
+        "finished": cur > n_total,
+        "quiz_pending": len(quiz),
+        # Finished every open step: the teacher opens the next one.
+        "waiting_teacher": cur <= n_total and cur > rel and not quiz,
+        "open": cur <= n_total and cur <= rel and not quiz,
+    }
+    if out["open"]:
+        st = steps.steps_of(ex)[cur - 1]
+        out["step"] = {
+            "n": cur, "label": label(ex, cur), "title": st["title"],
+            "markdown": step_text(ex, cur),
+            "needs_output": bool(output_rules(st)),
+        }
+    return out
+
+
+def finish(session: dict[str, Any], ex: dict[str, Any], n: int, output: str,
+           force: bool = False) -> dict[str, Any]:
+    """The student says step n is done. `status` is one of:
+    done, missing (the output lacks something; nothing stored), wrong_step,
+    not_open, quiz_pending, finished."""
+    sid = session["id"]
+    st_now = state(session, ex)
+    cur = st_now["current"]
+    if st_now["finished"]:
+        return {"status": "finished", "state": st_now}
+    if n != cur:
+        return {"status": "wrong_step", "state": st_now}
+    if st_now["quiz_pending"]:
+        return {"status": "quiz_pending", "state": st_now}
+    if cur > st_now["released"]:
+        return {"status": "not_open", "state": st_now}
+
+    step = steps.steps_of(ex)[cur - 1]
+    rules = output_rules(step)
+    missing = check_output(step, output) if rules else []
+    if missing and not force:
+        return {"status": "missing", "missing": missing, "state": st_now}
+
+    approved_quiz = [q for q in quiz_items(ex) if q["step"] == cur and q["approved"]]
+    with db.conn() as c:
+        c.execute(
+            "INSERT INTO step_checks (session_id, step, answer, status, delivered, decided_at, "
+            "auto_ok, missing, forced) VALUES (?, ?, ?, 'approved', 1, CURRENT_TIMESTAMP, ?, ?, ?)",
+            (sid, cur, (output or "")[-_OUTPUT_MAX:], None if not rules else int(not missing),
+             json.dumps(missing, ensure_ascii=False) if missing else None, int(bool(missing))),
+        )
+        for q in approved_quiz:
+            c.execute(
+                "INSERT INTO probes (session_id, body, source, quiz_key, quiz_step) "
+                "VALUES (?, ?, 'quiz', ?, ?)",
+                (sid, q["body"], q["key"], cur),
+            )
+        c.execute("UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?", (sid,))
+    return {"status": "done", "ok": None if not rules else not missing, "missing": missing,
+            "quiz": len(approved_quiz), "state": state(session, ex)}
+
+
+# --- the teacher's view ---------------------------------------------------------------------
+
+def _courses_of(c, exercise_id: str) -> list[tuple[str, str]]:
+    """(course_id, name) of the courses that offer the exercise or have a session
+    in it; '' = students outside every course."""
+    names = {r["course_id"]: r["name"] for r in c.execute("SELECT course_id, name FROM courses")}
+    ids = [r["course_id"] for r in c.execute(
+        "SELECT course_id FROM course_exercises WHERE exercise_id = ? ORDER BY course_id", (exercise_id,))]
+    for r in c.execute("SELECT DISTINCT COALESCE(course_id, '') AS cid FROM sessions WHERE exercise = ?",
+                       (exercise_id,)):
+        if r["cid"] not in ids:
+            ids.append(r["cid"])
+    return [(cid, names.get(cid, "")) for cid in ids]
+
+
+def overview(ex: dict[str, Any]) -> dict[str, Any]:
+    """Everything the dashboard's class-pacing panel shows for one exercise."""
+    eid = ex["exercise_id"]
+    n_total = total(ex)
+    quiz = quiz_items(ex)
+    step_meta = [{
+        "n": n, "label": label(ex, n), "title": st["title"], "minutes": st.get("minutes"),
+        "checked": bool(output_rules(st)),
+        "quiz": sum(1 for q in quiz if q["step"] == n),
+        "quiz_approved": sum(1 for q in quiz if q["step"] == n and q["approved"]),
+    } for n, st in enumerate(steps.steps_of(ex), 1)]
+
+    courses = []
+    with db.conn() as c:
+        for cid, name in _courses_of(c, eid):
+            # Each student's latest session in this exercise and course.
+            rows = c.execute(
+                "SELECT s.id, s.user_id, u.username, s.last_active_at FROM sessions s "
+                "JOIN users u ON u.id = s.user_id WHERE s.exercise = ? AND COALESCE(s.course_id, '') = ? "
+                "AND u.role = 'student' ORDER BY s.last_active_at", (eid, cid)).fetchall()
+            latest = {r["user_id"]: r for r in rows}
+            members = (c.execute("SELECT COUNT(*) AS n FROM course_members WHERE course_id = ?",
+                                 (cid,)).fetchone()["n"] if cid else None)
+            students = []
+            for r in sorted(latest.values(), key=lambda r: r["username"].lower()):
+                checks = c.execute(
+                    "SELECT step, auto_ok, forced, missing, answer, created_at FROM step_checks "
+                    "WHERE session_id = ? AND status = 'approved' ORDER BY step", (r["id"],)).fetchall()
+                quiz_rows = c.execute(
+                    "SELECT quiz_key, quiz_step, body, answer, status, auto_grade, override_grade "
+                    "FROM probes WHERE session_id = ? AND quiz_key IS NOT NULL ORDER BY id",
+                    (r["id"],)).fetchall()
+                cur = (max((k["step"] for k in checks), default=0)) + 1
+                students.append({
+                    "session_id": r["id"],
+                    "username": r["username"],
+                    "current": cur,
+                    "current_label": label(ex, cur) if cur <= n_total else None,
+                    "last_active_at": r["last_active_at"],
+                    "quiz_pending": sum(1 for q in quiz_rows if q["status"] == "pending"),
+                    # Steps finished although the output lacked something.
+                    "flags": [{
+                        "step": k["step"], "label": label(ex, k["step"]),
+                        "missing": json.loads(k["missing"]) if k["missing"] else [],
+                        "output": (k["answer"] or "")[-2000:],
+                    } for k in checks if k["auto_ok"] == 0],
+                    "quiz": [{
+                        "key": q["quiz_key"], "step": q["quiz_step"], "body": q["body"],
+                        "answer": q["answer"], "status": q["status"],
+                        "grade": q["override_grade"] if q["override_grade"] is not None else q["auto_grade"],
+                    } for q in quiz_rows],
+                })
+            courses.append({
+                "course_id": cid,
+                "name": name,
+                "released": released(ex, cid),
+                "members": members,
+                "students": students,
+                # Per step: finished it / working on it now.
+                "done": {n: sum(1 for s in students if s["current"] > n) for n in range(1, n_total + 1)},
+                "here": {n: sum(1 for s in students if s["current"] == n) for n in range(1, n_total + 1)},
+            })
+    return {
+        "exercise_id": eid,
+        "total": n_total,
+        "open_steps": open_from_start(ex),
+        "steps": step_meta,
+        "quiz": quiz,
+        "courses": courses,
+    }
+
+
+def tutor_context(ex: dict[str, Any], session_id: str, course_id: Optional[str]) -> str:
+    """System-prompt block for a class-paced lab: the step the student works on
+    (or the last one they finished), and nothing later."""
+    n_total = total(ex)
+    cur = steps.current_step(session_id)
+    if cur > n_total:
+        return ("PROGRESS: the student finished all the steps. Help with questions about "
+                "their work; there is nothing more to hand out.")
+    rel = released(ex, course_id)
+    how = ("When the student finishes a step, they click the 'סיימתי' (done) button under the "
+           "step in this chat and paste the step's terminal output; the server checks it and "
+           "shows the next step. Never claim to move them on yourself.")
+    if cur > rel and cur == 1:
+        return ("PROGRESS: the teacher has not opened the first step yet. Answer general "
+                "questions; never describe or hint at the steps.")
+    if cur > rel:
+        return (f"PROGRESS: the student finished step {label(ex, cur - 1)} and waits for the "
+                "teacher to open the next step for the whole class. Answer questions about the "
+                "steps so far; never describe, hint at, or list later steps.\n\n"
+                "LAST STEP THEY DID:\n" + step_text(ex, cur - 1) + "\n\n" + how)
+    return ("CURRENT STEP — help ONLY with this one:\n" + step_text(ex, cur)
+            + "\n\nNever describe, hint at, or list later steps. " + how)

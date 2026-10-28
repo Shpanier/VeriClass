@@ -213,7 +213,7 @@ async def regenerate(review_id: int, req: RegenerateRequest, teacher: dict = Dep
                                  "CLAUDE_STRONG_MODEL / CLAUDE_BEST_MODEL).")
     with db.conn() as c:
         row = c.execute(
-            "SELECT r.status, r.question, r.render_plain, s.id, s.user_id, s.exercise, s.mode, s.variant "
+            "SELECT r.status, r.question, r.render_plain, s.id, s.user_id, s.exercise, s.mode, s.variant, s.course_id "
             "FROM pending_reviews r JOIN sessions s ON s.id = r.session_id WHERE r.id = ?",
             (review_id,),
         ).fetchone()
@@ -221,7 +221,7 @@ async def regenerate(review_id: int, req: RegenerateRequest, teacher: dict = Dep
         raise HTTPException(404, "Unknown review")
     if row["status"] != "pending":
         raise HTTPException(409, f"Review already {row['status']}")
-    session = {k: row[k] for k in ("id", "user_id", "exercise", "mode", "variant")}
+    session = {k: row[k] for k in ("id", "user_id", "exercise", "mode", "variant", "course_id")}
     try:
         variants = await tutor.generate_variants(
             prompting.system_prompt_for(session, bool(row["render_plain"])),

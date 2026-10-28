@@ -404,6 +404,68 @@ details in [`vericlass_plugin/README.md`](vericlass_plugin/README.md) →
 
 ---
 
+## Chat-only labs in a GitHub Codespace (class pacing)
+
+For a long step-by-step lab that students do in a **GitHub Codespace**, with the
+student chat (the Chainlit app) as the only chat they may use. The chat hands out
+the lab one step at a time; the lecturer keeps the whole class on the same step.
+
+- **Steps open from the start** (`open_steps`, e.g. the setup part) go at each
+  student's own pace. The lecturer opens the rest for a whole course from the
+  dashboard (*Class pacing*: "▶ Open B4", or "Open up to…"). A student who
+  finished every open step waits in the chat, and the next step appears there by
+  itself when it opens.
+- **Done = the step's output.** Every step has a *Done* button (typing "סיימתי"
+  or "done" works too). For a step with `expect_output` patterns the student
+  pastes what the terminal printed; the server checks it and says what is
+  missing. They may continue anyway, and the lecturer sees those steps flagged.
+- **Questions after steps** (`quiz` in teacher.yaml) reach students only after
+  the lecturer approves them in the dashboard (the wording can be edited there).
+  An approved question is asked when a student finishes its step, the next step
+  waits for the answer, and the answer is graded against the model answer.
+- Progress is kept across breaks: a class-paced lab resumes the student's
+  session however old it is.
+
+In `exercise.yaml`:
+
+```yaml
+pacing: class          # the lecturer opens steps for the whole class
+open_steps: 8          # steps 1-8 are open from the start
+workspace: codespace   # students work in a Codespace (no Windows/macOS lint)
+steps:
+  - label: A1          # the step's name in the chat and the dashboard
+    title: Check Python
+    minutes: 4
+    text: |
+      ...commands in ```bash blocks, expected output in ```text blocks...
+```
+
+In `teacher.yaml`, per step:
+
+```yaml
+    expect_output:     # regular expressions, searched line by line
+      - match: '^Python 3'
+        hint: the "Python 3.x" line
+    quiz:
+      - q: What does the program you just ran do?
+        answer: It prints the text to the screen.
+```
+
+A long lab is easier to write as one Markdown file: `python
+scripts/steps_from_markdown.py <package>/source.md` writes exercise.yaml and
+teacher.yaml from it (the format is at the top of the script).
+
+**Serving the chat.** `bash deploy/tunnel.sh --with-chat` starts the backend
+with the chat inside it (`STUDENT_CHAT_PATH=/chat`), so students open
+`https://<your-domain>/chat/` and the one tunnel serves everything. Set
+`CHAINLIT_AUTH_SECRET` (`chainlit create-secret`) for a login page with a hidden
+password field. The chat lays Hebrew out right to left and code left to right
+(`public/vericlass-chat.css`, `public/vericlass-chat.js`).
+
+Nothing in a browser can stop a student from opening another AI site: "only this
+chat" is a class rule. Copilot can be turned off in a template repository's
+`.devcontainer/devcontainer.json`.
+
 ## Writing exercises
 
 Each lecturer runs their own VeriClass server. Exercises are **packages**:
@@ -516,12 +578,15 @@ backend/                     # FastAPI app
   variants.py                # deterministic student → variant assignment
   prompts.py                 # system prompts per (exercise, mode)
   exercises.py               # YAML loader and accessor
+  pacing.py                  # class-paced labs: open steps, output checks, quiz
   routes/
     login.py, sessions.py, exercises.py, ask.py,
-    probes.py, students.py, mode.py, review.py
+    probes.py, students.py, mode.py, review.py, pacing.py
 
 student_app/
-  app.py                     # Chainlit student UI (login + chat + probes)
+  app.py                     # Chainlit student UI (login + chat + probes + paced steps)
+public/
+  vericlass-chat.css, .js    # the chat: Hebrew right to left, code left to right
 
 vericlass_plugin/                # alternative student client: a CLion/JetBrains plugin
   build.gradle.kts           # IntelliJ Platform Gradle build (targets CLion)
@@ -555,10 +620,12 @@ scripts/
 | `STUDENT_CHAT_MODEL`  | Gemini model for the direct student chat. Default `gemini-2.5-flash-lite`. |
 | `DB_PATH`             | `./vericlass.db` by default.                                      |
 | `AUDIT_AES_KEY`       | 32-byte base64 key for encrypting raw cloud-LLM payloads.     |
-| `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only).   |
+| `DEV_AUTO_LOGIN_CODE` | If set, student app auto-logs in with this code (dev only; ignored when `STUDENT_CHAT_PATH` is set). |
 | `STUDENT_CLIENT_MODE` | CLion plugin behavior: `chat` (default) or `ide`. Ignored by Chainlit. |
 | `SCAFFOLD_FILENAME`   | File the plugin's `ide` mode scaffolds into the project. Default `mcalc.c`. |
 | `VERICLASS_DATA_DIR`   | The private data folder (exercise packages, login codes, reports). Default `../VeriClassPrivateData`. |
+| `STUDENT_CHAT_PATH`   | Serve the student chat inside the backend at this path (e.g. `/chat`); `deploy/tunnel.sh --with-chat` sets it. Off by default. |
+| `BACKEND_URL`         | Where the student chat calls the backend's API. Default `http://127.0.0.1:8010`. |
 | `CLAUDE_STRONG_MODEL`, `CLAUDE_BEST_MODEL` | The review queue's *Redo with* models (Sonnet 5.5, Opus 5.5). |
 | `BANK_MATCH_THRESHOLD`, `BANK_AUTO_ANSWER`, `BANK_AUTO_THRESHOLD` | When the question bank's answer is shown, or (review mode off) sent directly. |
 

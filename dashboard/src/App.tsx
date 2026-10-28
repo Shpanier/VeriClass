@@ -12,6 +12,7 @@ import { TerminalLogModal } from "./components/TerminalLogModal";
 import { VerifyTraceModal } from "./components/VerifyTraceModal";
 import { ReviewQueue } from "./components/ReviewQueue";
 import { StepChecks } from "./components/StepChecks";
+import { PacingPanel } from "./components/PacingPanel";
 import { LoginGate } from "./components/LoginGate";
 import { ExercisesPanel } from "./components/ExercisesPanel";
 import { CoursesPanel } from "./components/CoursesPanel";
@@ -183,7 +184,9 @@ export function App() {
             studentCount={visible.length}
           />
           <ProctorBanner students={visible} onInspect={setProctorSessionId} />
-          <StepChecks exerciseId={liveId} />
+          {liveId && liveExercise?.exercise_id === liveId && liveExercise.pacing === "class"
+            ? <PacingPanel exerciseId={liveId} />
+            : <StepChecks exerciseId={liveId} />}
           <ReviewQueue exerciseId={liveId} />
           <StudentGrid
             students={visible}

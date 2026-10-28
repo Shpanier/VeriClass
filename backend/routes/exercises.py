@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from backend import db, deps, exercises, packages, steps, terminal
+from backend import db, deps, exercises, packages, pacing, steps, terminal
 from backend import params as param_utils
 
 router = APIRouter()
@@ -82,9 +82,13 @@ def active_exercise(
     response["brief_md"] = param_utils.substitute_brief(
         response["brief_md"], v.get("params", {}), ex.get("param_labels", [])
     )
+    # Class-paced labs: the chat asks /api/steps/state for the step to show.
+    if pacing.is_paced(ex):
+        response["pacing"] = "class"
+        response["steps_total"] = len(steps.steps_of(ex))
     # Step-by-step labs: append only the step this student is on (step 1 for a
     # new pair; later steps after a re-login). Teacher-only `expected` never leaves.
-    if steps.steps_of(ex):
+    elif steps.steps_of(ex):
         n = (steps.current_step(session_id) if session_id
              else steps.current_step_for_user(user["id"], ex["exercise_id"]))
         if n <= len(steps.steps_of(ex)):
@@ -114,6 +118,7 @@ def _summary(ex: dict[str, Any], active_id: Optional[str]) -> dict[str, Any]:
         # Terminal commands that break on Windows or macOS (see os_warnings).
         "os_errors": sum(w["level"] == "error" for w in ex.get("os_warnings", [])),
         "steps": len(ex.get("steps") or []),
+        "pacing": ex.get("pacing"),
         "bank_questions": len(ex.get("faq") or []),
         # A package's folder in the private data folder (teacher only).
         "folder": ex.get("package_dir"),
@@ -142,6 +147,10 @@ def _full(ex: dict[str, Any]) -> dict[str, Any]:
         "language": ex.get("language"),
         "course_name": ex.get("course_name"),
         "check_command": ex.get("check_command"),
+        # Class-paced labs (backend/pacing.py) and where students work.
+        "pacing": ex.get("pacing"),
+        "open_steps": ex.get("open_steps"),
+        "workspace": ex.get("workspace"),
         # Steps with their teacher-only fields (this view is for the teacher).
         "steps": [
             {k: st.get(k) for k in ("title", "text", "minutes", "expected", "questions")}

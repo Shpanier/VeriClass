@@ -51,6 +51,16 @@ def family(os_name: Optional[str]) -> str:
 
 def tutor_block(session_id: str, ex: dict[str, Any]) -> str:
     """System-prompt lines about the student's environment."""
+    if ex.get("workspace") == "codespace":
+        return "\n".join([
+            "STUDENT ENVIRONMENT (use it when you diagnose an error):",
+            "- The student works in a GitHub Codespace: VS Code in the browser, on a Linux "
+            "(Ubuntu) machine in the cloud, with a bash terminal, sudo, git and Docker.",
+            "- Commands run in the Codespace's own terminal; this chat is in another browser tab, "
+            "and it is the only chat the student may use (no Copilot, no other AI).",
+            "- Ports opened in the Codespace appear in its PORTS tab, with a globe icon that opens "
+            "them in the browser.",
+        ])
     os_name = client_os(session_id)
     fam = family(os_name)
     policy = terminal.policy_for(ex)

@@ -118,6 +118,28 @@ CREATE TABLE IF NOT EXISTS step_checks (
     decided_at   TEXT
 );
 
+-- Class-paced labs (backend/pacing.py): steps 1..released are open to the
+-- course's students. course_id '' = students outside every course.
+CREATE TABLE IF NOT EXISTS step_release (
+    course_id    TEXT NOT NULL,
+    exercise_id  TEXT NOT NULL,
+    released     INTEGER NOT NULL,
+    updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (course_id, exercise_id)
+);
+
+-- The teacher's approval of a step's quiz question (teacher.yaml `quiz`), keyed
+-- by a hash of the question's text: a question changed in the package needs a
+-- new approval. body = the teacher's edited wording (NULL: the package's).
+CREATE TABLE IF NOT EXISTS quiz_approvals (
+    exercise_id  TEXT NOT NULL,
+    quiz_key     TEXT NOT NULL,
+    approved     INTEGER NOT NULL DEFAULT 0,
+    body         TEXT,
+    updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (exercise_id, quiz_key)
+);
+
 CREATE TABLE IF NOT EXISTS pending_reviews (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id   TEXT NOT NULL,
@@ -382,6 +404,17 @@ def init_schema() -> None:
             "code_text": "TEXT",
             "console_text": "TEXT",
             "check_output": "TEXT",
+            # Class-paced labs: the pasted output matched the step's patterns
+            # (1), didn't (0), or the step has none (NULL); what was missing
+            # (JSON list of hints); 1 when the student continued anyway.
+            "auto_ok": "INTEGER",
+            "missing": "TEXT",
+            "forced": "INTEGER NOT NULL DEFAULT 0",
+        })
+        # A probe made from a step's quiz question (backend/pacing.py).
+        _add_missing_columns(c, "probes", {
+            "quiz_key": "TEXT",
+            "quiz_step": "INTEGER",
         })
         # NULL = the password is still the login code (backend/passwords.py).
         # email / student_id / group_name come from a CSV import (backend/roster.py).

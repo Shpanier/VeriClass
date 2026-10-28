@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from backend.routes import (
     grade,
     login,
     mode,
+    pacing as pacing_routes,
     plugin,
     probes,
     proctor,
@@ -84,6 +86,7 @@ app.include_router(plugin.router, prefix="/api")
 app.include_router(grade.router, prefix="/api")
 app.include_router(files.router, prefix="/api")
 app.include_router(step_routes.router, prefix="/api")
+app.include_router(pacing_routes.router, prefix="/api")
 app.include_router(terminal_routes.router, prefix="/api")
 app.include_router(trace_routes.router, prefix="/api")
 app.include_router(course_routes.router, prefix="/api")
@@ -93,3 +96,16 @@ app.include_router(report_routes.router, prefix="/api")
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}
+
+
+# The students' chat (student_app, Chainlit) inside this server at
+# STUDENT_CHAT_PATH (e.g. /chat), so the tunnel that serves the plugin serves the
+# chat too. It calls this server's API at BACKEND_URL (its own address, e.g.
+# http://127.0.0.1:8010). Off by default: scripts/dev_up.sh runs the chat as its
+# own process on port 8011.
+_CHAT_PATH = os.environ.get("STUDENT_CHAT_PATH", "").strip().rstrip("/")
+if _CHAT_PATH:
+    from chainlit.utils import mount_chainlit
+
+    mount_chainlit(app=app, target=str(Path(__file__).resolve().parent.parent / "student_app" / "app.py"),
+                   path=_CHAT_PATH)

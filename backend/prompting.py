@@ -4,7 +4,7 @@ student's environment. Shared by /api/ask and the teacher's "regenerate"
 buttons, so a regenerated answer sees exactly what the first one saw."""
 from typing import Any
 
-from backend import environment, exercises, steps
+from backend import environment, exercises, pacing, steps
 from backend.prompts import student_system_prompt
 
 
@@ -17,6 +17,8 @@ def system_prompt_for(session: dict[str, Any], plain: bool = False) -> str:
     env = environment.tutor_block(session["id"], ex)
     if env:
         prompt += "\n\n" + env
-    if steps.steps_of(ex):
+    if pacing.is_paced(ex):
+        prompt += "\n\n" + pacing.tutor_context(ex, session["id"], session.get("course_id"))
+    elif steps.steps_of(ex):
         prompt += "\n\n" + steps.tutor_context(ex, session["id"], plain)
     return prompt

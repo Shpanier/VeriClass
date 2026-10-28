@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend import (
-    answer_cache, bank, db, deps, environment, exercises, prompting, steps, student_llm, textutil,
+    answer_cache, bank, db, deps, environment, exercises, pacing, prompting, steps, student_llm, textutil,
 )
 from backend.agents import tutor
 from backend.prompts import course_name
@@ -80,9 +80,18 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
             (req.session_id, "user", req.message, s["mode"]),
         )
 
+    # Class-paced labs: a step is finished with the chat's button, not by text.
+    if pacing.is_paced(ex) and steps.parse_done(req.message) is not None:
+        text = ("כדי לסיים שלב, לחצו על הכפתור «סיימתי» שמתחת לשלב, והדביקו את הפלט שקיבלתם בטרמינל."
+                if pacing.hebrew(ex) else
+                "To finish a step, click the \"Done\" button under the step and paste the output "
+                "you got in the terminal.")
+        _save_reply(req.session_id, s["mode"], text)
+        return StreamingResponse(_stream(text), media_type="text/plain")
+
     # Step-by-step labs: "Done with step N" goes to the teacher, not the LLM; a
     # decision the students haven't seen yet is delivered before anything else.
-    if steps.steps_of(ex) and (
+    if steps.steps_of(ex) and not pacing.is_paced(ex) and (
         steps.undelivered_decision(req.session_id) or steps.parse_done(req.message) is not None
     ):
         return StreamingResponse(_gen_step(req, s, ex, plain), media_type="text/plain")

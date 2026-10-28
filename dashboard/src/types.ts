@@ -264,6 +264,10 @@ export interface FullExercise {
   bank_questions?: number;
   download_name?: string | null;
   folder?: string | null;
+  /** "class": the teacher opens steps for the whole class (backend/pacing.py). */
+  pacing?: "class" | "pair" | null;
+  open_steps?: number | null;
+  workspace?: "codespace" | "ide" | null;
 }
 
 // The payload the authoring form POSTs (create) or PUTs (edit).
@@ -364,6 +368,60 @@ export interface PendingReview {
   /** The language the student wrote in: the card opens on it. */
   suggested_lang: Lang;
   bank_match: BankMatch | null;
+}
+
+// Class-paced labs (GET /api/pacing/{exercise_id}).
+export interface PacingStep {
+  n: number;
+  label: string;
+  title: string;
+  minutes?: number | null;
+  /** The step checks the pasted output. */
+  checked: boolean;
+  quiz: number;
+  quiz_approved: number;
+}
+
+export interface PacingQuizItem {
+  key: string;
+  step: number;
+  label: string;
+  /** The package's wording. */
+  q: string;
+  /** The teacher's wording (the package's until edited). */
+  body: string;
+  answer: string;
+  approved: boolean;
+}
+
+export interface PacingStudent {
+  session_id: string;
+  username: string;
+  current: number;
+  current_label: string | null;
+  last_active_at: string;
+  quiz_pending: number;
+  flags: { step: number; label: string; missing: string[]; output: string }[];
+  quiz: { key: string; step: number; body: string; answer: string | null; status: string; grade: number | null }[];
+}
+
+export interface PacingCourse {
+  course_id: string;
+  name: string;
+  released: number;
+  members: number | null;
+  students: PacingStudent[];
+  done: Record<string, number>;
+  here: Record<string, number>;
+}
+
+export interface PacingOverview {
+  exercise_id: string;
+  total: number;
+  open_steps: number;
+  steps: PacingStep[];
+  quiz: PacingQuizItem[];
+  courses: PacingCourse[];
 }
 
 export interface StepCheck {

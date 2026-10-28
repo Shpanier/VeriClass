@@ -351,6 +351,35 @@ gradle wrapper --gradle-version 8.10.2   # פעם אחת, יוצר את ה-wrapp
 
 ---
 
+## מעבדות בצ'אט בלבד, ב־GitHub Codespace (קצב כיתה)
+
+למעבדה ארוכה, צעד אחר צעד, שהסטודנטים עושים ב־**GitHub Codespace**, כשהצ'אט של
+הסטודנטים (אפליקציית Chainlit) הוא הצ'אט היחיד שמותר להם. הצ'אט נותן את המעבדה שלב
+אחרי שלב, והמרצה שומר את כל הכיתה באותו שלב.
+
+- **שלבים פתוחים מההתחלה** (`open_steps`, למשל חלק ההכנה): כל סטודנט בקצב שלו. את
+  השאר המרצה פותח לכל הקורס מהלוח (*קצב הכיתה*: "▶ לפתוח את B4", או "לפתוח עד…").
+  מי שסיים את כל השלבים הפתוחים מחכה בצ'אט, והשלב הבא מופיע שם לבד כשהוא נפתח.
+- **סיום שלב = הפלט שלו.** לכל שלב יש כפתור *סיימתי* (אפשר גם להקליד "סיימתי"). בשלב
+  עם `expect_output` הסטודנט מדביק את מה שהטרמינל הדפיס; השרת בודק ואומר מה חסר.
+  אפשר להמשיך בכל זאת, והמרצה רואה את השלבים האלה מסומנים.
+- **שאלות אחרי שלבים** (`quiz` ב־teacher.yaml) מגיעות לסטודנטים רק אחרי שהמרצה אישר
+  אותן בלוח (ואפשר לערוך שם את הניסוח). שאלה מאושרת נשאלת כשסטודנט מסיים את השלב
+  שלה, השלב הבא מחכה לתשובה, והתשובה מקבלת ציון מול התשובה לדוגמה.
+- ההתקדמות נשמרת גם אחרי הפסקה: מעבדה בקצב כיתה ממשיכה את המפגש של הסטודנט, ישן ככל שיהיה.
+
+את השדות (`pacing: class`, ‏`open_steps`, ‏`workspace: codespace`, ‏`label` לכל
+שלב, ו־`expect_output` ו־`quiz` ב־teacher.yaml) מתאר הסעיף באנגלית ב־README.md.
+מעבדה ארוכה נוח לכתוב כקובץ Markdown אחד: ‏`python scripts/steps_from_markdown.py
+<package>/source.md` כותב ממנו את exercise.yaml ואת teacher.yaml.
+
+**הגשת הצ'אט.** ‏`bash deploy/tunnel.sh --with-chat` מפעיל את השרת עם הצ'אט בתוכו
+(`STUDENT_CHAT_PATH=/chat`), כך שהסטודנטים פותחים `https://<your-domain>/chat/`,
+ו־tunnel אחד משרת הכול. הצ'אט מציג עברית מימין לשמאל וקוד משמאל לימין.
+
+שום דבר בדפדפן לא מונע מסטודנט לפתוח אתר AI אחר: "רק הצ'אט הזה" הוא כלל של הכיתה.
+אפשר לכבות את Copilot ב־`.devcontainer/devcontainer.json` של repository שמשמש template.
+
 ## כתיבת תרגילים
 
 לכל מרצה יש שרת VeriClass משלו. תרגיל הוא **חבילה**: תיקייה בתיקיית נתונים פרטית
@@ -443,12 +472,15 @@ backend/                     # FastAPI app
   variants.py                # deterministic student → variant assignment
   prompts.py                 # system prompts per (exercise, mode)
   exercises.py               # YAML loader and accessor
+  pacing.py                  # class-paced labs: open steps, output checks, quiz
   routes/
     login.py, sessions.py, exercises.py, ask.py,
-    probes.py, students.py, mode.py, review.py
+    probes.py, students.py, mode.py, review.py, pacing.py
 
 student_app/
-  app.py                     # Chainlit student UI (login + chat + probes)
+  app.py                     # Chainlit student UI (login + chat + probes + paced steps)
+public/
+  vericlass-chat.css, .js    # the chat: Hebrew right to left, code left to right
 
 vericlass_plugin/                # alternative student client: a CLion/JetBrains plugin
   build.gradle.kts           # IntelliJ Platform Gradle build (targets CLion)

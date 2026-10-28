@@ -125,7 +125,7 @@ def require_owns_session(session_id: str, user: dict) -> dict:
     Teachers pass for any session. Returns the session row."""
     with db.conn() as c:
         row = c.execute(
-            "SELECT id, user_id, exercise, mode, variant FROM sessions WHERE id = ?",
+            "SELECT id, user_id, exercise, mode, variant, course_id FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
     if row is None:

@@ -29,7 +29,7 @@ _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 # Optional exercise fields kept in the DB row's `data` JSON, and kept on an edit
 # that doesn't send them (the dashboard form has no input for some).
 _EXTRA_KEYS = ("scaffold_filename", "course_name", "language", "tutor_notes", "steps", "terminal",
-               "check_command", "faq")
+               "check_command", "faq", "pacing", "open_steps", "workspace")
 
 
 _DIRECTORY: Optional[Path] = None
@@ -155,7 +155,11 @@ def _row_to_exercise(row: Any) -> dict[str, Any]:
 
 def _check_os(ex: dict[str, Any]) -> None:
     """Attach the Windows/macOS differences of the exercise's terminal commands
-    (backend/portability.py) as ex["os_warnings"], and log the ones that break."""
+    (backend/portability.py) as ex["os_warnings"], and log the ones that break.
+    Not for an exercise done in a GitHub Codespace: every student has the same Linux."""
+    if ex.get("workspace") == "codespace":
+        ex["os_warnings"] = []
+        return
     allow = set(terminal.policy_for(ex)["allow"])
     ex["os_warnings"] = portability.lint_exercise(ex, allow)
     for w in ex["os_warnings"]:
@@ -391,6 +395,20 @@ def _validate(data: dict[str, Any], where: str) -> None:
     # scaffold_filename is optional; if given it selects the starter file (and,
     # via its extension, the language) the IDE plugin scaffolds for this exercise.
     terminal.validate(data.get("terminal"), where)
+
+    pacing = data.get("pacing")
+    if pacing is not None and pacing not in ("class", "pair"):
+        raise ValueError(f"{where}: pacing must be 'class' (the teacher opens steps for everyone) "
+                         "or 'pair' (the teacher approves each pair's step, the default)")
+    if pacing == "class" and not data.get("steps"):
+        raise ValueError(f"{where}: pacing: class needs steps")
+    open_steps = data.get("open_steps")
+    if open_steps is not None and (not isinstance(open_steps, int) or isinstance(open_steps, bool)
+                                   or not 0 <= open_steps <= len(data.get("steps") or [])):
+        raise ValueError(f"{where}: open_steps must be a number of steps, 0 to {len(data.get('steps') or [])}")
+    workspace = data.get("workspace")
+    if workspace is not None and workspace not in ("codespace", "ide"):
+        raise ValueError(f"{where}: workspace must be 'codespace' or 'ide'")
 
     cc = data.get("check_command")
     if cc is not None and (not isinstance(cc, str) or not cc.strip()):

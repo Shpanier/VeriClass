@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend import courses, db, deps, environment, variants
+from backend import courses, db, deps, environment, pacing, variants
 
 router = APIRouter()
 
@@ -42,12 +42,14 @@ def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_us
     with db.conn() as c:
         # Resume any session for this (user, exercise) that's still active.
         # Matches the dashboard's 30-min "active" window so a refresh doesn't
-        # spawn duplicate rows.
+        # spawn duplicate rows. A class-paced lab resumes however old the session
+        # is: progress is kept per session, and a lab outlasts a break.
+        recent = "" if pacing.is_paced(exercise) else "AND last_active_at >= datetime('now', '-30 minutes')"
         existing = c.execute(
-            """
+            f"""
             SELECT id, mode, variant FROM sessions
             WHERE user_id = ? AND exercise = ?
-              AND last_active_at >= datetime('now', '-30 minutes')
+              {recent}
             ORDER BY last_active_at DESC LIMIT 1
             """,
             (user_id, exercise["exercise_id"]),

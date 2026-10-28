@@ -10,6 +10,8 @@ import type {
   Lang,
   NewExercise,
   PackageResult,
+  PacingOverview,
+  PacingQuizItem,
   Paste,
   PendingReview,
   ProbeSuggestion,
@@ -205,6 +207,17 @@ export const api = {
       body: JSON.stringify({ model }),
     }),
   pendingStepChecks: () => j<StepChecksResponse>("/api/step-checks/pending"),
+  pacing: (exerciseId: string) => j<PacingOverview>(`/api/pacing/${encodeURIComponent(exerciseId)}`),
+  releaseSteps: (exerciseId: string, courseId: string, released: number) =>
+    j<{ released: number }>(`/api/pacing/${encodeURIComponent(exerciseId)}/release`, {
+      method: "POST",
+      body: JSON.stringify({ course_id: courseId, released }),
+    }),
+  setQuiz: (exerciseId: string, key: string, approved: boolean, body?: string) =>
+    j<PacingQuizItem>(`/api/pacing/${encodeURIComponent(exerciseId)}/quiz/${key}`, {
+      method: "POST",
+      body: JSON.stringify({ approved, body: body ?? null }),
+    }),
   decideStepCheck: (id: number, action: "approve" | "return", note: string) =>
     j<{ ok: boolean }>(`/api/step-checks/${id}/decide`, {
       method: "POST",

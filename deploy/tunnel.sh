@@ -9,6 +9,7 @@
 #    bash deploy/tunnel.sh ngrok            # override provider for this run
 #    bash deploy/tunnel.sh cloudflare
 #    bash deploy/tunnel.sh --with-backend   # also launch uvicorn in background
+#    bash deploy/tunnel.sh --with-chat      # …with the students' chat at /chat (implies --with-backend)
 #    bash deploy/tunnel.sh -h               # help
 #
 #  Students never run this — it's teacher-side only.
@@ -24,11 +25,13 @@ CONF="$SCRIPT_DIR/tunnel.conf"
 export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
 
 WITH_BACKEND=0
+WITH_CHAT=0
 PROVIDER_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --with-backend) WITH_BACKEND=1; shift ;;
+    --with-chat) WITH_BACKEND=1; WITH_CHAT=1; shift ;;
     ngrok|cloudflare|cloudflare-quick) PROVIDER_OVERRIDE="$1"; shift ;;
     -h|--help) grep -E '^#( |$)' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown argument: $1  (try -h)" >&2; exit 2 ;;
@@ -40,6 +43,10 @@ done
 source "$CONF"
 [[ -n "$PROVIDER_OVERRIDE" ]] && PROVIDER="$PROVIDER_OVERRIDE"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
+# The students' chat (student_app) served by the backend itself, so one tunnel
+# serves both: students open https://<your-domain>/chat/ (backend/main.py).
+CHAT_PATH=""
+[[ "$WITH_CHAT" -eq 1 ]] && CHAT_PATH="${STUDENT_CHAT_PATH:-/chat}"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m✖\033[0m %s\n' "$*" >&2; exit 1; }
@@ -61,11 +68,13 @@ backend_up() { lsof -ti "tcp:$BACKEND_PORT" >/dev/null 2>&1; }
 if [[ "$WITH_BACKEND" -eq 1 ]]; then
   if backend_up; then
     say "Backend already running on :$BACKEND_PORT — not starting another."
+    [[ -n "$CHAT_PATH" ]] && say "  (the chat at $CHAT_PATH works only if it was started with STUDENT_CHAT_PATH=$CHAT_PATH)"
   else
     say "Starting backend (uvicorn :$BACKEND_PORT) in the background…"
     ( cd "$PROJECT_ROOT" \
       && source .venv/bin/activate \
-      && exec uvicorn backend.main:app --port "$BACKEND_PORT" ) \
+      && STUDENT_CHAT_PATH="$CHAT_PATH" BACKEND_URL="http://127.0.0.1:$BACKEND_PORT" \
+         exec uvicorn backend.main:app --port "$BACKEND_PORT" ) \
       >"$PROJECT_ROOT/deploy/backend.log" 2>&1 &
     BACKEND_PID=$!
     sleep 2
@@ -91,12 +100,14 @@ case "$PROVIDER" in
     [[ "$NGROK_DOMAIN" == CHANGEME* ]] && die "Set NGROK_DOMAIN in deploy/tunnel.conf first."
     say "ngrok → https://$NGROK_DOMAIN  (forwarding to :$BACKEND_PORT)"
     say "Students' plugin must be packaged with: https://$NGROK_DOMAIN"
+    [[ -n "$CHAT_PATH" ]] && say "Students' chat: https://$NGROK_DOMAIN$CHAT_PATH/"
     exec ngrok http --url="$NGROK_DOMAIN" "$BACKEND_PORT"
     ;;
   cloudflare)
     need cloudflared CLOUDFLARE
     say "Cloudflare named tunnel '$CF_TUNNEL_NAME' → :$BACKEND_PORT"
     say "Students' plugin must be packaged with your routed hostname (https://…)."
+    [[ -n "$CHAT_PATH" ]] && say "Students' chat: https://<your hostname>$CHAT_PATH/"
     exec cloudflared tunnel run --url "http://localhost:$BACKEND_PORT" "$CF_TUNNEL_NAME"
     ;;
   cloudflare-quick)

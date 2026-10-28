@@ -1,0 +1,28 @@
+/* VeriClass student chat. public/vericlass-chat.js sets dir="rtl" on every
+   paragraph, list, heading and table with Hebrew in it, dir="ltr" on the rest.
+   Code always stays left to right. Chainlit 2.x renders a Markdown paragraph as
+   <div role="article">. */
+.message-content [dir] {
+  text-align: start;
+}
+
+/* Chainlit's list classes indent on the left; a Hebrew list indents on the right. */
+.message-content ul[dir="rtl"],
+.message-content ol[dir="rtl"] {
+  margin-left: 0;
+  padding-left: 0;
+  margin-right: 0.75rem;
+  padding-right: 0.5rem;
+}
+
+.message-content pre,
+.message-content pre * {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}
+
+.message-content :not(pre) > code {
+  direction: ltr;
+  unicode-bidi: isolate;
+}

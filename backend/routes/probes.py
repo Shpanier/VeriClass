@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend import db, deps, exercises
+from backend import db, deps, exercises, pacing
 from backend.agents import grader, probe
 
 router = APIRouter()
@@ -34,19 +34,24 @@ class ProbeOverrideRequest(BaseModel):
 
 @router.get("/probes/pending/{session_id}")
 def pending(session_id: str, user: dict = Depends(deps.current_user)):
-    deps.require_owns_session(session_id, user)
+    s = deps.require_owns_session(session_id, user)
     with db.conn() as c:
         rows = c.execute(
-            "SELECT id, body FROM probes WHERE session_id = ? AND status = 'pending'",
+            "SELECT id, body, source, quiz_step FROM probes WHERE session_id = ? AND status = 'pending'",
             (session_id,),
         ).fetchall()
-    return [{"id": r["id"], "body": r["body"]} for r in rows]
+    # source 'quiz': a class-paced lab's question after a step (quiz_step, shown
+    # by its label, e.g. "B6").
+    ex = exercises.get(s["exercise"]) if any(r["quiz_step"] for r in rows) else None
+    return [{"id": r["id"], "body": r["body"], "source": r["source"],
+             "quiz_step": pacing.label(ex, r["quiz_step"]) if r["quiz_step"] else None}
+            for r in rows]
 
 
 @router.post("/probes/answer")
 async def answer(req: ProbeAnswerRequest, user: dict = Depends(deps.current_user)):
     with db.conn() as c:
-        p = c.execute("SELECT session_id, body FROM probes WHERE id = ?", (req.probe_id,)).fetchone()
+        p = c.execute("SELECT session_id, body, quiz_key FROM probes WHERE id = ?", (req.probe_id,)).fetchone()
         if not p:
             raise HTTPException(404, "Unknown probe")
         s = c.execute(
@@ -55,11 +60,13 @@ async def answer(req: ProbeAnswerRequest, user: dict = Depends(deps.current_user
     # A student may only answer probes on their own session.
     deps.require_owns_session(p["session_id"], user)
     variant = exercises.variant(s["exercise"], s["variant"])
+    # A quiz question is graded against the teacher's model answer.
+    reference = pacing.quiz_reference(exercises.get(s["exercise"]), p["quiz_key"]) if p["quiz_key"] else None
     # Auto-grading is best-effort: a transient LLM outage must never lose the
     # student's answer or 500 the request. On failure, save with no grade so the
     # teacher can grade it manually (via /probe/override) later.
     try:
-        score, why = await grader.grade(p["body"], req.answer, variant["params"])
+        score, why = await grader.grade(p["body"], req.answer, variant["params"], reference)
     except Exception:
         log.exception("auto-grading failed for probe %s; saving ungraded", req.probe_id)
         score, why = None, "Auto-grading is temporarily unavailable — your answer was saved."
