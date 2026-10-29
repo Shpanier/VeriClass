@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import type { FullExercise, NewExercise, ParamLabel, StepDraft } from "../types";
+import type { AnswerInChat, FullExercise, NewExercise, ParamLabel, StepDraft } from "../types";
 import { scanBriefRefs, substituteBrief, type BriefRef } from "../params";
 import { useLang } from "../i18n";
 import { Modal } from "./ui/Modal";
@@ -92,7 +92,8 @@ export function ExerciseFormModal({
   const [courseName, setCourseName] = useState(initial?.course_name ?? "");
   const [checkCommand, setCheckCommand] = useState(initial?.check_command ?? "");
   const [chatHistory, setChatHistory] = useState(initial?.chat_history ?? true);
-  const [outputInChat, setOutputInChat] = useState<"accept" | "ask" | "off">(initial?.output_in_chat ?? "accept");
+  const [outputInChat, setOutputInChat] = useState<"confirm" | "accept" | "ask" | "off">(initial?.output_in_chat ?? "confirm");
+  const [answerInChat, setAnswerInChat] = useState<AnswerInChat>(initial?.answer_in_chat ?? "detect");
   const [resumeMinutes, setResumeMinutes] = useState(
     initial?.resume_minutes_set && initial.resume_minutes != null ? String(initial.resume_minutes) : "");
   const [blockedHint, setBlockedHint] = useState(
@@ -228,6 +229,7 @@ export function ExerciseFormModal({
       check_command: checkCommand.trim() || undefined,
       chat_history: chatHistory,
       output_in_chat: outputInChat,
+      answer_in_chat: answerInChat,
       resume_minutes: resumeMinutes.trim() !== "" ? Math.max(0, Math.round(Number(resumeMinutes))) : undefined,
       steps: builtSteps.length || initial?.steps?.length ? builtSteps : undefined,
     };
@@ -353,11 +355,21 @@ export function ExerciseFormModal({
       </div>
       <label style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px", fontSize: 13 }}>
         {t("fldOutputInChat")}
-        <select value={outputInChat} onChange={(e) => setOutputInChat(e.target.value as "accept" | "ask" | "off")}
+        <select value={outputInChat} onChange={(e) => setOutputInChat(e.target.value as "confirm" | "accept" | "ask" | "off")}
                 style={{ padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4 }}>
+          <option value="confirm">{t("fldOutputConfirm")}</option>
           <option value="accept">{t("fldOutputAccept")}</option>
           <option value="ask">{t("fldOutputAsk")}</option>
           <option value="off">{t("fldOutputOff")}</option>
+        </select>
+      </label>
+      <label style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px", fontSize: 13 }}>
+        {t("fldAnswerInChat")}
+        <select value={answerInChat} onChange={(e) => setAnswerInChat(e.target.value as AnswerInChat)}
+                style={{ padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4 }}>
+          <option value="detect">{t("fldAnswerDetect")}</option>
+          <option value="confirm">{t("fldAnswerConfirm")}</option>
+          <option value="answer">{t("fldAnswerAnswer")}</option>
         </select>
       </label>
 

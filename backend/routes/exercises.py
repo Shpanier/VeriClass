@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from backend import db, deps, exercises, packages, pacing, steps, terminal, transcript
+from backend import db, deps, exercises, open_questions, packages, pacing, steps, terminal, transcript
 from backend.routes import sessions as sessions_routes
 from backend import params as param_utils
 
@@ -157,6 +157,7 @@ def _full(ex: dict[str, Any]) -> dict[str, Any]:
         "resume_minutes": sessions_routes.resume_minutes(ex),
         "resume_minutes_set": ex.get("resume_minutes") is not None,
         "output_in_chat": pacing.output_in_chat(ex),
+        "answer_in_chat": open_questions.answer_in_chat(ex),
         # Steps with their teacher-only fields (this view is for the teacher).
         "steps": [
             {**{k: st.get(k) for k in ("title", "text", "minutes", "expected", "questions", "expected_output")},
@@ -326,8 +327,10 @@ class ExercisePayload(BaseModel):
     # and how recent a session must be to be resumed (0 = always). None keeps.
     chat_history: Optional[bool] = None
     resume_minutes: Optional[int] = Field(default=None, ge=0)
-    # A step's output pasted as a chat message (backend/pacing.py): accept | ask | off.
-    output_in_chat: Optional[Literal["accept", "ask", "off"]] = None
+    # A chat message while a step is open (backend/pacing.py): confirm | accept | ask | off.
+    output_in_chat: Optional[Literal["confirm", "accept", "ask", "off"]] = None
+    # A chat message while a quiz/teacher's question is open (backend/open_questions.py).
+    answer_in_chat: Optional[Literal["detect", "confirm", "answer"]] = None
 
 
 @router.post("/exercises")

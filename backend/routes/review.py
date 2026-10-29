@@ -22,6 +22,13 @@ Keeping the queue in step with the students (who is still waiting for what):
   nobody waits for (status 'replaced'), so the queue has no duplicates.
 Status: pending | answered | deleted | replaced | expired (an IDE client that
 timed out, which can't receive a late answer).
+
+A question in a language the teacher doesn't read (neither Hebrew nor English,
+e.g. Arabic or Russian) comes with a translation: the same model call that
+drafts the four answers names the question's language and translates it
+(question_lang, question_translation). The setting `review_translate_to`
+(system_settings, GET/POST /api/reviews/config) picks the language: 'he'
+(default), 'en', or 'off'.
 """
 import asyncio
 import json
@@ -117,18 +124,17 @@ def _quote(question: str) -> str:
     return q if len(q) <= 120 else q[:117] + "…"
 
 
-def _hebrew(question: str, exercise_id: Optional[str] = None) -> bool:
-    """Write the student's note in Hebrew? The question's language; for a
-    question with no clear language ("aaaa", "??"), the exercise's."""
+def hebrew_for(question: str, exercise_id: Optional[str] = None) -> bool:
+    """Write the chat's own lines to this student in Hebrew? When the exercise
+    is in Hebrew (its brief, what students read: the chat around them is
+    Hebrew) or the question is; English only when both are English."""
     if textutil.detect_lang(question or "") == "he":
         return True
-    if re.search(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}", question or ""):
-        return False  # a few English words: English
     try:
         ex = exercises.get(exercise_id) if exercise_id else None
     except KeyError:
         ex = None
-    return bool(ex) and textutil.has_hebrew(ex.get("brief_md") or "")  # what students read
+    return bool(ex) and textutil.has_hebrew(ex.get("brief_md") or "")
 
 
 def deliver_late(review_id: int) -> None:
@@ -143,14 +149,14 @@ def deliver_late(review_id: int) -> None:
             "VALUES (?, 'assistant', ?, ?, ?, ?)",
             (r["session_id"], text, r["mode"], chosen, model_of(review_id)),
         )
-    head = (f"🧑‍🏫 **המרצה ענה על השאלה:** «{_quote(r['question'])}»" if _hebrew(r["question"], r["exercise"])
+    head = (f"🧑‍🏫 **המרצה ענה על השאלה:** «{_quote(r['question'])}»" if hebrew_for(r["question"], r["exercise"])
             else f"🧑‍🏫 **Your teacher answered your question:** “{_quote(r['question'])}”")
     transcript.record(r["session_id"], "tutor", f"{head}\n\n{text}", kind="text", origin="server")
 
 
 def deleted_message(question: str, note: Optional[str], exercise_id: Optional[str] = None) -> str:
     """What the student reads when the teacher deleted their question."""
-    he = _hebrew(question, exercise_id)
+    he = hebrew_for(question, exercise_id)
     text = (f"🗑️ המרצה מחק את השאלה «{_quote(question)}», והיא לא תיענה." if he
             else f"🗑️ Your teacher deleted the question “{_quote(question)}”; it won't be answered.")
     if note and note.strip():
@@ -174,6 +180,37 @@ def review_mode_enabled() -> bool:
     return bool(row and row["value"] == "on")
 
 
+# The languages the teacher's dashboard reads; a question in any other language
+# is translated into review_translate_to.
+READABLE_LANGS = ("he", "en")
+TRANSLATE_TO = ("he", "en", "off")
+
+
+def translate_to() -> str:
+    """The language questions the teacher can't read are translated into, or 'off'."""
+    with db.conn() as c:
+        row = c.execute("SELECT value FROM system_settings WHERE key = 'review_translate_to'").fetchone()
+    return row["value"] if row and row["value"] in TRANSLATE_TO else "he"
+
+
+def translation_target() -> Optional[str]:
+    """translate_to() for the drafting call: None when it's off."""
+    to = translate_to()
+    return None if to == "off" else to
+
+
+def _translation(question: str, variants: dict) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """(language, translation, translated_to) to keep for a question: a
+    translation only when the question is in neither Hebrew nor English and the
+    model gave one that isn't just the question again."""
+    lang = (variants.get("question_lang") or "").strip().lower() or None
+    text = (variants.get("question_translation") or "").strip()
+    to = translation_target()
+    if not text or not to or lang in READABLE_LANGS or " ".join(text.split()) == " ".join(question.split()):
+        return lang, None, None
+    return lang, text, to
+
+
 # --- used by /api/ask ------------------------------------------------------
 
 def enqueue(session_id: str, question: str, variants: dict, plain: bool = False) -> int:
@@ -191,12 +228,13 @@ def enqueue(session_id: str, question: str, variants: dict, plain: bool = False)
             "INSERT INTO pending_reviews(session_id, question, "
             "variant_nudge, variant_normal, variant_more, variant_direct, "
             "variant_nudge_he, variant_normal_he, variant_more_he, variant_direct_he, "
-            "model, render_plain, bank_match) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "model, render_plain, bank_match, question_lang, question_translation, translated_to) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (session_id, question,
              *(variants[lvl]["en"] for lvl in LEVELS),
              *(variants[lvl]["he"] for lvl in LEVELS),
-             variants.get("model"), int(plain), json.dumps(match, ensure_ascii=False) if match else None),
+             variants.get("model"), int(plain), json.dumps(match, ensure_ascii=False) if match else None,
+             *_translation(question, variants)),
         )
         return cur.lastrowid
 
@@ -249,8 +287,25 @@ def set_review_mode(req: ReviewModeRequest, teacher: dict = Depends(deps.require
 @router.get("/reviews/config")
 def review_config(teacher: dict = Depends(deps.require_teacher)):
     """What the queue's buttons can do: the models a question's answers can be
-    drafted again with (CLAUDE_STRONG_MODEL, CLAUDE_BEST_MODEL)."""
-    return {"regen_models": student_llm.regen_models()}
+    drafted again with (CLAUDE_STRONG_MODEL, CLAUDE_BEST_MODEL), and the
+    language questions in other languages are translated into."""
+    return {"regen_models": student_llm.regen_models(), "translate_to": translate_to()}
+
+
+class ReviewConfigRequest(BaseModel):
+    translate_to: Literal["he", "en", "off"]
+
+
+@router.post("/reviews/config")
+def set_review_config(req: ReviewConfigRequest, teacher: dict = Depends(deps.require_teacher)):
+    """Change the translation language (applies to questions asked from now on)."""
+    with db.conn() as c:
+        c.execute(
+            "INSERT INTO system_settings(key, value) VALUES('review_translate_to', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (req.translate_to,),
+        )
+    return review_config(teacher)
 
 
 # --- pending queue --------------------------------------------------------
@@ -269,6 +324,7 @@ def _item(r) -> dict:
         "model", "regenerated_at",
         "variant_nudge", "variant_normal", "variant_more", "variant_direct",
         "variant_nudge_he", "variant_normal_he", "variant_more_he", "variant_direct_he",
+        "question_lang", "question_translation", "translated_to",
     )}
     # The language the student wrote in, so the card opens on matching answers.
     item["suggested_lang"] = textutil.detect_lang(r["question"])
@@ -428,16 +484,23 @@ async def regenerate(review_id: int, req: RegenerateRequest, teacher: dict = Dep
             prompting.system_prompt_for(session, bool(row["render_plain"])),
             session["id"], row["question"],
             course=course_name(exercises.get(session["exercise"])), model=model,
+            translate_to=translation_target(),
         )
     except Exception as e:
         raise HTTPException(502, f"{student_llm.model_label(model)} couldn't draft answers: {e}")
+    lang, translation, to = _translation(row["question"], variants)
     with db.conn() as c:
+        # The question didn't change: a translation the new draft left out stays.
         cur = c.execute(
             "UPDATE pending_reviews SET "
             + ", ".join(f"variant_{lvl} = ?, variant_{lvl}_he = ?" for lvl in LEVELS)
-            + ", model = ?, regenerated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'",
+            + ", model = ?, regenerated_at = CURRENT_TIMESTAMP, "
+              "question_lang = COALESCE(?, question_lang), "
+              "question_translation = COALESCE(?, question_translation), "
+              "translated_to = COALESCE(?, translated_to) "
+              "WHERE id = ? AND status = 'pending'",
             (*(x for lvl in LEVELS for x in (variants[lvl]["en"], variants[lvl]["he"])),
-             variants.get("model"), review_id),
+             variants.get("model"), lang, translation, to, review_id),
         )
         if cur.rowcount == 0:
             raise HTTPException(409, "The question was answered or expired meanwhile.")

@@ -42,6 +42,9 @@ class AskRequest(BaseModel):
 
 # Sent with replies that can be asked again; the value is the button's model name.
 REASK_HEADER = "X-VeriClass-Reask"
+# Sent with a reply that waits for the teacher's review (up to REVIEW_TIMEOUT_SECONDS):
+# the student chat stays usable meanwhile instead of showing itself busy.
+REVIEW_HEADER = "X-VeriClass-Review"
 _REASK_INSTRUCTION = (
     "The student found a shorter answer to this question not detailed enough. Give a "
     "complete, detailed explanation, still following every rule above."
@@ -117,7 +120,7 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
                         # the student chat) can receive an answer after it stopped waiting.
                         late_ok=request.headers.get("x-vericlass-transcript") == "1"
                         and transcript.enabled(ex)),
-            media_type="text/plain",
+            media_type="text/plain", headers={REVIEW_HEADER: "1"},
         )
 
     # Question bank (BANK_AUTO_ANSWER): a near-identical question gets its ready
@@ -237,13 +240,15 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict], p
     """Review-mode generator: draft four answers, wait for the teacher's pick,
     stream the chosen text."""
     # Tell the student something is happening so they don't think it hung.
-    yield ("🧑‍🏫 _המרצה בודק את השאלה שלכם — רגע…_\n\n" if textutil.detect_lang(req.message) == "he"
+    he = review_mod.hebrew_for(req.message, s["exercise"])
+    yield ("🧑‍🏫 _המרצה בודק את השאלה שלכם — רגע…_\n\n" if he
            else "🧑‍🏫 _Your teacher is reviewing your question — one moment…_\n\n")
 
     try:
         variants = await tutor.generate_variants(
             sys_prompt, req.session_id, req.message,
             course=course_name(exercises.get(s["exercise"])),
+            translate_to=review_mod.translation_target(),
         )
     except Exception as e:
         log.exception("variant generation failed")
@@ -255,7 +260,6 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict], p
     # late_ok: the client shows the transcript, so an answer after the timeout
     # still reaches the student there. Any other client (the IDE plugin) can't
     # get one, so for it a timeout still ends the question.
-    he = textutil.detect_lang(req.message) == "he"
     try:
         try:
             await asyncio.wait_for(ev.wait(), timeout=REVIEW_TIMEOUT_SECONDS)

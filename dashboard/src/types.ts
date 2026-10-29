@@ -275,7 +275,9 @@ export interface FullExercise {
   /** resume_minutes is set in the exercise (not the default). */
   resume_minutes_set?: boolean;
   /** A step's output pasted as a chat message: accept it, ask the student, or ignore. */
-  output_in_chat?: "accept" | "ask" | "off";
+  output_in_chat?: "confirm" | "accept" | "ask" | "off";
+  /** A chat message while a quiz/teacher's question is open: its answer, or ask the student. */
+  answer_in_chat?: AnswerInChat;
   steps?: StepDraft[];
   /** No variants: every student gets the same exercise. */
   implicit_variant?: boolean;
@@ -306,9 +308,13 @@ export interface NewExercise {
   check_command?: string;
   chat_history?: boolean;
   resume_minutes?: number;
-  output_in_chat?: "accept" | "ask" | "off";
+  output_in_chat?: "confirm" | "accept" | "ask" | "off";
+  answer_in_chat?: AnswerInChat;
   steps?: StepDraft[];
 }
+
+/** backend/open_questions.py: detect (default) | confirm | answer. */
+export type AnswerInChat = "detect" | "confirm" | "answer";
 
 export interface ProbeSuggestion {
   kind: string;
@@ -393,6 +399,19 @@ export interface PendingReview {
   waiting: boolean;
   /** Most likely sent by mistake (empty, a few characters, no letters). */
   looks_like_noise: boolean;
+  /** The language the question is written in (ISO 639-1), when the drafting model named it. */
+  question_lang: string | null;
+  /** The question translated into `translated_to`, when it is in neither Hebrew nor English. */
+  question_translation: string | null;
+  translated_to: Lang | null;
+}
+
+/** The language questions in other languages are translated into for the queue. */
+export type TranslateTo = Lang | "off";
+
+export interface ReviewConfig {
+  regen_models: RegenModel[];
+  translate_to: TranslateTo;
 }
 
 // Class-paced labs (GET /api/pacing/{exercise_id}).
@@ -445,6 +464,8 @@ export interface PacingCourse {
   students: PacingStudent[];
   done: Record<string, number>;
   here: Record<string, number>;
+  /** Per question key: students past its step who were never asked it. */
+  quiz_missed: Record<string, number>;
 }
 
 export interface PacingOverview {
@@ -560,4 +581,22 @@ export interface UserAccount {
   role: "student" | "teacher";
   custom_password: boolean;
   courses: string[];
+}
+
+/** One entry of a session's chat transcript (GET /api/transcript/{session_id}). */
+export interface TranscriptEntry {
+  id: number;
+  author: "student" | "tutor" | "system";
+  kind: string;
+  step: number | null;
+  content: string;
+  origin: "client" | "server";
+  created_at: string;
+}
+
+export interface TranscriptResponse {
+  enabled: boolean;
+  entries: TranscriptEntry[];
+  truncated: boolean;
+  last_id: number;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { AnswerLevel, BankMatch, Lang, PendingReview, RegenModel } from "../types";
+import type { AnswerLevel, BankMatch, Lang, PendingReview, RegenModel, TranslateTo } from "../types";
 import { useLang } from "../i18n";
 
 const LEVELS: { key: AnswerLevel; tint: string }[] = [
@@ -9,6 +9,16 @@ const LEVELS: { key: AnswerLevel; tint: string }[] = [
   { key: "more",   tint: "#fef3c7" },
   { key: "direct", tint: "#ede9fe" },
 ];
+
+/** A language code's name in the dashboard's language ("ar" -> "Arabic" / "ערבית"). */
+function langName(code: string | null, ui: Lang): string {
+  if (!code) return "?";
+  try {
+    return new Intl.DisplayNames([ui], { type: "language" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
 
 /** Text of a level in a given language (Hebrew falls back to English if empty). */
 function variantText(r: PendingReview, level: AnswerLevel, lang: Lang): string | null {
@@ -43,6 +53,8 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
   const elsewhere = allPending.length - pending.length;
   const [busyId, setBusyId] = useState<number | null>(null);
   const [regenModels, setRegenModels] = useState<RegenModel[]>([]);
+  // Questions in neither Hebrew nor English arrive translated into this.
+  const [translateTo, setTranslateTo] = useState<TranslateTo>("he");
   // A card being drafted again: which model, and any error.
   const [regen, setRegen] = useState<Record<number, { label: string; error?: string }>>({});
   // Teacher edits, keyed by `${reviewId}:${level}:${lang}` so each language's
@@ -86,7 +98,10 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
 
   useEffect(() => {
     api.getReviewMode().then((r) => setEnabled(r.enabled)).catch(console.error);
-    api.reviewConfig().then((c) => setRegenModels(c.regen_models)).catch(console.error);
+    api.reviewConfig().then((c) => {
+      setRegenModels(c.regen_models);
+      setTranslateTo(c.translate_to ?? "he");
+    }).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -172,6 +187,21 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
 
       {enabled && (
         <div style={{ marginTop: 12 }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151",
+                          marginBottom: 8 }}>
+            🌐 {t("reviewTranslateTo")}
+            <select
+              value={translateTo}
+              onChange={(e) => {
+                const to = e.target.value as TranslateTo;
+                api.setReviewTranslate(to).then((c) => setTranslateTo(c.translate_to)).catch(console.error);
+              }}
+            >
+              <option value="he">{t("reviewTranslateHe")}</option>
+              <option value="en">{t("reviewTranslateEn")}</option>
+              <option value="off">{t("reviewTranslateOff")}</option>
+            </select>
+          </label>
           {elsewhere > 0 && (
             <div style={{ color: "#b45309", fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
               {t("otherExercisesWaiting", { n: elsewhere })}
@@ -245,6 +275,16 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
                       </span>
                     )}
                     <div style={{ marginTop: 4, color: "#374151", whiteSpace: "pre-wrap" }} dir="auto">{r.question}</div>
+                    {r.question_translation && (
+                      <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 4, background: "#eef2ff",
+                                    border: "1px solid #c7d2fe" }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "#4338ca", marginBottom: 2 }}>
+                          🌐 {t("reviewTranslated", { from: langName(r.question_lang, lang),
+                                                       to: langName(r.translated_to, lang) })}
+                        </div>
+                        <div style={{ color: "#111827", whiteSpace: "pre-wrap" }} dir="auto">{r.question_translation}</div>
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     {/* Draft the four answers again with a stronger model. */}

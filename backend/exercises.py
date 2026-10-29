@@ -30,7 +30,7 @@ _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 # that doesn't send them (the dashboard form has no input for some).
 _EXTRA_KEYS = ("scaffold_filename", "course_name", "language", "tutor_notes", "steps", "terminal",
                "check_command", "faq", "pacing", "open_steps", "workspace",
-               "chat_history", "resume_minutes", "output_in_chat")
+               "chat_history", "resume_minutes", "output_in_chat", "answer_in_chat")
 
 
 _DIRECTORY: Optional[Path] = None
@@ -414,8 +414,11 @@ def _validate(data: dict[str, Any], where: str) -> None:
     if ch is not None and not isinstance(ch, bool):
         raise ValueError(f"{where}: chat_history must be true or false")
     oic = data.get("output_in_chat")
-    if oic is not None and oic not in ("accept", "ask", "off"):
-        raise ValueError(f"{where}: output_in_chat must be 'accept', 'ask' or 'off'")
+    if oic is not None and oic not in ("confirm", "accept", "ask", "off"):
+        raise ValueError(f"{where}: output_in_chat must be 'confirm', 'accept', 'ask' or 'off'")
+    aic = data.get("answer_in_chat")
+    if aic is not None and aic not in ("detect", "confirm", "answer"):
+        raise ValueError(f"{where}: answer_in_chat must be 'detect', 'confirm' or 'answer'")
     rm = data.get("resume_minutes")
     if rm is not None and (not isinstance(rm, int) or isinstance(rm, bool) or rm < 0):
         raise ValueError(f"{where}: resume_minutes must be a number of minutes (0 = always resume)")

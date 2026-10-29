@@ -28,3 +28,24 @@ def detect_lang(text: str) -> str:
 
 def has_hebrew(text: str) -> bool:
     return bool(_HEBREW.search(text or ""))
+
+
+# A question mark that ends a sentence (not one inside a shell glob like file?.txt).
+_QUESTION_MARK = re.compile(r"[?？؟](?=\s|$)")
+# How a question or a request for help opens, in Hebrew, English and Arabic.
+_ASKS = re.compile(
+    r"^\W*(?:מה|מהו|מהי|מזה|למה|מדוע|איך|כיצד|מתי|איפה|היכן|מי|האם|"
+    r"לא הבנתי|לא מבין|לא מבינה|לא ברור|לא בטוח|לא בטוחה|תסביר|תסבירי|הסבר|תעזור|תעזרי|עזרה|רמז|"
+    r"what|why|how|when|where|who|which|can|could|should|is|are|do|does|did|"
+    r"i don'?t (?:understand|get|know)|not sure|explain|help|hint|"
+    r"ماذا|لماذا|كيف|متى|أين|اين|هل|لم افهم|مش فاهم|ساعدني)\b",
+    re.I,
+)
+
+
+def looks_like_question(text: str) -> bool:
+    """Does a message ask something rather than answer? A question mark ending
+    a sentence, or a question word / "I don't understand" / "explain" at its
+    start. Plain string rules: it errs toward asking the student."""
+    t = (text or "").strip()
+    return bool(t) and bool(_QUESTION_MARK.search(t) or _ASKS.search(t))

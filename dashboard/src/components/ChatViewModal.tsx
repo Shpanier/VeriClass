@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { Message, ParamLabel, Probe, SessionDetail, Student } from "../types";
+import type { Message, ParamLabel, Probe, SessionDetail, Student, TranscriptEntry, TranscriptResponse } from "../types";
 import { renderParams } from "../params";
 import { useLang } from "../i18n";
 
@@ -15,23 +15,43 @@ export function ChatViewModal({
 }) {
   const { t } = useLang();
   const [detail, setDetail] = useState<SessionDetail | null>(null);
+  // The chat as the student saw it (steps, pasted outputs, quiz, notes): for
+  // exercises that keep a transcript; the tutor's messages and probes otherwise.
+  const [chat, setChat] = useState<TranscriptResponse | null>(null);
+  const [view, setView] = useState<"chat" | "messages" | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
   const params = renderParams(detail?.session.variant_params ?? student.variant_params, paramLabels);
 
   useEffect(() => {
-    const tick = () =>
+    const tick = () => {
       api.sessionDetail(student.session_id).then(setDetail).catch(console.error);
+      api.transcript(student.session_id).then(setChat).catch(console.error);
+    };
     tick();
     const id = setInterval(tick, 2000);
     return () => clearInterval(id);
   }, [student.session_id]);
 
+  const hasChat = !!chat?.enabled && chat.entries.length > 0;
+  const shown = view ?? (hasChat ? "chat" : "messages");
+
   useEffect(() => {
     if (autoScroll) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [detail, autoScroll]);
+  }, [detail, chat, shown, autoScroll]);
 
   const items = interleave(detail?.messages ?? [], detail?.probes ?? []);
+  const tab = (key: "chat" | "messages", label: string) => (
+    <button
+      onClick={() => setView(key)}
+      style={{
+        border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 10px", cursor: "pointer",
+        background: shown === key ? "#111827" : "white", color: shown === key ? "white" : "#111827",
+      }}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <div
@@ -85,6 +105,13 @@ export function ChatViewModal({
           </div>
         )}
 
+        {chat?.enabled && (
+          <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
+            {tab("chat", t("chatViewTranscript", { n: chat.entries.length }))}
+            {tab("messages", t("chatViewMessages", { m: detail?.messages.length ?? 0, p: detail?.probes.length ?? 0 }))}
+          </div>
+        )}
+
         <div
           style={{
             marginTop: 12,
@@ -96,15 +123,25 @@ export function ChatViewModal({
             background: "#fafafa",
           }}
         >
-          {items.length === 0 && (
-            <p style={{ color: "#888" }}>{t("noMessages")}</p>
-          )}
-          {items.map((item) =>
-            item.kind === "message" ? (
-              <MessageBubble key={`m${item.data.id}`} m={item.data} />
-            ) : (
-              <ProbeBubble key={`p${item.data.id}`} p={item.data} />
-            )
+          {shown === "chat" ? (
+            <>
+              {chat?.truncated && <p style={{ color: "#888", fontSize: 12 }}>{t("chatViewTruncated")}</p>}
+              {(chat?.entries.length ?? 0) === 0 && <p style={{ color: "#888" }}>{t("noMessages")}</p>}
+              {chat?.entries.map((e) => <TranscriptBubble key={`t${e.id}`} e={e} />)}
+            </>
+          ) : (
+            <>
+              {items.length === 0 && (
+                <p style={{ color: "#888" }}>{t("noMessages")}</p>
+              )}
+              {items.map((item) =>
+                item.kind === "message" ? (
+                  <MessageBubble key={`m${item.data.id}`} m={item.data} />
+                ) : (
+                  <ProbeBubble key={`p${item.data.id}`} p={item.data} />
+                )
+              )}
+            </>
           )}
           <div ref={bottomRef} />
         </div>
@@ -114,6 +151,35 @@ export function ChatViewModal({
             ? t("chatFooter", { m: detail.messages.length, p: detail.probes.length })
             : t("loading")}
         </footer>
+      </div>
+    </div>
+  );
+}
+
+/** One transcript entry: the student's on the right, the chat's and the
+server's notes on the left (notes tinted). */
+function TranscriptBubble({ e }: { e: TranscriptEntry }) {
+  const isStudent = e.author === "student";
+  const isNote = e.author === "system" || e.origin === "server";
+  return (
+    <div style={{ display: "flex", justifyContent: isStudent ? "flex-end" : "flex-start", margin: "8px 0" }}>
+      <div
+        dir="auto"
+        style={{
+          background: isStudent ? "#dbeafe" : isNote ? "#fef3c7" : "white",
+          border: "1px solid #ddd",
+          borderRadius: 8,
+          padding: "8px 12px",
+          maxWidth: "78%",
+          whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere",
+          fontSize: 13,
+        }}
+      >
+        <div style={{ fontSize: 10, color: "#666", marginBottom: 4 }} dir="ltr">
+          {e.author} · {e.kind}{e.step != null ? ` · step ${e.step}` : ""} · {e.created_at}
+        </div>
+        {e.content}
       </div>
     </div>
   );

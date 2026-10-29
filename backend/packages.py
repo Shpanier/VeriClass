@@ -392,7 +392,7 @@ def export_zip(ex: dict[str, Any]) -> bytes:
 _EDITABLE = ("title_en", "title_he", "default_mode", "brief_md", "welcome_suggestions",
              "required_error_strings", "param_labels", "tutor_notes", "terminal", "language",
              "course_name", "check_command", "scaffold_filename", "chat_history", "resume_minutes",
-             "output_in_chat")
+             "output_in_chat", "answer_in_chat")
 _STEP_KEYS = ("title", "text", "minutes")
 
 

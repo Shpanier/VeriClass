@@ -131,6 +131,15 @@ asks again replaces its older copy, and a student who logs in again sees which
 of their questions are still with the teacher. API: `POST /api/reviews/{id}/delete`
 (`{"notify", "note"}`), `POST /api/reviews/delete-stale`, `GET /api/reviews/open/{session_id}`.
 
+**Questions in other languages.** A question in neither Hebrew nor English (say,
+Arabic or Russian) arrives with a translation under it: the same model call that
+drafts the four answers names the question's language and translates it, so it
+costs no extra call. The queue's 🌐 setting picks the language (Hebrew by
+default, English, or off); it applies to questions asked from then on. *Redo
+with* keeps the translation. Stored on `pending_reviews.question_lang`,
+`question_translation` and `translated_to`; the setting is `review_translate_to`
+(`GET/POST /api/reviews/config`, `{"translate_to": "he" | "en" | "off"}`).
+
 Use this in high-stakes labs, during summative assessment, or when a
 particular student needs heavily-scaffolded support. The model **never**
 returns a full working solution at any level — that constraint is enforced
@@ -436,12 +445,15 @@ the lab one step at a time; the lecturer keeps the whole class on the same step.
   or "done" works too). For a step with `expect_output` checks the student
   pastes what the terminal printed. An output that passes every check moves the
   student on by itself. One that doesn't waits for the lecturer: the dashboard
-  shows it next to the step's `expected_output`, with *Let them continue*;
-  meanwhile the student may paste again. Students never see the expected output
-  or the checks. A student who pastes the output as an ordinary chat message,
-  without *Done*, gets the same: the server recognizes it (`POST
-  /api/steps/detect`) and finishes the step; an output that passes only some of
-  the checks makes the chat ask "is this the output of step X, or a question?".
+  shows it next to the step's `expected_output`, with *Let them continue* and
+  *Send back to try again* (with an optional note, which the student's chat
+  shows with a *paste again* button); meanwhile the student may paste again. Students never see the expected output
+  or the checks. Students often type or paste into the chat instead of clicking
+  *Done*, so any message while a step is open is handled first (`POST
+  /api/steps/detect`): an output that passes every check finishes the step, and
+  any other message makes the chat ask "a question, or your answer for step
+  X?" before anything reaches the lecturer. "The answer" is checked like a
+  paste after *Done*; "a question" goes to the tutor (or the review queue).
 - **Questions after steps** (`quiz` in teacher.yaml) reach students only after
   the lecturer approves them in the dashboard (the wording can be edited there).
   An approved question is asked when a student finishes its step, the next step
@@ -469,7 +481,8 @@ session's transcript.
 | Setting | Where | Default |
 |---|---|---|
 | `chat_history: false` | exercise.yaml, or *Keep the chat history* in the exercise editor | on |
-| `output_in_chat: accept \| ask \| off` | exercise.yaml, or the exercise editor; a step's output pasted as a chat message: accept it when it passes every check (ask when only some do), always ask, or treat it as a question | `accept` |
+| `output_in_chat: confirm \| accept \| ask \| off` | exercise.yaml, or the exercise editor; a chat message while a step is open: `confirm` accepts a full match and asks about anything else, `accept` asks only about a partial match, `ask` asks about any match, `off` treats every message as a question | `confirm` |
+| `answer_in_chat: detect \| confirm \| answer` | exercise.yaml, or the exercise editor; a chat message while a quiz or teacher's question is open (the question doesn't lock the chat, so the student can still ask): `detect` takes it as the answer unless it looks like a question (a question mark, a question word, "I don't understand"), and then asks "your answer, or a question of yours?"; `confirm` always asks; `answer` always takes it as the answer. "Done", or a message that matches the open step's output checks, still goes to the step. A question of the student's own goes to the tutor, or to the teacher in review mode; while it waits for the teacher (`X-VeriClass-Review` on the reply) the chat isn't busy, so the student can answer meanwhile | `detect` |
 | `resume_minutes: N` | exercise.yaml, or the exercise editor; how recent a session must be to be resumed, `0` = always | always for `pacing: class`, otherwise 30 |
 | `CHAT_HISTORY_REPLAY_MAX` | environment | 400 (the latest entries replayed after a login) |
 

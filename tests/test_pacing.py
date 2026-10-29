@@ -570,17 +570,24 @@ def test_output_pasted_as_a_message_is_recognized(client):
     h, sid = _student(client, "PCE-50")
     for q in pacing.quiz_items(exercises.get(LAB)):
         pacing.set_quiz(exercises.get(LAB), q["key"], False)
-    assert _detect(client, h, sid, GOOD) == {"kind": "output", "step": 1, "label": "A1", "matched": 2, "checks": 2}
+    found = {"step": 1, "label": "A1", "needs_output": True, "checks": 2}
+    # Default (confirm): a full match is the answer; anything else, ask the student.
+    assert _detect(client, h, sid, GOOD) == {"kind": "output", "matched": 2, **found}
     maybe = _detect(client, h, sid, "ALL READY")
-    assert maybe["kind"] == "maybe" and maybe["matched"] == 1
+    assert maybe == {"kind": "maybe", "matched": 1, **found}
     assert "hint" not in str(maybe) and "alpine" not in str(maybe)  # never gives the checks away
-    assert _detect(client, h, sid, "why does docker pull take so long?") == {"kind": "question"}
+    assert _detect(client, h, sid, "why does docker pull take so long?") == {"kind": "maybe", "matched": 0, **found}
     assert _detect(client, h, sid, "   ") == {"kind": "question"}
 
     ex = exercises.get(LAB)
     try:
+        ex["output_in_chat"] = "accept"
+        assert _detect(client, h, sid, GOOD)["kind"] == "output"
+        assert _detect(client, h, sid, "ALL READY")["kind"] == "maybe"
+        assert _detect(client, h, sid, "why does docker pull take so long?") == {"kind": "question"}
         ex["output_in_chat"] = "ask"
         assert _detect(client, h, sid, GOOD)["kind"] == "maybe"
+        assert _detect(client, h, sid, "why?") == {"kind": "question"}
         ex["output_in_chat"] = "off"
         assert _detect(client, h, sid, GOOD) == {"kind": "question"}
     finally:
@@ -589,9 +596,15 @@ def test_output_pasted_as_a_message_is_recognized(client):
     other, _ = _student(client, "PCE-51")
     assert client.post("/api/steps/detect", headers=other, json={"session_id": sid, "text": GOOD}).status_code == 403
 
-    # A step without checks: a message is always a question.
+    # A step without checks: confirm asks "a question, or done with the step?"; accept doesn't.
     _finish(client, h, sid, 1, GOOD)
-    assert _detect(client, h, sid, GOOD) == {"kind": "question"}
+    assert _detect(client, h, sid, "I read it") == {"kind": "maybe", "step": 2, "label": "A2", "needs_output": False}
+    try:
+        ex["output_in_chat"] = "accept"
+        assert _detect(client, h, sid, "I read it") == {"kind": "question"}
+    finally:
+        ex.pop("output_in_chat")
+    # No open step (waiting for the teacher): always a question.
 
 
 def test_ask_finishes_the_step_when_the_message_is_its_output(client):
@@ -606,5 +619,208 @@ def test_output_in_chat_is_validated():
     base = {"exercise_id": "x", "title_en": "x", "default_mode": "mentor", "brief_md": "x",
             "variants": [{"id": "v1", "params": {}, "test_inputs": []}]}
     exercises._validate({**base, "output_in_chat": "ask"}, "t")
+    exercises._validate({**base, "output_in_chat": "confirm"}, "t")
     with pytest.raises(ValueError, match="output_in_chat"):
         exercises._validate({**base, "output_in_chat": "maybe"}, "t")
+
+
+def test_a_question_approved_late_is_asked_of_students_past_its_step(client, teacher):
+    ex = exercises.get(LAB)
+    for q in pacing.quiz_items(ex):
+        pacing.set_quiz(ex, q["key"], False)
+    _release(client, teacher, 2, "course-q")
+    with db.conn() as c:
+        c.execute("INSERT OR IGNORE INTO courses (course_id, name) VALUES ('course-q', 'Q')")
+    people = {}
+    for code in ("PCE-70", "PCE-71"):
+        h, sid = _student(client, code)
+        with db.conn() as c:
+            c.execute("UPDATE sessions SET course_id = 'course-q' WHERE id = ?", (sid,))
+        people[code] = (h, sid)
+    h70, sid70 = people["PCE-70"]
+    assert _finish(client, h70, sid70, 1, GOOD)["quiz"] == 0     # nothing approved yet: no question
+    st = _state(client, h70, sid70)
+    assert st["current"] == 2 and st["open"]
+
+    key = pacing.quiz_key(Q1)
+    view = client.get(f"/api/pacing/{LAB}", headers=teacher).json()
+    course = next(c for c in view["courses"] if c["course_id"] == "course-q")
+    assert course["quiz_missed"][key] == 1                       # PCE-70 is past A1, never asked
+    assert view["steps"][0]["quiz"] == 2 and view["steps"][0]["quiz_approved"] == 0
+
+    r = client.post(f"/api/pacing/{LAB}/quiz/{key}", headers=teacher,
+                    json={"approved": True, "ask_finished": True, "course_id": "course-q"})
+    assert r.status_code == 200 and r.json()["asked_now"] == 1
+    pending = client.get(f"/api/probes/pending/{sid70}", headers=h70).json()
+    assert [p["quiz_step"] for p in pending] == ["A1"]
+    st = _state(client, h70, sid70)
+    assert st["quiz_pending"] == 1 and not st["open"]            # A2 waits for the answer
+    assert client.get(f"/api/probes/pending/{people['PCE-71'][1]}", headers=people["PCE-71"][0]).json() == []
+
+    # Asking again doesn't ask twice; the counter is back to 0.
+    r = client.post(f"/api/pacing/{LAB}/quiz/{key}", headers=teacher,
+                    json={"approved": True, "ask_finished": True, "course_id": "course-q"})
+    assert r.json()["asked_now"] == 0
+    view = client.get(f"/api/pacing/{LAB}", headers=teacher).json()
+    assert next(c for c in view["courses"] if c["course_id"] == "course-q")["quiz_missed"][key] == 0
+    # Without ask_finished, approving asks nobody at once.
+    key2 = pacing.quiz_key(Q2)
+    assert client.post(f"/api/pacing/{LAB}/quiz/{key2}", headers=teacher,
+                       json={"approved": True}).json()["asked_now"] == 0
+    for q in pacing.quiz_items(ex):
+        pacing.set_quiz(ex, q["key"], False)
+
+
+def test_a_student_with_no_open_step_only_asks_questions(client, teacher):
+    _release(client, teacher, 1, "course-w")
+    h, sid = _student(client, "PCE-80")
+    with db.conn() as c:
+        c.execute("UPDATE sessions SET course_id = 'course-w' WHERE id = ?", (sid,))
+    _finish(client, h, sid, 1, GOOD)
+    assert _state(client, h, sid)["waiting_teacher"]
+    assert _detect(client, h, sid, "what happens next?") == {"kind": "question"}
+
+
+def test_teacher_sends_a_wrong_output_back(client, teacher):
+    for q in pacing.quiz_items(exercises.get(LAB)):
+        pacing.set_quiz(exercises.get(LAB), q["key"], False)
+    _release(client, teacher, 4)
+    h, sid = _student(client, "PCE-90")
+    _finish(client, h, sid, 1, GOOD)
+    _finish(client, h, sid, 2)
+    assert _finish(client, h, sid, 3, "asdfasdf")["status"] == "missing"
+
+    # Only the teacher, and only for an output that waits at that step.
+    assert client.post(f"/api/pacing/{LAB}/decline", headers=h,
+                       json={"session_id": sid, "step": 3}).status_code == 403
+    assert client.post(f"/api/pacing/{LAB}/decline", headers=teacher,
+                       json={"session_id": sid, "step": 2}).status_code == 409
+    r = client.post(f"/api/pacing/{LAB}/decline", headers=teacher,
+                    json={"session_id": sid, "step": 3, "note": "Run uname -r inside the container."})
+    assert r.status_code == 200
+
+    st = _state(client, h, sid)
+    assert st["current"] == 3 and st["open"] and not st["waiting_review"]  # same step, nothing waits
+    view = client.get(f"/api/pacing/{LAB}", headers=teacher).json()
+    me = next(s for c in view["courses"] for s in c["students"] if s["session_id"] == sid)
+    assert me["waiting"] == [] and me["flags"] == []
+    notes = client.get(f"/api/transcript/{sid}", headers=h, params={"origin": "server"}).json()["entries"]
+    assert [(n["kind"], n["step"]) for n in notes] == [("returned", 3)]
+    assert "isn't right yet" in notes[0]["content"] and "Run uname -r inside the container." in notes[0]["content"]
+    with db.conn() as c:
+        row = c.execute("SELECT status, teacher_note, answer FROM step_checks WHERE session_id = ? AND step = 3",
+                        (sid,)).fetchone()
+    assert (row["status"], row["teacher_note"], row["answer"]) == ("returned", "Run uname -r inside the container.",
+                                                                  "asdfasdf")  # kept for the record
+    assert client.post(f"/api/pacing/{LAB}/decline", headers=teacher,
+                       json={"session_id": sid, "step": 3}).status_code == 409  # already sent back
+
+    # They paste again: a wrong one waits again, a right one moves them on.
+    assert _finish(client, h, sid, 3, "still wrong")["status"] == "missing"
+    assert _finish(client, h, sid, 3, "Linux 6.8.0-azure")["status"] == "done"
+    assert _state(client, h, sid)["current"] == 4
+
+
+def _open_quiz(client, teacher, monkeypatch, code):
+    """A student who finished A1 and has its (approved) quiz question open."""
+    async def fake_grade(question, answer, params, reference=None):
+        return 1, "partly"
+
+    monkeypatch.setattr(grader, "grade", fake_grade)
+    q1 = next(q for q in client.get(f"/api/pacing/{LAB}", headers=teacher).json()["quiz"] if q["q"] == Q1)
+    client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher, json={"approved": True})
+    h, sid = _student(client, code)
+    assert _finish(client, h, sid, 1, GOOD)["quiz"] == 1
+    return h, sid, q1
+
+
+def _session_row(sid):
+    with db.conn() as c:
+        return dict(c.execute("SELECT * FROM sessions WHERE id = ?", (sid,)).fetchone())
+
+
+def _classify(client, h, sid, text):
+    r = client.post("/api/probes/classify", headers=h, json={"session_id": sid, "text": text})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_a_student_with_an_open_question_can_still_ask(client, teacher, monkeypatch):
+    h, sid, q1 = _open_quiz(client, teacher, monkeypatch, "PCE-AQ1")
+    try:
+        probe_id = client.get(f"/api/probes/pending/{sid}", headers=h).json()[0]["id"]
+        # detect (default): an answer is the answer; a question asks the student first.
+        d = _classify(client, h, sid, "Because a container shares the host's kernel.")
+        assert (d["kind"], d["mode"], d["probe"]["id"]) == ("answer", "detect", probe_id)
+        assert _classify(client, h, sid, "What does kernel mean here?")["kind"] == "maybe"
+        assert _classify(client, h, sid, "לא הבנתי את השאלה")["kind"] == "maybe"
+        # The tutor knows the open question and must not answer it for them.
+        prompt = prompting.system_prompt_for(_session_row(sid))
+        assert "OPEN QUESTIONS" in prompt and "never answer them" in prompt
+        ex = exercises.get(LAB)
+        ex["answer_in_chat"] = "confirm"
+        assert _classify(client, h, sid, "Because a container shares the host's kernel.")["kind"] == "maybe"
+        ex["answer_in_chat"] = "answer"
+        assert _classify(client, h, sid, "What does kernel mean here?")["kind"] == "answer"
+        ex.pop("answer_in_chat")
+
+        r = client.post("/api/probes/answer", headers=h, json={"probe_id": probe_id, "answer": "shared kernel"})
+        assert r.status_code == 200
+        # Answered: nothing is open, a message is an ordinary one, and the question is closed.
+        assert _classify(client, h, sid, "shared kernel")["kind"] == "none"
+        assert "OPEN QUESTIONS" not in prompting.system_prompt_for(_session_row(sid))
+        again = client.post("/api/probes/answer", headers=h, json={"probe_id": probe_id, "answer": "again"})
+        assert again.status_code == 409
+    finally:
+        exercises.get(LAB).pop("answer_in_chat", None)
+        client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher, json={"approved": False})
+
+
+def test_a_step_output_while_a_teachers_question_is_open_goes_to_the_step(client, teacher):
+    # A teacher's question can be open while a step is: the step's output is not its answer.
+    h, sid = _student(client, "PCE-AQ3")
+    assert client.post("/api/probe/send", headers=teacher,
+                       json={"session_id": sid, "bodies": ["What did you pull?"]}).status_code == 200
+    assert _classify(client, h, sid, GOOD)["kind"] == "step"
+    assert _classify(client, h, sid, "docker.io/library/alpine:3.20")["kind"] == "step"  # a partial match
+    assert _classify(client, h, sid, "The alpine image")["kind"] == "answer"
+    assert _classify(client, h, sid, "Which image do you mean?")["kind"] == "maybe"
+
+
+def test_a_withdrawn_question_cant_be_answered(client, teacher, monkeypatch):
+    h, sid, q1 = _open_quiz(client, teacher, monkeypatch, "PCE-AQ2")
+    try:
+        probe_id = client.get(f"/api/probes/pending/{sid}", headers=h).json()[0]["id"]
+        assert client.post(f"/api/sessions/{sid}/reset", headers=teacher, json={"step": 1}).status_code == 200
+        assert client.get(f"/api/probes/pending/{sid}", headers=h).json() == []
+        r = client.post("/api/probes/answer", headers=h, json={"probe_id": probe_id, "answer": "late"})
+        assert r.status_code == 409 and "cancelled" in r.json()["detail"]
+    finally:
+        client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher, json={"approved": False})
+
+
+def test_answer_in_chat_is_validated():
+    base = {"exercise_id": "x", "title_en": "x", "default_mode": "mentor", "brief_md": "x",
+            "variants": [{"id": "v1", "params": {}, "test_inputs": []}]}
+    exercises._validate({**base, "answer_in_chat": "confirm"}, "t")
+    with pytest.raises(ValueError, match="answer_in_chat"):
+        exercises._validate({**base, "answer_in_chat": "maybe"}, "t")
+
+
+@pytest.mark.parametrize("text, asks", [
+    ("What does kernel mean?", True),
+    ("why the same kernel", True),
+    ("מה זה kernel", True),
+    ("לא הבנתי מה צריך לכתוב", True),
+    ("תסביר שוב בבקשה", True),
+    ("هل هذا صحيح", True),
+    ("ממש לא ברור לי?", True),
+    ("Because the container shares the host kernel.", False),
+    ("כי לקונטיינר אין kernel משלו", False),
+    ("ls file?.txt shows it", False),
+    ("6.8.0-1015-azure", False),
+    ("", False),
+])
+def test_looks_like_question(text, asks):
+    from backend import textutil
+    assert textutil.looks_like_question(text) is asks

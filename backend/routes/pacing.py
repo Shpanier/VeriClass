@@ -1,7 +1,7 @@
 """Class-paced labs (backend/pacing.py). Students: where they are, and "done
 with this step" with the pasted output. Teacher: the class's progress, opening
-steps for a course, letting a student past a step, and approving the quiz
-questions."""
+steps for a course, letting a student past a step or sending their output
+back, and approving the quiz questions."""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -49,7 +49,8 @@ class DetectRequest(BaseModel):
 
 @router.post("/steps/detect")
 def detect_output(req: DetectRequest, user: dict = Depends(deps.current_user)):
-    """Is a chat message the current step's pasted output? (exercise.yaml output_in_chat)"""
+    """Is a chat message the current step's answer, a question, or should the
+    chat ask the student? (exercise.yaml output_in_chat)"""
     s = deps.require_owns_session(req.session_id, user)
     return pacing.detect_output(s, _paced(s["exercise"]), req.text)
 
@@ -86,15 +87,35 @@ def let_through(exercise_id: str, req: LetThroughRequest, teacher: dict = Depend
     return {"ok": True}
 
 
+class DeclineRequest(BaseModel):
+    session_id: str
+    step: int
+    note: Optional[str] = None  # shown to the student with the request to try again
+
+
+@router.post("/pacing/{exercise_id}/decline")
+def decline(exercise_id: str, req: DeclineRequest, teacher: dict = Depends(deps.require_teacher)):
+    """Send a student's non-matching output back: they stay on the step and paste again."""
+    ex = _paced(exercise_id)
+    if not pacing.decline(ex, req.session_id, req.step, req.note):
+        raise HTTPException(409, "Nothing of this student waits at that step.")
+    return {"ok": True}
+
+
 class QuizRequest(BaseModel):
     approved: bool
     body: Optional[str] = None  # new wording; None keeps the current one
+    # Also ask it now of this course's students who already finished its step.
+    ask_finished: bool = False
+    course_id: Optional[str] = None  # None / "": students outside every course
 
 
 @router.post("/pacing/{exercise_id}/quiz/{key}")
 def set_quiz(exercise_id: str, key: str, req: QuizRequest, teacher: dict = Depends(deps.require_teacher)):
     ex = _paced(exercise_id)
     try:
-        return pacing.set_quiz(ex, key, req.approved, req.body)
+        item = pacing.set_quiz(ex, key, req.approved, req.body)
     except KeyError:
         raise HTTPException(404, "Unknown question")
+    asked = pacing.ask_finished(ex, key, req.course_id) if req.approved and req.ask_finished else 0
+    return {**item, "asked_now": asked}

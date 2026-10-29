@@ -159,6 +159,10 @@ async def _sync_others() -> None:
         cl.user_session.set("seen", e["id"])
         if e["author"] == "student":
             await cl.Message(content=e["content"], author="student", type="user_message").send()
+        elif e["kind"] == "returned" and e.get("step"):
+            # The teacher sent the step's output back: paste again from here.
+            cl.user_session.set("in_review", None)
+            await cl.Message(content=e["content"], actions=[_paste_again(e["step"])]).send()
         else:
             await cl.Message(content=e["content"]).send()
         if e["kind"] == "reset":
@@ -244,11 +248,16 @@ async def _chat_login():
 
 async def _pick(question: str, options: list[tuple[str, str]]):
     """One button per (value, label); the chosen value, or None on timeout."""
-    res = await cl.AskActionMessage(
+    ask = cl.AskActionMessage(
         content=question,
         actions=[cl.Action(name="pick", payload={"value": v}, label=label) for v, label in options],
         timeout=600,
-    ).send()
+    )
+    res = await ask.send()
+    # Chainlit then replaces the question with "Selected: …" in English; keep
+    # the question, with the answer under it, in the chat's language.
+    ask.content = f"{question}\n\n**{res['label']}**" if res else f"{question}\n\n_לא נבחרה תשובה._"
+    await ask.update()
     return ((res or {}).get("payload") or {}).get("value")
 
 
@@ -417,21 +426,32 @@ async def on_suggest(action: cl.Action):
 @cl.on_message
 async def on_message(msg: cl.Message):
     await _record({"author": "student", "kind": "text", "content": msg.content or ""})
+    # "Done" finishes the open step, even while a question of ours is open.
     if cl.user_session.get("paced") and _DONE_TEXT.match(msg.content or ""):
         st = await _get_state()
         if st and st.get("open"):
             await _finish(st["step"]["n"])
             return
+    reply = await _probe_answer(msg.content or "")
+    if reply == "answered":
+        return
+    if reply == "question":
+        # Asked while a question of ours is open: answer it, then remind them.
+        await _ask(msg.content)
+        await _remind_probe()
+        return
     if cl.user_session.get("paced") and await _pasted_output(msg.content or ""):
         return
     await _ask(msg.content)
 
 
 async def _pasted_output(text: str) -> bool:
-    """The student pasted the step's output as a message instead of clicking
-    "Done": the server decides (POST /api/steps/detect, exercise.yaml
-    output_in_chat). It finishes the step with it, or, when the output only
-    partly matches, asks the student first. False = treat it as a question."""
+    """A message while a step is open may be the step's answer rather than a
+    question (students often type or paste instead of clicking "Done"). The
+    server decides (POST /api/steps/detect, exercise.yaml output_in_chat): it is
+    the step's output, a question, or "maybe", and then the student is asked
+    first, before anything goes to the teacher. Finishes the step and returns
+    True when it is the answer; False = treat it as a question."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(f"{BACKEND}/api/steps/detect", headers=_auth(),
@@ -442,14 +462,15 @@ async def _pasted_output(text: str) -> bool:
         d = None
     if not d or d["kind"] == "question":
         return False
-    n, label = d["step"], d["label"]
+    n, label, needs_output = d["step"], d["label"], d.get("needs_output", True)
     if d["kind"] == "maybe":
-        question = f"🤔 זה הפלט של שלב {label}, או שאלה?"
-        chosen = await _pick(question, [("output", f"📋 זה הפלט של שלב {label}"), ("question", "❓ זו שאלה")])
+        question = f"🤔 שלחתם שאלה, או את התשובה לשלב {label}?"
+        answer_label = f"📋 זה הפלט של שלב {label}" if needs_output else f"✅ סיימתי את שלב {label}"
+        chosen = await _pick(question, [("answer", answer_label), ("question", "❓ זו שאלה")])
         await _record({"author": "tutor", "kind": "text", "step": n, "content": question},
                       *([{"author": "student", "kind": "text", "step": n,
-                          "content": "זה הפלט" if chosen == "output" else "זו שאלה"}] if chosen else []))
-        if chosen != "output":
+                          "content": answer_label if chosen == "answer" else "❓ זו שאלה"}] if chosen else []))
+        if chosen != "answer":
             return False
     async with cl.user_session.get("lock"):
         st = await _get_state()
@@ -457,7 +478,7 @@ async def _pasted_output(text: str) -> bool:
             return False
         if d["kind"] == "output":
             await _say(f"📋 זיהיתי שזה הפלט של שלב {label}.", kind="result", step=n)
-        await _after_finish(await _post_finish(n, text), n)
+        await _after_finish(await _post_finish(n, text if needs_output else ""), n)
     return True
 
 
@@ -489,6 +510,11 @@ async def _ask(text: str):
                     out.content = _ask_error_message(resp.status_code)
                     await out.update()
                     return
+                if resp.headers.get("X-VeriClass-Review"):
+                    # The answer waits for the teacher, maybe for minutes. Meanwhile the
+                    # chat isn't busy: the student can answer a question, finish a step,
+                    # or ask something else.
+                    await cl.context.emitter.task_end()
                 async for chunk in resp.aiter_text():
                     if chunk:
                         await out.stream_token(chunk)
@@ -551,6 +577,13 @@ async def _show_state():
         _forget_shown()
     cl.user_session.set("reset_shown", False)
     review = cl.user_session.get("in_review")
+    if (review is not None and st["current"] == review and st.get("open") and not st.get("waiting_review")
+            and not cl.user_session.get("history")):
+        # Sent back by the teacher; without a transcript its note can't arrive, so say it here.
+        cl.user_session.set("in_review", None)
+        await _say(f"↩️ המרצה בדק את הפלט ששלחתם לשלב {st['current_label']}, והוא עוד לא תקין. "
+                   "הריצו שוב והדביקו את הפלט החדש.", kind="returned", step=review,
+                   actions=[_paste_again(review)])
     if review is not None and st["current"] > review:
         # The teacher let them past the step whose output didn't match.
         cl.user_session.set("in_review", None)
@@ -583,6 +616,10 @@ async def _send_step(step: dict, unlocked: bool):
            if step["needs_output"] else "כשסיימתם: לחצו **סיימתי**.")
     await _say(f"{head}{step['markdown']}\n\n---\n{how}", kind="step", step=step["n"],
                actions=[_finish_action(step)])
+
+
+def _paste_again(n: int) -> cl.Action:
+    return cl.Action(name="finish", payload={"step": n}, label="📋 להדביק שוב")
 
 
 def _finish_action(step: dict) -> cl.Action:
@@ -653,7 +690,7 @@ async def _after_finish(r, n: int, action: cl.Action = None):
                    "בדקו את «שימו לב» בשלב, הריצו שוב, והדביקו את הפלט החדש. "
                    "המרצה רואה את הפלט ששלחתם, ואם הכול בסדר הוא יאשר לכם להמשיך: "
                    "השלב הבא יופיע כאן לבד.", kind="result", step=n,
-                   actions=[cl.Action(name="finish", payload={"step": n}, label="📋 להדביק שוב")])
+                   actions=[_paste_again(n)])
         return
     if r["status"] != "done":
         await _not_this_step(r["state"], n)
@@ -702,28 +739,81 @@ async def _poll(session_id: str, token: str):
         pass  # chat ended; stop polling cleanly
 
 
-async def _ask_pending_probes():
-    """Ask every question waiting for this student. Call with the lock."""
+# --- questions the chat asks the student (backend/open_questions.py) ----------------
+# A quiz question after a step, or one the teacher sent. It is shown once and
+# stays open without locking the chat: the student answers in the chat when
+# ready, and can still ask the teacher something meanwhile. The server says
+# whether a message is the answer (exercise.yaml answer_in_chat); when unsure,
+# the student is asked. One question at a time, oldest first.
+
+async def _pending_probes() -> list:
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             r = await client.get(
                 f"{BACKEND}/api/probes/pending/{cl.user_session.get('session_id')}", headers=_auth())
     except httpx.HTTPError as e:
         log.warning("[probes] %s", e)
-        return
-    if r.status_code == 200:
-        for probe in r.json():
-            await _handle_probe(probe)
+        return []
+    return r.json() if r.status_code == 200 else []
 
 
-async def _handle_probe(probe: dict):
-    if probe.get("source") == "quiz":
-        content = f"❓ **שאלת הבנה על שלב {probe.get('quiz_step')}:**\n\n> {probe['body']}\n\nכתבו את התשובה שלכם:"
-    else:
-        content = f"🎓 **המרצה שואל/ת:**\n\n> {probe['body']}\n\nכתבו את התשובה שלכם:"
-    answer = await _prompt(content, kind="answer")
-    if not answer:
-        return
+async def _ask_pending_probes():
+    """Show the oldest question waiting for the student's answer, once. Call with the lock."""
+    probes = await _pending_probes()
+    if probes and cl.user_session.get("probe_shown") != probes[0]["id"]:
+        cl.user_session.set("probe_shown", probes[0]["id"])
+        await _say(_probe_text(probes[0]), kind="quiz")
+
+
+def _probe_text(probe: dict) -> str:
+    head = (f"❓ **שאלת הבנה על שלב {probe.get('quiz_step')}:**" if probe.get("source") == "quiz"
+            else "🎓 **המרצה שואל/ת:**")
+    return (f"{head}\n\n> {probe['body']}\n\n"
+            "כתבו כאן את התשובה שלכם. יש לכם שאלה לפני שאתם עונים? אפשר לשאול אותה כאן.")
+
+
+async def _probe_answer(text: str):
+    """A message while a question of ours is open: "answered" (sent as its
+    answer), "question" (the student's own question), or None (no question is
+    open, or it is the open step's output). POST /api/probes/classify decides;
+    on "maybe" the student picks."""
+    if not cl.user_session.get("probe_shown"):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(f"{BACKEND}/api/probes/classify", headers=_auth(),
+                                  json={"session_id": cl.user_session.get("session_id"), "text": text})
+        d = r.json() if r.status_code == 200 else None
+    except httpx.HTTPError as e:
+        log.warning("classify answer failed: %s", e)
+        d = None
+    if not d or d["kind"] in ("none", "step"):
+        return None
+    if d["kind"] == "maybe":
+        question = "🤔 זו התשובה שלכם לשאלה, או שאלה שלכם?"
+        options = [("answer", "✍️ זו התשובה שלי"), ("question", "❓ זו שאלה שלי")]
+        chosen = await _pick(question, options)
+        await _record({"author": "tutor", "kind": "text", "content": question},
+                      *([{"author": "student", "kind": "text", "content": dict(options)[chosen]}] if chosen else []))
+        if chosen != "answer":
+            return "question"
+    async with cl.user_session.get("lock"):
+        await _answer_probe(d["probe"], text)
+        await _ask_pending_probes()
+        if cl.user_session.get("paced"):
+            await _show_state()
+    return "answered"
+
+
+async def _remind_probe():
+    """After answering the student's own question: the question of ours is still open."""
+    probes = await _pending_probes()
+    if probes and probes[0]["id"] == cl.user_session.get("probe_shown"):
+        await _say(f"✍️ כשתהיו מוכנים, כתבו כאן את התשובה לשאלה:\n\n> {probes[0]['body']}")
+
+
+async def _answer_probe(probe: dict, answer: str):
+    """Send the student's answer and show how it went."""
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(
@@ -740,5 +830,7 @@ async def _handle_probe(probe: dict):
         grade = f" ציון: **{data['auto_grade']}/2**" if data.get("auto_grade") is not None else ""
         why = f" — {data['why']}" if data.get("why") else ""
         await _say(f"✅ התשובה נשמרה.{grade}{why}", kind="result")
+    elif r.status_code == 409:
+        await _say("השאלה הזו כבר לא פתוחה (כבר עניתם עליה, או שהמרצה ביטל אותה).", record=False)
     else:
         await _say("⚠️ התשובה לא נשלחה. נסו שוב.", record=False)

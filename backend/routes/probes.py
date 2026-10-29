@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend import db, deps, exercises, pacing
+from backend import db, deps, exercises, open_questions, pacing
 from backend.agents import grader, probe
 
 router = APIRouter()
@@ -27,31 +27,46 @@ class ProbeAnswerRequest(BaseModel):
     answer: str
 
 
+class ProbeClassifyRequest(BaseModel):
+    session_id: str
+    text: str
+
+
 class ProbeOverrideRequest(BaseModel):
     probe_id: int
     grade: int
 
 
+def _exercise(s: dict):
+    try:
+        return exercises.get(s["exercise"])
+    except KeyError:
+        return None
+
+
 @router.get("/probes/pending/{session_id}")
 def pending(session_id: str, user: dict = Depends(deps.current_user)):
+    """The questions waiting for the student's answer, oldest first. source
+    'quiz': a class-paced lab's question after a step (quiz_step, shown by its
+    label, e.g. "B6")."""
     s = deps.require_owns_session(session_id, user)
-    with db.conn() as c:
-        rows = c.execute(
-            "SELECT id, body, source, quiz_step FROM probes WHERE session_id = ? AND status = 'pending'",
-            (session_id,),
-        ).fetchall()
-    # source 'quiz': a class-paced lab's question after a step (quiz_step, shown
-    # by its label, e.g. "B6").
-    ex = exercises.get(s["exercise"]) if any(r["quiz_step"] for r in rows) else None
-    return [{"id": r["id"], "body": r["body"], "source": r["source"],
-             "quiz_step": pacing.label(ex, r["quiz_step"]) if r["quiz_step"] else None}
-            for r in rows]
+    return open_questions.pending(session_id, _exercise(s))
+
+
+@router.post("/probes/classify")
+def classify(req: ProbeClassifyRequest, user: dict = Depends(deps.current_user)):
+    """A message the student wrote while a question is open: its answer, a
+    question of their own, or unsure (the chat then asks them). exercise.yaml
+    answer_in_chat; see backend/open_questions.py."""
+    s = deps.require_owns_session(req.session_id, user)
+    return open_questions.classify(s, _exercise(s), req.text)
 
 
 @router.post("/probes/answer")
 async def answer(req: ProbeAnswerRequest, user: dict = Depends(deps.current_user)):
     with db.conn() as c:
-        p = c.execute("SELECT session_id, body, quiz_key FROM probes WHERE id = ?", (req.probe_id,)).fetchone()
+        p = c.execute("SELECT session_id, body, quiz_key, status FROM probes WHERE id = ?",
+                      (req.probe_id,)).fetchone()
         if not p:
             raise HTTPException(404, "Unknown probe")
         s = c.execute(
@@ -59,6 +74,9 @@ async def answer(req: ProbeAnswerRequest, user: dict = Depends(deps.current_user
         ).fetchone()
     # A student may only answer probes on their own session.
     deps.require_owns_session(p["session_id"], user)
+    # Answered meanwhile (another tab), or withdrawn when the teacher reset the student.
+    if p["status"] != "pending":
+        raise HTTPException(409, f"This question is {p['status']}")
     variant = exercises.variant(s["exercise"], s["variant"])
     # A quiz question is graded against the teacher's model answer.
     reference = pacing.quiz_reference(exercises.get(s["exercise"]), p["quiz_key"]) if p["quiz_key"] else None
@@ -71,11 +89,13 @@ async def answer(req: ProbeAnswerRequest, user: dict = Depends(deps.current_user
         log.exception("auto-grading failed for probe %s; saving ungraded", req.probe_id)
         score, why = None, "Auto-grading is temporarily unavailable — your answer was saved."
     with db.conn() as c:
-        c.execute(
+        cur = c.execute(
             "UPDATE probes SET answer = ?, auto_grade = ?, status = 'answered', "
-            "answered_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "answered_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'",
             (req.answer, score, req.probe_id),
         )
+        if cur.rowcount == 0:
+            raise HTTPException(409, "This question was answered or withdrawn meanwhile")
     return {"auto_grade": score, "why": why}
 
 

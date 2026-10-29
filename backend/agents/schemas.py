@@ -20,6 +20,18 @@ class VariantSet(BaseModel):
     normal: LevelText
     more: LevelText
     direct: LevelText
+    # For the teacher's queue (backend/routes/review.py): the question's own
+    # language and, when the teacher can't read it, a translation.
+    question_lang: str = Field(
+        default="",
+        description="ISO 639-1 code of the language the student's latest question is written in "
+                    "(ignore code identifiers), e.g. he, en, ar, ru",
+    )
+    question_translation: str = Field(
+        default="",
+        description="The student's latest question translated as the instructions say; "
+                    "empty when the instructions ask for no translation",
+    )
 
 
 class ProbeItem(BaseModel):

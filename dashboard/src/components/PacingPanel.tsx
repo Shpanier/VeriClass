@@ -25,7 +25,7 @@ export function PacingPanel({ exerciseId }: { exerciseId: string }) {
   if (!view) return null;
 
   const empty: PacingCourse = {
-    course_id: "", name: "", released: view.open_steps, members: null, students: [], done: {}, here: {},
+    course_id: "", name: "", released: view.open_steps, members: null, students: [], done: {}, here: {}, quiz_missed: {},
   };
   const courses = view.courses.length ? view.courses : [empty];
   // Until the teacher picks one: the course with the most students in the lab.
@@ -146,6 +146,10 @@ export function PacingPanel({ exerciseId }: { exerciseId: string }) {
               <div>
                 <span title="finished">{done}✓</span>
                 {here > 0 && <span style={{ color: "#1d4ed8", fontWeight: 700 }}> {here}●</span>}
+                {s.quiz > s.quiz_approved && (
+                  <span title={t("pacingQuizUnapprovedTip", { n: s.quiz - s.quiz_approved })}
+                        style={{ color: "#b45309", fontWeight: 700 }}> ❓{s.quiz - s.quiz_approved}</span>
+                )}
               </div>
             </div>
           );
@@ -219,13 +223,17 @@ function Review({ exerciseId, course, steps, onChange }: {
 }) {
   const { t } = useLang();
   const [busy, setBusy] = useState<string | null>(null);
+  // The teacher's note to the student when sending an output back, per session.
+  const [notes, setNotes] = useState<Record<string, string>>({});
   const items = course.students.flatMap((s) => s.waiting.map((w) => ({ s, w })));
   if (items.length === 0) return null;
 
-  const letThrough = async (sessionId: string, step: number) => {
+  const decide = async (sessionId: string, step: number, approve: boolean) => {
     setBusy(sessionId);
     try {
-      await api.letThrough(exerciseId, sessionId, step);
+      if (approve) await api.letThrough(exerciseId, sessionId, step);
+      else await api.declineOutput(exerciseId, sessionId, step, notes[sessionId]);
+      setNotes((m) => { const next = { ...m }; delete next[sessionId]; return next; });
       onChange();
     } catch (e) {
       console.error(e);
@@ -246,11 +254,17 @@ function Review({ exerciseId, course, steps, onChange }: {
               <strong>{s.username}</strong>
               <span style={{ color: "#1d4ed8", fontWeight: 600 }}>{w.label}{step ? ` · ${step.title}` : ""}</span>
               <span style={{ flex: 1 }} />
-              <button disabled={busy === s.session_id} onClick={() => letThrough(s.session_id, w.step)} style={{
+              <button disabled={busy === s.session_id} onClick={() => decide(s.session_id, w.step, true)} style={{
                 padding: "4px 12px", border: "none", borderRadius: 4, background: "#15803d", color: "white",
                 fontWeight: 600, cursor: busy === s.session_id ? "wait" : "pointer",
               }}>
                 {t("pacingLetThrough")}
+              </button>
+              <button disabled={busy === s.session_id} onClick={() => decide(s.session_id, w.step, false)} style={{
+                padding: "4px 12px", border: "1px solid #fca5a5", borderRadius: 4, background: "#fef2f2", color: "#b91c1c",
+                fontWeight: 600, cursor: busy === s.session_id ? "wait" : "pointer",
+              }}>
+                {t("pacingDecline")}
               </button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8, marginTop: 6 }}>
@@ -268,6 +282,10 @@ function Review({ exerciseId, course, steps, onChange }: {
                 {t("pacingMissing")}: {w.missing.join(" · ")}
               </div>
             )}
+            <input value={notes[s.session_id] ?? ""} dir="auto" placeholder={t("pacingDeclineNote")}
+                   onChange={(e) => setNotes((m) => ({ ...m, [s.session_id]: e.target.value }))}
+                   style={{ width: "100%", boxSizing: "border-box", marginTop: 6, padding: "4px 8px", fontSize: 12,
+                            border: "1px solid #d1d5db", borderRadius: 4 }} />
           </div>
         );
       })}
@@ -337,11 +355,16 @@ function Quiz({ exerciseId, items, course, pending, onChange }: {
   const { t } = useLang();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  // Approving: also ask the students who already finished the step (default yes).
+  const [askPast, setAskPast] = useState<Record<string, boolean>>({});
+  const [askedNow, setAskedNow] = useState<Record<string, number>>({});
 
-  const save = async (q: PacingQuizItem, approved: boolean) => {
+  const save = async (q: PacingQuizItem, approved: boolean, askFinished = false) => {
     setBusyKey(q.key);
     try {
-      await api.setQuiz(exerciseId, q.key, approved, drafts[q.key]);
+      const r = await api.setQuiz(exerciseId, q.key, approved, drafts[q.key],
+                                  askFinished ? { courseId: course.course_id } : undefined);
+      if (r.asked_now) setAskedNow((m) => ({ ...m, [q.key]: r.asked_now }));
       setDrafts((d) => { const next = { ...d }; delete next[q.key]; return next; });
       onChange();
     } catch (e) {
@@ -367,6 +390,8 @@ function Quiz({ exerciseId, items, course, pending, onChange }: {
         const graded = answers.filter((a) => a.grade != null);
         const avg = graded.length ? (graded.reduce((x, a) => x + (a.grade ?? 0), 0) / graded.length).toFixed(1) : "–";
         const busy = busyKey === q.key;
+        const missed = course.quiz_missed?.[q.key] ?? 0;
+        const askThem = askPast[q.key] ?? true;
         return (
           <div key={q.key} style={{
             background: "white", borderRadius: 6, padding: 10, marginBottom: 8,
@@ -394,7 +419,7 @@ function Quiz({ exerciseId, items, course, pending, onChange }: {
             )}
             <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
               {(!q.approved || edited) && (
-                <button disabled={busy} onClick={() => save(q, true)} style={{
+                <button disabled={busy} onClick={() => save(q, true, missed > 0 && askThem)} style={{
                   padding: "4px 10px", border: "none", borderRadius: 4, background: "#15803d", color: "white",
                   fontWeight: 600, cursor: busy ? "wait" : "pointer",
                 }}>
@@ -408,6 +433,24 @@ function Quiz({ exerciseId, items, course, pending, onChange }: {
                   {t("pacingUnapprove")}
                 </button>
               )}
+              {!q.approved && missed > 0 && (
+                <label style={{ display: "inline-flex", gap: 4, alignItems: "center", fontSize: 12, color: "#374151" }}>
+                  <input type="checkbox" checked={askThem}
+                         onChange={(e) => setAskPast((m) => ({ ...m, [q.key]: e.target.checked }))} />
+                  {t("pacingAskFinished", { n: missed, label: q.label })}
+                </label>
+              )}
+              {q.approved && !edited && missed > 0 && (
+                <button disabled={busy} onClick={() => save(q, true, true)} style={{
+                  padding: "4px 10px", border: "1px solid #f59e0b", borderRadius: 4, background: "#fffbeb",
+                  color: "#92400e", fontWeight: 600, cursor: busy ? "wait" : "pointer",
+                }}>
+                  {t("pacingAskFinishedNow", { n: missed, label: q.label })}
+                </button>
+              )}
+              {askedNow[q.key] ? (
+                <span style={{ fontSize: 12, color: "#15803d", fontWeight: 600 }}>✓ {t("pacingAskedNow", { n: askedNow[q.key] })}</span>
+              ) : null}
             </div>
             {answers.length > 0 && (
               <details style={{ marginTop: 6 }}>

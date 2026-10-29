@@ -11,14 +11,15 @@ of the setup included (e.g. stop everyone after A5), or open several at once.
 A student finishes a step by pasting its output into the chat. The server
 checks it against the step's `expect_output` patterns (teacher.yaml) and moves
 the student on. An output that doesn't match waits for the teacher, who sees it
-next to the step's `expected` output in the dashboard and can let the student
-continue; meanwhile the student may paste again. A step without patterns needs
-no output.
+next to the step's `expected_output` in the dashboard and either lets the
+student continue or sends it back (with a note) to try again; meanwhile the
+student may paste again. A step without patterns needs no output.
 
 A finished step's `quiz` questions (teacher.yaml) are asked as probes, but only
 the ones the teacher approved in the dashboard, and the next step waits until
-they are answered. Approvals are keyed by the question's text, so a question
-changed in the package needs a new approval.
+they are answered. A question approved after some students already finished its
+step can be asked of them at once (ask_finished). Approvals are keyed by the
+question's text, so a question changed in the package needs a new approval.
 """
 import hashlib
 import json
@@ -109,26 +110,31 @@ def check_output(step: dict[str, Any], output: str) -> list[str]:
     return [r["hint"] for r in output_rules(step) if not re.search(r["match"], text, re.M)]
 
 
-# --- output pasted into the chat as a message --------------------------------------------
-# Students sometimes paste a step's output as an ordinary chat message instead of
-# clicking "Done". exercise.yaml `output_in_chat` decides what happens then:
-#   accept (default): an output that passes every check of the student's current
-#     step finishes it; one that passes only some is "maybe" (the chat asks
-#     whether it is the step's output or a question).
-#   ask: every output that passes at least one check is "maybe".
-#   off: chat messages are always questions for the tutor.
-OUTPUT_IN_CHAT = ("accept", "ask", "off")
+# --- a chat message while a step is open -------------------------------------------------
+# Students often type or paste into the chat instead of clicking "Done": the
+# message may be the step's answer or a question. exercise.yaml `output_in_chat`
+# decides what happens (the student chat asks the student when it says "maybe"):
+#   confirm (default): an output that passes every check of the student's
+#     current step finishes it; any other message asks the student first:
+#     "a question, or your answer for step X?".
+#   accept: the same for a full match; a partial match asks; any other message
+#     is a question.
+#   ask: every message with at least one matching check asks, a full match too.
+#   off: chat messages are always questions.
+# A student with no open step (waiting for the teacher, finished) only asks questions.
+OUTPUT_IN_CHAT = ("confirm", "accept", "ask", "off")
 
 
 def output_in_chat(ex: dict[str, Any]) -> str:
     value = ex.get("output_in_chat")
-    return value if value in OUTPUT_IN_CHAT else "accept"
+    return value if value in OUTPUT_IN_CHAT else "confirm"
 
 
 def detect_output(session: dict[str, Any], ex: dict[str, Any], text: str) -> dict[str, Any]:
-    """Is this chat message the current step's output? `kind`: output (finish
-    the step with it), maybe (ask the student), or question. The checks' hints
-    are never returned: they would give the expected output away."""
+    """Is this chat message the current step's answer? `kind`: output (finish
+    the step with it), maybe (ask the student), or question. `needs_output`:
+    the step checks a pasted output (else finishing needs no text). The
+    checks' hints are never returned: they would give the expected output away."""
     question = {"kind": "question"}
     mode = output_in_chat(ex)
     if mode == "off" or not (text or "").strip():
@@ -138,13 +144,16 @@ def detect_output(session: dict[str, Any], ex: dict[str, Any], text: str) -> dic
         return question
     cur = st["current"]
     rules = output_rules(steps.steps_of(ex)[cur - 1])
+    found = {"step": cur, "label": label(ex, cur), "needs_output": bool(rules)}
     if not rules:
-        return question
+        return {"kind": "maybe", **found} if mode == "confirm" else question
     matched = len(rules) - len(check_output({"expect_output": rules}, text))
-    if matched == 0:
-        return question
-    kind = "output" if matched == len(rules) and mode == "accept" else "maybe"
-    return {"kind": kind, "step": cur, "label": label(ex, cur), "matched": matched, "checks": len(rules)}
+    found.update(matched=matched, checks=len(rules))
+    if matched == len(rules) and mode in ("confirm", "accept"):
+        return {"kind": "output", **found}
+    if matched > 0 or mode == "confirm":
+        return {"kind": "maybe", **found}
+    return question
 
 
 # --- quiz questions ------------------------------------------------------------------
@@ -196,6 +205,29 @@ def set_quiz(ex: dict[str, Any], key: str, approved: bool, body: Optional[str] =
             (ex["exercise_id"], key, int(approved), body),
         )
     return next(i for i in quiz_items(ex) if i["key"] == key)
+
+
+def ask_finished(ex: dict[str, Any], key: str, course_id: Optional[str]) -> int:
+    """Ask an approved question now of the course's students who already
+    finished its step without being asked it. Their next step waits for the
+    answer, as after any question. Returns how many were asked."""
+    item = next((i for i in quiz_items(ex) if i["key"] == key), None)
+    if item is None:
+        raise KeyError(key)
+    if not item["approved"]:
+        return 0
+    asked = 0
+    with db.conn() as c:
+        for r in _latest_sessions(c, ex["exercise_id"], _course(course_id)):
+            if _current(c, r["id"]) <= item["step"]:
+                continue  # not there yet: asked when they finish the step
+            if c.execute("SELECT 1 FROM probes WHERE session_id = ? AND quiz_key = ? AND status != 'cancelled'",
+                         (r["id"], key)).fetchone():
+                continue
+            c.execute("INSERT INTO probes (session_id, body, source, quiz_key, quiz_step) "
+                      "VALUES (?, ?, 'quiz', ?, ?)", (r["id"], item["body"], key, item["step"]))
+            asked += 1
+    return asked
 
 
 def quiz_reference(ex: dict[str, Any], key: str) -> Optional[str]:
@@ -331,6 +363,33 @@ def let_through(ex: dict[str, Any], session_id: str, n: int) -> bool:
     return True
 
 
+def decline(ex: dict[str, Any], session_id: str, n: int, note: Optional[str] = None) -> bool:
+    """The teacher sends a student's non-matching output for step n back: the
+    student stays on the step and is told so in their chat (the transcript),
+    with the teacher's note. The output is kept (status 'returned'). False when
+    nothing of theirs waits at that step."""
+    from backend import transcript  # transcript doesn't import pacing; avoids a cycle at import
+
+    note = (note or "").strip() or None
+    with db.conn() as c:
+        row = c.execute(
+            "SELECT id FROM step_checks WHERE session_id = ? AND step = ? AND status = 'waiting' "
+            "ORDER BY id DESC LIMIT 1", (session_id, n)).fetchone()
+        if row is None or _current(c, session_id) != n:
+            return False
+        c.execute("UPDATE step_checks SET status = 'returned', teacher_note = ?, decided_at = CURRENT_TIMESTAMP "
+                  "WHERE id = ?", (note, row["id"]))
+    lbl = label(ex, n)
+    text = (f"↩️ המרצה בדק את הפלט ששלחתם לשלב {lbl}, והוא עוד לא תקין. בדקו את השלב, הריצו שוב, "
+            "והדביקו את הפלט החדש." if hebrew(ex) else
+            f"↩️ Your teacher checked the output you sent for step {lbl}: it isn't right yet. Check the "
+            "step, run it again, and paste the new output.")
+    if note:
+        text += f"\n\n> {note}"
+    transcript.record(session_id, "system", text, kind="returned", step=n, origin="server")
+    return True
+
+
 def _current(c, session_id: str) -> int:
     """steps.current_step inside an open transaction."""
     row = c.execute("SELECT MAX(step) AS s FROM step_checks WHERE session_id = ? AND status = 'approved'",
@@ -339,6 +398,15 @@ def _current(c, session_id: str) -> int:
 
 
 # --- the teacher's view ---------------------------------------------------------------------
+
+def _latest_sessions(c, exercise_id: str, course_id: str) -> list:
+    """Each student's latest session in this exercise and course ('' = none)."""
+    rows = c.execute(
+        "SELECT s.id, s.user_id, u.username, s.last_active_at FROM sessions s "
+        "JOIN users u ON u.id = s.user_id WHERE s.exercise = ? AND COALESCE(s.course_id, '') = ? "
+        "AND u.role = 'student' ORDER BY s.last_active_at", (exercise_id, course_id)).fetchall()
+    return list({r["user_id"]: r for r in rows}.values())
+
 
 def _courses_of(c, exercise_id: str) -> list[tuple[str, str]]:
     """(course_id, name) of the courses that offer the exercise or have a session
@@ -372,12 +440,7 @@ def overview(ex: dict[str, Any]) -> dict[str, Any]:
     courses = []
     with db.conn() as c:
         for cid, name in _courses_of(c, eid):
-            # Each student's latest session in this exercise and course.
-            rows = c.execute(
-                "SELECT s.id, s.user_id, u.username, s.last_active_at FROM sessions s "
-                "JOIN users u ON u.id = s.user_id WHERE s.exercise = ? AND COALESCE(s.course_id, '') = ? "
-                "AND u.role = 'student' ORDER BY s.last_active_at", (eid, cid)).fetchall()
-            latest = {r["user_id"]: r for r in rows}
+            latest = {r["user_id"]: r for r in _latest_sessions(c, eid, cid)}
             members = (c.execute("SELECT COUNT(*) AS n FROM course_members WHERE course_id = ?",
                                  (cid,)).fetchone()["n"] if cid else None)
             students = []
@@ -427,6 +490,12 @@ def overview(ex: dict[str, Any]) -> dict[str, Any]:
                 # Per step: finished it / working on it now.
                 "done": {n: sum(1 for s in students if s["current"] > n) for n in range(1, n_total + 1)},
                 "here": {n: sum(1 for s in students if s["current"] == n) for n in range(1, n_total + 1)},
+                # Per question: students past its step who were never asked it
+                # (it wasn't approved yet when they finished the step).
+                "quiz_missed": {q["key"]: sum(
+                    1 for s in students if s["current"] > q["step"]
+                    and not any(a["key"] == q["key"] and a["status"] != "cancelled" for a in s["quiz"])
+                ) for q in quiz},
             })
     return {
         "exercise_id": eid,

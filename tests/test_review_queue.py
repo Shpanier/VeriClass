@@ -3,6 +3,7 @@ one), the student's language preselected, regenerating with a stronger model,
 the question bank, and an approved answer that survives a dropped connection."""
 import asyncio
 import os
+import re
 import tempfile
 import threading
 import time
@@ -31,9 +32,18 @@ def _variants(tag="", model="fake-haiku"):
 def drafts(monkeypatch):
     calls = []
 
-    async def fake(system_prompt, session_id, question, course="", model=None):
-        calls.append({"model": model, "prompt": system_prompt})
-        return _variants("regen" if model else "", model or "fake-haiku")
+    async def fake(system_prompt, session_id, question, course="", model=None, translate_to=None):
+        calls.append({"model": model, "prompt": system_prompt, "translate_to": translate_to})
+        out = _variants("regen" if model else "", model or "fake-haiku")
+        # Like the model: Arabic is named and translated; "[he?]" plays a model
+        # that translates a Hebrew question anyway.
+        if re.search(r"[\u0600-\u06FF]", question):
+            out["question_lang"] = "ar"
+            out["question_translation"] = f"{translate_to}: translated" if translate_to and not model else ""
+        elif "[he?]" in question:
+            out["question_lang"] = "he"
+            out["question_translation"] = "unneeded"
+        return out
 
     monkeypatch.setattr(tutor, "generate_variants", fake)
     return calls
@@ -110,6 +120,17 @@ def test_four_answers_language_and_direct_pick(client, drafts):
     assert (row["answer_level"], row["model"]) == ("direct", "fake-haiku")
 
 
+def test_a_reply_that_waits_for_the_teacher_says_so(client, drafts):
+    # The student chat stays usable while the answer waits (X-VeriClass-Review).
+    h, sid = _student(client)
+    th = _teacher(client)
+    t, box = _ask_in_background(client, h, sid, "What does argc count?")
+    item = _wait_pending(client, th, sid)
+    client.post(f"/api/reviews/{item['id']}/select", json={"chosen": "normal", "lang": "en"}, headers=th)
+    t.join(10)
+    assert box["r"].headers.get(ask_mod.REVIEW_HEADER) == "1"
+
+
 def test_regenerate_with_a_stronger_model(client, drafts, monkeypatch):
     h, sid = _student(client)
     th = _teacher(client)
@@ -118,7 +139,7 @@ def test_regenerate_with_a_stronger_model(client, drafts, monkeypatch):
     assert item["suggested_lang"] == "he"
 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    assert client.get("/api/reviews/config", headers=th).json() == {"regen_models": []}
+    assert client.get("/api/reviews/config", headers=th).json()["regen_models"] == []
     assert client.post(f"/api/reviews/{item['id']}/regenerate", json={"model": "best"}, headers=th).status_code == 400
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
@@ -406,8 +427,57 @@ def test_a_note_follows_the_exercise_language_when_the_question_has_none():
     exercises._LOADED["he-brief-test"] = he_ex
     try:
         assert "המרצה מחק" in review_mod.deleted_message("aaaa", None, "he-brief-test")
-        assert "deleted" in review_mod.deleted_message("What is argv?", None, "he-brief-test")
+        # A Hebrew lab's chat is Hebrew, whatever the question looks like.
+        assert "המרצה מחק" in review_mod.deleted_message("What is argv?", None, "he-brief-test")
+        assert "המרצה מחק" in review_mod.deleted_message("hello from codespace in /x", None, "he-brief-test")
         assert "deleted" in review_mod.deleted_message("aaaa", None, "ex3-mcalc")
         assert "המרצה מחק" in review_mod.deleted_message("מה זה?", None, "ex3-mcalc")
     finally:
         exercises._LOADED.pop("he-brief-test")
+
+
+def test_a_question_in_another_language_comes_translated(client, drafts, monkeypatch):
+    h, sid = _student(client)
+    th = _teacher(client)
+    assert client.get("/api/reviews/config", headers=th).json()["translate_to"] == "he"
+    t, box = _ask_in_background(client, h, sid, "كيف أشغل الحاوية؟")
+    item = _wait_pending(client, th, sid)
+    assert drafts[-1]["translate_to"] == "he"
+    assert (item["question_lang"], item["question_translation"], item["translated_to"]) == ("ar", "he: translated", "he")
+
+    # Drafting again with a stronger model keeps the translation it left out.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    r = client.post(f"/api/reviews/{item['id']}/regenerate", json={"model": "strong"}, headers=th)
+    assert r.status_code == 200, r.text
+    assert r.json()["question_translation"] == "he: translated"
+    client.post(f"/api/reviews/{item['id']}/select", json={"chosen": "normal", "lang": "he"}, headers=th)
+    t.join(10)
+
+
+def test_no_translation_for_hebrew_or_english_or_when_off(client, drafts):
+    h, sid = _student(client)
+    th = _teacher(client)
+    t, box = _ask_in_background(client, h, sid, "איך מריצים את הקונטיינר? [he?]")
+    item = _wait_pending(client, th, sid)
+    assert item["question_lang"] == "he" and item["question_translation"] is None
+    client.post(f"/api/reviews/{item['id']}/select", json={"chosen": "normal", "lang": "he"}, headers=th)
+    t.join(10)
+
+    assert client.post("/api/reviews/config", json={"translate_to": "fr"}, headers=th).status_code == 422
+    r = client.post("/api/reviews/config", json={"translate_to": "off"}, headers=th)
+    assert r.status_code == 200 and r.json()["translate_to"] == "off"
+    try:
+        t, box = _ask_in_background(client, h, sid, "كيف أشغل الحاوية؟")
+        item = _wait_pending(client, th, sid)
+        assert drafts[-1]["translate_to"] is None
+        assert item["question_lang"] == "ar" and item["question_translation"] is None
+        client.post(f"/api/reviews/{item['id']}/select", json={"chosen": "normal", "lang": "he"}, headers=th)
+        t.join(10)
+    finally:
+        client.post("/api/reviews/config", json={"translate_to": "he"}, headers=th)
+
+
+def test_the_drafting_prompt_asks_for_a_translation_only_when_on():
+    assert "Hebrew translation" in tutor._translate_rule("he")
+    assert "English translation" in tutor._translate_rule("en")
+    assert "leave question_translation empty" in tutor._translate_rule(None)

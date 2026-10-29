@@ -17,6 +17,9 @@ import type {
   ProbeSuggestion,
   ProctorEvent,
   RegenModel,
+  ReviewConfig,
+  TranslateTo,
+  TranscriptResponse,
   RosterResult,
   SessionDetail,
   StepChecksResponse,
@@ -148,6 +151,9 @@ export const api = {
     return r.blob();
   },
   students: () => j<Student[]>("/api/students"),
+  /** The chat as the student saw it (backend/transcript.py); enabled=false when the exercise keeps none. */
+  transcript: (sessionId: string) =>
+    j<TranscriptResponse>(`/api/transcript/${encodeURIComponent(sessionId)}`),
   sessionDetail: (sessionId: string) =>
     j<SessionDetail>(`/api/students/${sessionId}/messages`),
   proctorEvents: (sessionId: string) =>
@@ -200,7 +206,12 @@ export const api = {
       body: JSON.stringify({ enabled }),
     }),
   pendingReviews: () => j<PendingReview[]>("/api/reviews/pending"),
-  reviewConfig: () => j<{ regen_models: RegenModel[] }>("/api/reviews/config"),
+  reviewConfig: () => j<ReviewConfig>("/api/reviews/config"),
+  setReviewTranslate: (translate_to: TranslateTo) =>
+    j<ReviewConfig>("/api/reviews/config", {
+      method: "POST",
+      body: JSON.stringify({ translate_to }),
+    }),
   regenerateReview: (id: number, model: RegenModel["key"]) =>
     j<PendingReview>(`/api/reviews/${id}/regenerate`, {
       method: "POST",
@@ -223,15 +234,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ course_id: courseId, step }),
     }),
+  declineOutput: (exerciseId: string, sessionId: string, step: number, note?: string) =>
+    j<{ ok: boolean }>(`/api/pacing/${encodeURIComponent(exerciseId)}/decline`, {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, step, note: note ?? null }),
+    }),
   letThrough: (exerciseId: string, sessionId: string, step: number) =>
     j<{ ok: boolean }>(`/api/pacing/${encodeURIComponent(exerciseId)}/let-through`, {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId, step }),
     }),
-  setQuiz: (exerciseId: string, key: string, approved: boolean, body?: string) =>
-    j<PacingQuizItem>(`/api/pacing/${encodeURIComponent(exerciseId)}/quiz/${key}`, {
+  setQuiz: (exerciseId: string, key: string, approved: boolean, body?: string,
+            askFinished?: { courseId: string }) =>
+    j<PacingQuizItem & { asked_now: number }>(`/api/pacing/${encodeURIComponent(exerciseId)}/quiz/${key}`, {
       method: "POST",
-      body: JSON.stringify({ approved, body: body ?? null }),
+      body: JSON.stringify({
+        approved, body: body ?? null,
+        ask_finished: !!askFinished, course_id: askFinished?.courseId ?? null,
+      }),
     }),
   decideStepCheck: (id: number, action: "approve" | "return", note: string) =>
     j<{ ok: boolean }>(`/api/step-checks/${id}/decide`, {

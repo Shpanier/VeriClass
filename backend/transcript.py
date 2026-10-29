@@ -32,7 +32,7 @@ from backend import db
 AUTHORS = ("student", "tutor", "system")
 # What an entry is, so a client can resume sensibly (e.g. a "step" entry with
 # its step number tells the chat the step's text is already on screen).
-KINDS = ("text", "brief", "step", "output", "result", "quiz", "answer", "note", "reset")
+KINDS = ("text", "brief", "step", "output", "result", "quiz", "answer", "note", "reset", "returned")
 _CONTENT_MAX = 60_000
 
 
