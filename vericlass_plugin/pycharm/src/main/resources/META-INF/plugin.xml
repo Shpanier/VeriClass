@@ -7,8 +7,10 @@
     <description><![CDATA[
         Student client for the <b>VeriClass</b> instructor-controlled LLM platform, embedded directly
         in PyCharm. Log in with your course code, read your personalized exercise briefing, and chat
-        with the locally-hosted tutor model without leaving the IDE. Comprehension probes from the
-        instructor appear inline.<br/><br/>
+        with the locally-hosted tutor model without leaving the IDE. Questions from the instructor
+        appear in the chat without locking it. Class-paced labs run step by step in the chat, with
+        each step's output taken from the VeriClass Terminal, and the conversation is kept, so it
+        carries on after the IDE restarts.<br/><br/>
         Behavior is chosen by the backend's <code>STUDENT_CLIENT_MODE</code> setting:
         <ul>
             <li><b>chat</b> — faithful chat experience: login, briefing, streaming chat, probes.</li>

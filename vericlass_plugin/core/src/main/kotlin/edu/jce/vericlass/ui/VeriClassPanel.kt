@@ -19,15 +19,19 @@ import edu.jce.vericlass.ide.CheckRunner
 import edu.jce.vericlass.ide.ExerciseScaffolder
 import edu.jce.vericlass.ide.RunReporter
 import edu.jce.vericlass.ide.SubmissionCollector
-import edu.jce.vericlass.probe.ProbePoller
+import edu.jce.vericlass.lab.ApiLabBackend
+import edu.jce.vericlass.lab.LabFlow
+import edu.jce.vericlass.lab.LabTexts
 import edu.jce.vericlass.settings.VeriClassSettings
 import edu.jce.vericlass.terminal.VeriClassSessionService
 import edu.jce.vericlass.trace.SessionTrace
 import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.util.concurrency.AppExecutorUtil
 import java.awt.BorderLayout
 import java.awt.FlowLayout
+import java.util.concurrent.TimeUnit
 import javax.swing.BorderFactory
 import javax.swing.JButton
 import javax.swing.JPanel
@@ -37,7 +41,7 @@ import javax.swing.Timer
  * Root of the VeriClass tool window. Owns the login → session flow: authenticate,
  * start (or resume) a session, load the variant's exercise, ask the backend
  * which behavior to run (chat vs. ide), then build the session UI and start the
- * probe poller.
+ * lab flow (questions, class-paced steps, the transcript; see [LabFlow]).
  */
 class VeriClassPanel(
     private val project: Project,
@@ -46,10 +50,10 @@ class VeriClassPanel(
 
     private val api = VeriClassApiClient()
     private val loginPanel = LoginPanel(::doLogin)
-    // Everything tied to one logged-in session (chat, probe poller, exam guard)
-    // is registered to this child disposable so a re-login tears the previous
-    // session down completely — otherwise a second login stacks a second
-    // forever-running ProbePoller and re-attaches exam window listeners.
+    // Everything tied to one logged-in session (chat, lab flow and its poll, exam
+    // guard) is registered to this child disposable so a re-login tears the
+    // previous session down completely — otherwise a second login stacks a second
+    // forever-running poll and re-attaches exam window listeners.
     private var sessionDisposable: Disposable? = null
 
     init {
@@ -194,28 +198,50 @@ class VeriClassPanel(
         val onPaste: (String, String) -> Unit = { target, text -> guard?.onPaste(target, text, null) }
 
         // One scrolling conversation: the exercise brief is the first message;
-        // students scroll up to read it again.
-        val steps = ChatPanel.StepState(exercise.steps_total, exercise.step_current)
+        // students scroll up to read it again. A class-paced lab's steps come
+        // from the lab flow, one at a time, not from "Done with step N" messages.
+        val paced = exercise.isClassPaced
+        val steps = if (paced) ChatPanel.StepState(0, 0) else ChatPanel.StepState(exercise.steps_total, exercise.step_current)
+        val texts = LabTexts.forBrief(exercise.brief_md)
         val chat = ChatPanel(
             api, login.token, session.session_id, sessionScope, trace,
             onPaste = { onPaste("chat", it) },
             steps = steps,
             attachments = { stepAttachment(exercise) },
+            texts = texts,
         )
-        chat.addMessage(ChatPanel.Role.EXERCISE, Briefing.markdown(exercise, session.variant))
-        nonEnglishPathNotice()?.let(chat::addNotice)
-        if (config.isIdeMode && exercise.variant != null) {
-            chat.addComponent(TestChecklistPanel(exercise.variant))
-        }
+        if (paced) chat.setPlaceholder(texts.placeholder())
         chat.setSuggestions(exercise.welcome_suggestions)
-        chat.scrollToTop()
         add(chat, BorderLayout.CENTER)
+
+        // The flow replays the session's conversation (or shows the brief), asks the
+        // teacher's and the quiz questions in the chat, and runs the lab's steps.
+        // One task at a time on its own thread, like the web chat's lock.
+        val flow = LabFlow(
+            ApiLabBackend(api, login.token, session.session_id, chat.clientId),
+            chat.labView, texts, paced, trace.terminalHistory,
+            AppExecutorUtil.createBoundedApplicationPoolExecutor("VeriClass lab", 1),
+            io = AppExecutorUtil.getAppExecutorService(),
+        )
+        chat.attach(flow) { _ ->
+            nonEnglishPathNotice()?.let(chat::addNotice)
+            if (config.isIdeMode && exercise.variant != null) {
+                chat.addComponent(TestChecklistPanel(exercise.variant))
+            }
+        }
+        // A step-by-step lab's brief ends with the step the student is on now: show it again after a replay.
+        flow.start(Briefing.markdown(exercise, session.variant), reshowBrief = !paced && exercise.steps_total > 0)
+        val interval = config.poll_interval_ms.toLong().coerceAtLeast(500)
+        val poll = AppExecutorUtil.getAppScheduledExecutorService()
+            .scheduleWithFixedDelay(flow::poll, interval, interval, TimeUnit.MILLISECONDS)
+        Disposer.register(sessionScope) {
+            poll.cancel(false)
+            flow.dispose()
+        }
 
         if (config.isIdeMode) {
             ExerciseScaffolder.scaffold(project, config.scaffold_filename, exercise)
         }
-
-        ProbePoller(api, session.session_id, login.token, config.poll_interval_ms.toLong(), sessionScope)
 
         // Start the VeriClass Terminal (bottom tool window) for this session; it
         // shuts down with the session (re-login, project close).

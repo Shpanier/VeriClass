@@ -87,8 +87,10 @@ At any time, the instructor opens *Ask Them* on a student card and either:
 - Clicks **Suggest** — the cloud LLM reads the student's recent transcript
   and proposes 2–3 probe questions targeted at apparent gaps.
 
-The student's chat is interrupted with the probe. Their answer is
-auto-graded 0–2 and saved. You can later override the auto-grade.
+The probe appears in the student's chat and stays open without locking it:
+the student answers when ready and can still ask the tutor or the instructor
+meanwhile. Their answer is auto-graded 0–2 and saved. You can later override
+the auto-grade.
 
 This is the assessment backbone: probes test whether the student
 *understands* what the AI helped them produce.
@@ -365,8 +367,8 @@ What the student sees:
    exercise YAML).
 4. They chat with the model until they're satisfied with their solution.
 5. At any moment, a probe may appear: *"Your instructor is asking you…"*.
-   They must type an answer before the chat continues; the auto-grade
-   appears immediately.
+   It stays open in the chat until they answer (they may ask something about
+   it first); the auto-grade appears immediately.
 
 Students cannot see other students' work, swap variants, or bypass probes.
 The chat is rate-limited via prompt-injection denylist phrases in
@@ -434,6 +436,9 @@ details in [`vericlass_plugin/README.md`](vericlass_plugin/README.md) →
 For a long step-by-step lab that students do in a **GitHub Codespace**, with the
 student chat (the Chainlit app) as the only chat they may use. The chat hands out
 the lab one step at a time; the lecturer keeps the whole class on the same step.
+The PyCharm plugin (0.5.0+) runs the same labs in its tool window, with the same
+rules: there *Done* opens a box already filled with what the VeriClass Terminal
+ran since the step appeared, which the student checks (or replaces) and sends.
 
 - **Steps open from the start** (`open_steps`, e.g. the setup part) go at each
   student's own pace, until the lecturer sets the course's marker in the

@@ -14,7 +14,10 @@ import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Raised for any non-2xx backend response, carrying a student-friendly message. */
-class VeriClassApiException(message: String) : RuntimeException(message)
+open class VeriClassApiException(message: String) : RuntimeException(message)
+
+/** The question was answered meanwhile (another window) or withdrawn by the teacher (HTTP 409). */
+class ProbeClosedException(message: String) : VeriClassApiException(message)
 
 // Sent on every request so ngrok-free serves the API directly instead of its
 // HTML "you are about to visit" interstitial (which would break JSON parsing).
@@ -22,10 +25,12 @@ class VeriClassApiException(message: String) : RuntimeException(message)
 private const val NGROK_HEADER = "ngrok-skip-browser-warning"
 // Set by the server on a tutor reply that may be asked again with a stronger model.
 private const val REASK_HEADER = "X-VeriClass-Reask"
+// Set by the server on a reply that waits for the teacher's review (up to 10 minutes).
+private const val REVIEW_HEADER = "X-VeriClass-Review"
 private val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(30)
 
 /**
- * Thin client over the six student-facing VeriClass endpoints. All calls are
+ * Thin client over the student-facing VeriClass endpoints. All calls are
  * blocking and MUST be invoked off the EDT (use a pooled thread). The base URL
  * is read fresh from settings on every call so changing it takes effect without
  * a restart.
@@ -118,6 +123,11 @@ class VeriClassApiClient {
      *
      * [attachment]: sent with a step submission ("Done with step N") for the
      * teacher: filename, source (the open file), console, check_output.
+     *
+     * [transcript]: this chat shows the session's transcript, so an answer the
+     * teacher sends after the wait ended still reaches the student there.
+     * [onReviewWait]: called once, before the first token, when the reply waits
+     * for the teacher's review.
      */
     fun ask(
         token: String,
@@ -126,6 +136,8 @@ class VeriClassApiClient {
         cancelled: AtomicBoolean,
         reask: Boolean = false,
         attachment: Map<String, String?>? = null,
+        transcript: Boolean = false,
+        onReviewWait: (() -> Unit)? = null,
         onToken: (String) -> Unit,
     ): String? {
         val body = buildMap<String, Any> {
@@ -141,7 +153,9 @@ class VeriClassApiClient {
             .header(NGROK_HEADER, "true")
             // This client renders Markdown (chat bubbles); older ones got plain text.
             .header("X-VeriClass-Render", "markdown")
-            .timeout(Duration.ofMinutes(10))
+            .apply { if (transcript) header("X-VeriClass-Transcript", "1") }
+            // Review mode holds the reply up to 10 minutes; the server then says so and ends it.
+            .timeout(Duration.ofMinutes(11))
             .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8))
             .build()
 
@@ -150,6 +164,7 @@ class VeriClassApiClient {
             val detail = resp.body().use { it.readBytes().toString(StandardCharsets.UTF_8) }
             throw VeriClassApiException(friendlyError(resp.statusCode(), detail))
         }
+        if (resp.headers().firstValue(REVIEW_HEADER).isPresent) onReviewWait?.invoke()
         // InputStreamReader buffers and decodes UTF-8 correctly across chunk
         // boundaries (important for Hebrew briefings / multibyte tokens).
         resp.body().use { stream ->
@@ -175,15 +190,69 @@ class VeriClassApiClient {
         return arr.toList()
     }
 
+    /** Throws [ProbeClosedException] when the question is no longer open. Slow: the answer is graded. */
     fun answerProbe(probeId: Int, answer: String, token: String): ProbeAnswerResponse {
         val resp = sendJson(
             "POST", "/api/probes/answer",
             body = mapOf("probe_id" to probeId, "answer" to answer),
             token = token,
+            timeout = Duration.ofSeconds(90),
         )
+        if (resp.statusCode() == 409) throw ProbeClosedException(detailOf(resp.body()) ?: "This question is closed")
         requireOk(resp, "Could not submit your answer")
         return gson.fromJson(resp.body(), ProbeAnswerResponse::class.java)
     }
+
+    /**
+     * Is [text] the answer to the question the chat asked and still waits for?
+     * Null when the server can't tell (an older one has no such call).
+     */
+    fun classifyAnswer(sessionId: String, text: String, token: String): ClassifyResponse? =
+        getOrNull(sendJson("POST", "/api/probes/classify",
+            body = mapOf("session_id" to sessionId, "text" to text), token = token))
+
+    // --- class-paced labs ---------------------------------------------------
+
+    /** Where the student is. Null when the exercise isn't class-paced or the server can't be read. */
+    fun stepState(sessionId: String, token: String): StepStateResponse? =
+        getOrNull(sendJson("GET", "/api/steps/state/" + encode(sessionId), body = null, token = token))
+
+    /** "Done with step [step]", with its output (empty when the step checks none). */
+    fun finishStep(sessionId: String, step: Int, output: String, token: String): FinishResponse? =
+        getOrNull(sendJson("POST", "/api/steps/finish",
+            body = mapOf("session_id" to sessionId, "step" to step, "output" to output), token = token))
+
+    /** Is a chat message the open step's output? (exercise.yaml output_in_chat) */
+    fun detectOutput(sessionId: String, text: String, token: String): DetectResponse? =
+        getOrNull(sendJson("POST", "/api/steps/detect",
+            body = mapOf("session_id" to sessionId, "text" to text), token = token))
+
+    // --- the session's transcript ---------------------------------------------
+
+    /**
+     * The session's transcript after entry [after]; [excludeClient]: leave out
+     * what that chat wrote. Null when it can't be read (or an older server).
+     */
+    fun transcript(sessionId: String, token: String, after: Int = 0, excludeClient: String? = null): TranscriptResponse? {
+        val query = "?after=$after" + (excludeClient?.let { "&exclude_client=" + encode(it) } ?: "")
+        return getOrNull(sendJson("GET", "/api/transcript/" + encode(sessionId) + query, body = null, token = token))
+    }
+
+    /** Append entries (author, kind, step, content) written by chat [client]. False on failure. */
+    fun recordTranscript(sessionId: String, token: String, client: String, entries: List<Map<String, Any?>>): Boolean =
+        try {
+            val resp = sendJson("POST", "/api/transcript/" + encode(sessionId),
+                body = mapOf("entries" to entries, "client" to client), token = token)
+            resp.statusCode() == 200
+        } catch (e: Exception) {
+            thisLogger().debug("transcript append failed", e)
+            false
+        }
+
+    /** The student's questions still with the teacher (for a chat that comes back). */
+    fun openReviews(sessionId: String, token: String): List<OpenReview> =
+        getOrNull<Array<OpenReview>>(sendJson("GET", "/api/reviews/open/" + encode(sessionId), body = null, token = token))
+            ?.toList() ?: emptyList()
 
     // --- submit work to teacher ------------------------------------------
 
@@ -276,6 +345,11 @@ class VeriClassApiClient {
         }
         return http.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
     }
+
+    /** The body as [T] on HTTP 200, else null (the caller treats the feature as absent). */
+    private inline fun <reified T> getOrNull(resp: HttpResponse<String>): T? =
+        if (resp.statusCode() != 200) null
+        else runCatching { gson.fromJson(resp.body(), T::class.java) }.getOrNull()
 
     private fun requireOk(resp: HttpResponse<String>, context: String) {
         if (resp.statusCode() !in 200..299) {

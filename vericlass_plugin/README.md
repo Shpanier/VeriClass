@@ -26,7 +26,7 @@ plugin fetches `GET /api/client-config` at login and obeys it.
 
 | `.env` value          | Behavior |
 |-----------------------|----------|
-| `STUDENT_CLIENT_MODE=chat` | **Faithful chat port.** Login → briefing bubble → streaming chat → welcome-suggestion chips → probe prompts + auto-grade. Mirrors Chainlit 1:1, just in a tool window. |
+| `STUDENT_CLIENT_MODE=chat` | **Faithful chat port.** Login → briefing bubble → streaming chat → welcome-suggestion chips → questions in the chat + auto-grade. Mirrors Chainlit 1:1, just in a tool window. |
 | `STUDENT_CLIENT_MODE=ide`  | **IDE-native.** Everything in `chat`, **plus** it scaffolds the student's assigned variant as a starter file (`SCAFFOLD_FILENAME`, default `mcalc.c`) into the open project and shows the variant's required test inputs as a checklist. |
 
 The starter language follows the `SCAFFOLD_FILENAME` extension — `.py` yields a
@@ -35,6 +35,34 @@ Python, CLion ⇒ C) when the name is ambiguous. So a Python cohort just sets
 `SCAFFOLD_FILENAME=mcalc.py`.
 
 If the backend is older and lacks the endpoint, the plugin falls back to `chat`.
+
+## Labs in the chat (0.5.0)
+
+The plugin follows the same rules as the web chat (`student_app/app.py`); the
+logic is in `lab/LabFlow.kt`, tested against a fake server in `LabFlowTest`.
+
+- **Questions don't lock anything.** A teacher's question or a quiz question
+  after a step appears in the chat (no modal dialog) and stays open. A message
+  is its answer or the student's own question: the server decides
+  (`answer_in_chat`), and when it isn't sure the student picks. "Done", or an
+  output that matches the open step's checks, still goes to the step.
+- **Class-paced labs** (`pacing: class`): one step at a time, with a *Done*
+  button (typing "done" / "סיימתי" works too). For a step that checks its
+  output, *Done* opens a box filled with what the **VeriClass Terminal** ran
+  since the step appeared (commands and output); the student checks it, edits
+  or replaces it, and sends. Output that doesn't match waits for the teacher,
+  who lets the student on or sends it back with a note; later steps appear when
+  the teacher opens them, and a reset shows the step again.
+- **Chat history.** Everything the chat shows is recorded in the session's
+  transcript; after a new login (or an IDE restart) the conversation is
+  replayed and carries on from the same step. An answer the teacher sends after
+  the 10-minute wait still arrives, and a question waiting for the teacher's
+  review doesn't keep the box busy. The web chat and the plugin share one
+  history per session.
+- The chat's own lines follow the lab's language (Hebrew when the brief is).
+
+Older servers: whatever a server lacks (the transcript, classify) is skipped,
+and an open question then always asks the student whether a message is its answer.
 
 ---
 
@@ -208,8 +236,10 @@ only gate. Published zips are stored under `PLUGIN_DIST_DIR` (default
 | Start/resume session | `POST /api/sessions` (Bearer) → `{session_id, variant, mode}` |
 | Load exercise | `GET /api/exercises/active?variant=…` |
 | Pick behavior | `GET /api/client-config` → `{mode, scaffold_filename, poll_interval_ms}` |
-| Chat | `POST /api/ask` (Bearer, streamed `text/plain`) |
-| Probes | `GET /api/probes/pending/{session}` every 2 s; `POST /api/probes/answer` |
+| Chat | `POST /api/ask` (Bearer, streamed `text/plain`; `X-VeriClass-Review` = waits for the teacher, the box stays usable) |
+| Questions (probes, quiz) | `GET /api/probes/pending/{session}` every 2 s, shown in the chat; `POST /api/probes/classify` (answer or the student's own question?); `POST /api/probes/answer` |
+| Class-paced labs | `GET /api/steps/state/{session}` every 2 s; `POST /api/steps/finish`; `POST /api/steps/detect` (a typed or pasted output) |
+| Chat history | `GET /api/transcript/{session}` (replay after login, then the server's notes and other windows' messages every 2 s); `POST` to record; `GET /api/reviews/open/{session}` |
 
 Streaming, review mode ("your teacher is reviewing…"), persona modes, variant
 assignment, and probe auto-grading all work exactly as with Chainlit — they live
@@ -230,7 +260,8 @@ vericlass_plugin/
       ui/         VeriClassToolWindowFactory.kt, VeriClassPanel.kt, LoginPanel.kt,
                   ChatPanel.kt, BriefingPanel.kt, TestChecklistPanel.kt,
                   ScrollableColumn.kt
-      probe/      ProbePoller.kt                     # 2 s poll + modal + grade
+      lab/        LabFlow.kt, LabBackend.kt, LabTexts.kt  # questions in the chat, class-paced
+                                                     # steps, the transcript (as student_app)
       exam/       ExamGuard.kt, ExamFullScreen.kt, …  # proctor (product-neutral)
       ide/        ExerciseScaffolder.kt, RunReporter.kt, SubmissionCollector.kt
       util/       Format.kt, MarkdownLite.kt

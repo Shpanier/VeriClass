@@ -102,11 +102,20 @@ object MarkdownLite {
 
     private val ORDERED = Regex("^\\d+[.)]\\s+(.*)$")
 
-    /** Inline: escape, then **bold** and `code`. */
+    /**
+     * Inline: escape, then **bold**, _italic_ and `code`. Italic only outside
+     * code and between non-word characters, so snake_case names stay as they are.
+     */
     private fun inline(raw: String): String {
         var s = Format.html(raw)
         s = Regex("\\*\\*(.+?)\\*\\*").replace(s) { "<b>${it.groupValues[1]}</b>" }
+        s = s.split('`').mapIndexed { i, part ->
+            if (i % 2 == 1) part else ITALIC.replace(part) { "<i>${it.groupValues[1]}</i>" }
+        }.joinToString("`")
         s = Regex("`([^`]+?)`").replace(s) { "<code>${it.groupValues[1]}</code>" }
         return s
     }
+
+    // (?U): Hebrew letters count as word characters too.
+    private val ITALIC = Regex("""(?U)(?<!\w)_([^_\s](?:[^_]*?[^_\s])?)_(?!\w)""")
 }

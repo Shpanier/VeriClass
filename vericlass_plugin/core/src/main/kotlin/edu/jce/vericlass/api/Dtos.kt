@@ -78,7 +78,11 @@ data class Exercise(
     val step_current: Int = 0,
     /** Run on a step submission and attached for the teacher, e.g. "python checks.py". */
     val check_command: String? = null,
-)
+    /** "class": a class-paced lab; the chat shows one step at a time from /api/steps/state. */
+    val pacing: String? = null,
+) {
+    val isClassPaced: Boolean get() = pacing == "class"
+}
 
 /** The exercise's terminal rules: which programs may run, and whether student scripts may. */
 data class TerminalPolicyDto(
@@ -88,14 +92,104 @@ data class TerminalPolicyDto(
     val blocked_hint: String? = null,
 )
 
+/** A question the chat asks the student: one the teacher sent, or a class-paced lab's quiz question. */
 data class Probe(
     val id: Int = 0,
     val body: String = "",
+    /** "quiz" for a question after a step; otherwise how the teacher wrote it. */
+    val source: String? = null,
+    /** A quiz question's step, by its label (e.g. "B6"). */
+    val quiz_step: String? = null,
 )
 
 data class ProbeAnswerResponse(
-    val auto_grade: Int = 0,
-    val why: String = "",
+    /** Null when grading was unavailable (the answer was still saved). */
+    val auto_grade: Int? = null,
+    val why: String? = null,
+)
+
+/**
+ * POST /api/probes/classify: is a message the open question's answer? kind:
+ * none (no question is open), step (the open step's output), answer, or maybe
+ * (ask the student).
+ */
+data class ClassifyResponse(
+    val kind: String = "none",
+    val probe: Probe? = null,
+)
+
+// --- class-paced labs (backend/pacing.py) -----------------------------------------
+
+/** GET /api/steps/state: where the student is in a class-paced lab. */
+data class StepStateResponse(
+    val total: Int = 0,
+    val current: Int = 0,
+    val current_label: String? = null,
+    val released: Int = 0,
+    val finished: Boolean = false,
+    val quiz_pending: Int = 0,
+    /** Finished every open step: the teacher opens the next one. */
+    val waiting_teacher: Boolean = false,
+    val open: Boolean = false,
+    /** Their last output didn't match; it waits for the teacher. */
+    val waiting_review: Boolean = false,
+    /** The open step (when [open]). */
+    val step: OpenStep? = null,
+)
+
+data class OpenStep(
+    val n: Int = 0,
+    val label: String = "",
+    val title: String = "",
+    val markdown: String = "",
+    /** The step checks a pasted output (else "Done" needs no text). */
+    val needs_output: Boolean = false,
+)
+
+/** POST /api/steps/finish. status: done, missing, wrong_step, not_open, quiz_pending, finished. */
+data class FinishResponse(
+    val status: String = "",
+    val ok: Boolean? = null,
+    /** Quiz questions asked now, after the step. */
+    val quiz: Int? = null,
+    val state: StepStateResponse? = null,
+)
+
+/** POST /api/steps/detect: is a chat message the open step's answer? kind: output, maybe, question. */
+data class DetectResponse(
+    val kind: String = "question",
+    val step: Int = 0,
+    val label: String = "",
+    val needs_output: Boolean = true,
+)
+
+// --- the session's transcript (backend/transcript.py) --------------------------------
+
+data class TranscriptEntry(
+    val id: Int = 0,
+    /** student | tutor | system */
+    val author: String = "tutor",
+    /** text, brief, step, output, result, quiz, answer, note, reset, returned */
+    val kind: String = "text",
+    val step: Int? = null,
+    val content: String = "",
+    /** client (a student's chat wrote it) | server (the server's own note) */
+    val origin: String = "client",
+)
+
+data class TranscriptResponse(
+    /** False when the exercise keeps no transcript (exercise.yaml chat_history: false). */
+    val enabled: Boolean = false,
+    val entries: List<TranscriptEntry> = emptyList(),
+    /** Older entries were left out (CHAT_HISTORY_REPLAY_MAX). */
+    val truncated: Boolean = false,
+    val last_id: Int = 0,
+)
+
+/** GET /api/reviews/open: a question of the student's still with the teacher. */
+data class OpenReview(
+    val id: Int = 0,
+    val question: String = "",
 )
 
 /** Returned by POST /api/submissions when the student sends work to the teacher. */

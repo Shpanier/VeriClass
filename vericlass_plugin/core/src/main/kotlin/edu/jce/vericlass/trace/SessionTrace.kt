@@ -5,6 +5,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.util.Disposer
 import edu.jce.vericlass.api.VeriClassApiClient
+import edu.jce.vericlass.terminal.TerminalHistory
 import edu.jce.vericlass.terminal.TerminalRecord
 import java.io.File
 import java.io.Writer
@@ -51,7 +52,11 @@ class SessionTrace(
     /** Reports not yet accepted by the backend. */
     val pending: Int get() = outbox.pending
 
+    /** What the VeriClass terminal ran in this session (a class-paced lab's "Done" box starts from it). */
+    val terminalHistory = TerminalHistory()
+
     fun terminal(rec: TerminalRecord) {
+        terminalHistory.add(rec)
         val id = newId()
         val at = Instant.now()
         val output = rec.output.orEmpty()
