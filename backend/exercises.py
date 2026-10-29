@@ -29,7 +29,8 @@ _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 # Optional exercise fields kept in the DB row's `data` JSON, and kept on an edit
 # that doesn't send them (the dashboard form has no input for some).
 _EXTRA_KEYS = ("scaffold_filename", "course_name", "language", "tutor_notes", "steps", "terminal",
-               "check_command", "faq", "pacing", "open_steps", "workspace")
+               "check_command", "faq", "pacing", "open_steps", "workspace",
+               "chat_history", "resume_minutes", "output_in_chat")
 
 
 _DIRECTORY: Optional[Path] = None
@@ -409,6 +410,22 @@ def _validate(data: dict[str, Any], where: str) -> None:
     workspace = data.get("workspace")
     if workspace is not None and workspace not in ("codespace", "ide"):
         raise ValueError(f"{where}: workspace must be 'codespace' or 'ide'")
+    ch = data.get("chat_history")
+    if ch is not None and not isinstance(ch, bool):
+        raise ValueError(f"{where}: chat_history must be true or false")
+    oic = data.get("output_in_chat")
+    if oic is not None and oic not in ("accept", "ask", "off"):
+        raise ValueError(f"{where}: output_in_chat must be 'accept', 'ask' or 'off'")
+    rm = data.get("resume_minutes")
+    if rm is not None and (not isinstance(rm, int) or isinstance(rm, bool) or rm < 0):
+        raise ValueError(f"{where}: resume_minutes must be a number of minutes (0 = always resume)")
+    for i, st in enumerate(data.get("steps") or [], 1):
+        for rule in (st.get("expect_output") or []) if isinstance(st, dict) else []:
+            pattern = rule.get("match") if isinstance(rule, dict) else rule
+            try:
+                re.compile(str(pattern or ""))
+            except re.error as e:
+                raise ValueError(f"{where}: step {i}: output check {pattern!r} is broken ({e})")
 
     cc = data.get("check_command")
     if cc is not None and (not isinstance(cc, str) or not cc.strip()):

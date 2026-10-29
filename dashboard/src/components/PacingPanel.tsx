@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { PacingCourse, PacingOverview, PacingQuizItem } from "../types";
+import type { PacingCourse, PacingOverview, PacingQuizItem, PacingStep } from "../types";
 import { useLang } from "../i18n";
 
 /** Class-paced labs (pacing: class): how far the class got, the button that
@@ -96,23 +96,32 @@ export function PacingPanel({ exerciseId }: { exerciseId: string }) {
             {t("pacingOpenNext", { label: label(rel + 1) })}
           </button>
         )}
-        {rel < view.total - 1 && (
-          <select
-            disabled={busy}
-            value=""
-            onChange={(e) => e.target.value && release(Number(e.target.value))}
-            style={{ padding: "6px 8px", borderRadius: 4, border: "1px solid #d1d5db" }}
-          >
-            <option value="">{t("pacingOpenUpTo")}</option>
-            {view.steps.filter((s) => s.n > rel + 1).map((s) => (
-              <option key={s.n} value={s.n}>{s.label} · {s.title}</option>
-            ))}
-          </select>
-        )}
-        {rel > view.open_steps && (
+        {/* Any step, the ones open from the start included: "up to A5" stops everyone after A5. */}
+        <select
+          disabled={busy}
+          value=""
+          onChange={(e) => e.target.value !== "" && release(Number(e.target.value))}
+          style={{ padding: "6px 8px", borderRadius: 4, border: "1px solid #d1d5db" }}
+        >
+          <option value="">{t("pacingOpenUpTo")}</option>
+          {rel > 0 && <option value="0">{t("pacingCloseAll")}</option>}
+          {view.steps.filter((s) => s.n !== rel).map((s) => (
+            <option key={s.n} value={s.n}>{s.n < rel ? "◀ " : "▶ "}{s.label} · {s.title}</option>
+          ))}
+        </select>
+        {rel > 0 && (
           <button disabled={busy} onClick={() => release(rel - 1)} style={btn(false)}>
             {t("pacingCloseLast", { label: label(rel) })}
           </button>
+        )}
+        {course.students.length > 0 && (
+          <ResetPicker
+            steps={view.steps}
+            upTo={Math.min(view.total, Math.max(...course.students.map((s) => s.current)))}
+            prompt={t("pacingResetAll")}
+            who={t("pacingResetEveryone")}
+            onReset={async (n) => { await api.resetCourse(exerciseId, course.course_id, n); await load(); }}
+          />
         )}
       </div>
 
@@ -143,15 +152,134 @@ export function PacingPanel({ exerciseId }: { exerciseId: string }) {
         })}
       </div>
 
-      <Students course={course} total={view.total} />
+      <Review exerciseId={exerciseId} course={course} steps={view.steps} onChange={load} />
+      <Students course={course} total={view.total} steps={view.steps} onChange={load} />
       <Quiz exerciseId={exerciseId} items={view.quiz} course={course} pending={pendingQuiz} onChange={load} />
     </section>
   );
 }
 
-/** Each student's step, the furthest behind first, with the steps they finished
- *  although their output lacked something. */
-function Students({ course, total }: { course: PacingCourse; total: number }) {
+/** "Back to step…": pick a step (1 = the beginning), then confirm. */
+function ResetPicker({ steps, upTo, prompt, who, small, onReset }: {
+  steps: PacingStep[]; upTo: number; prompt: string; who: string; small?: boolean;
+  onReset: (n: number) => Promise<void>;
+}) {
+  const { t } = useLang();
+  const [n, setN] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const options = steps.filter((s) => s.n <= upTo);
+  const go = async () => {
+    if (n == null) return;
+    setBusy(true);
+    try {
+      await onReset(n);
+      setN(null);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const fs = small ? 11 : 13;
+  if (n == null) {
+    return (
+      <select value="" onChange={(e) => e.target.value && setN(Number(e.target.value))} title={t("pacingResetHint")}
+              style={{ padding: small ? "1px 4px" : "6px 8px", borderRadius: 4, border: "1px solid #d1d5db", fontSize: fs }}>
+        <option value="">{prompt}</option>
+        {options.map((s) => <option key={s.n} value={s.n}>{s.label} · {s.title}</option>)}
+      </select>
+    );
+  }
+  const label = steps[n - 1]?.label ?? String(n);
+  return (
+    <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: fs,
+                   background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 4, padding: "2px 6px" }}>
+      {t("pacingResetConfirm", { who, label })}
+      <button disabled={busy} onClick={go} style={{ border: "none", borderRadius: 4, background: "#b91c1c", color: "white",
+                                                    fontWeight: 600, padding: "2px 8px", cursor: busy ? "wait" : "pointer", fontSize: fs }}>
+        {t("pacingResetYes")}
+      </button>
+      <button disabled={busy} onClick={() => setN(null)} style={{ border: "1px solid #d1d5db", borderRadius: 4, background: "white",
+                                                                 padding: "2px 8px", cursor: "pointer", fontSize: fs }}>
+        {t("pacingCancel")}
+      </button>
+    </span>
+  );
+}
+
+const mono: React.CSSProperties = {
+  fontFamily: "ui-monospace, Menlo, Consolas, monospace", fontSize: 11, whiteSpace: "pre-wrap",
+  background: "#f8fafc", padding: 6, borderRadius: 4, maxHeight: 260, overflow: "auto", margin: "4px 0 0",
+};
+
+/** Outputs that didn't match their step's checks: the student's paste next to
+ *  the expected output, and the button that lets the student continue. */
+function Review({ exerciseId, course, steps, onChange }: {
+  exerciseId: string; course: PacingCourse; steps: PacingStep[]; onChange: () => void;
+}) {
+  const { t } = useLang();
+  const [busy, setBusy] = useState<string | null>(null);
+  const items = course.students.flatMap((s) => s.waiting.map((w) => ({ s, w })));
+  if (items.length === 0) return null;
+
+  const letThrough = async (sessionId: string, step: number) => {
+    setBusy(sessionId);
+    try {
+      await api.letThrough(exerciseId, sessionId, step);
+      onChange();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 14, border: "1px solid #f59e0b", borderRadius: 8, background: "#fffbeb", padding: 10 }}>
+      <div style={{ fontWeight: 700, fontSize: 14 }}>⏳ {t("pacingReview")} ({items.length})</div>
+      <div style={{ color: "#6b7280", fontSize: 12, margin: "2px 0 8px" }}>{t("pacingReviewHint")}</div>
+      {items.map(({ s, w }) => {
+        const step = steps[w.step - 1];
+        return (
+          <div key={s.session_id} style={{ background: "white", border: "1px solid #e5e7eb", borderRadius: 6, padding: 8, marginBottom: 8 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <strong>{s.username}</strong>
+              <span style={{ color: "#1d4ed8", fontWeight: 600 }}>{w.label}{step ? ` · ${step.title}` : ""}</span>
+              <span style={{ flex: 1 }} />
+              <button disabled={busy === s.session_id} onClick={() => letThrough(s.session_id, w.step)} style={{
+                padding: "4px 12px", border: "none", borderRadius: 4, background: "#15803d", color: "white",
+                fontWeight: 600, cursor: busy === s.session_id ? "wait" : "pointer",
+              }}>
+                {t("pacingLetThrough")}
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8, marginTop: 6 }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{t("pacingTheirOutput")}</div>
+                <pre dir="ltr" style={mono}>{w.output || "—"}</pre>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{t("pacingExpected")}</div>
+                <pre dir="ltr" style={{ ...mono, background: "#ecfdf5" }}>{step?.expected_output || step?.expected || t("pacingNoExpected")}</pre>
+              </div>
+            </div>
+            {w.missing.length > 0 && (
+              <div style={{ fontSize: 12, color: "#b45309", marginTop: 4 }} dir="auto">
+                {t("pacingMissing")}: {w.missing.join(" · ")}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Each student's step, the furthest behind first, with the steps the teacher
+ *  let them past although their output didn't match. */
+function Students({ course, total, steps, onChange }: {
+  course: PacingCourse; total: number; steps: PacingStep[]; onChange: () => void;
+}) {
   const { t } = useLang();
   const rows = [...course.students].sort((a, b) => a.current - b.current || a.username.localeCompare(b.username));
   const quizzing = rows.filter((s) => s.quiz_pending > 0).length;
@@ -172,17 +300,26 @@ function Students({ course, total }: { course: PacingCourse; total: number }) {
                 <span style={{ color: s.current > total ? "#15803d" : "#1d4ed8", fontWeight: 600 }}>
                   {s.current > total ? t("pacingDone") : t("pacingOnStep", { label: s.current_label ?? "" })}
                 </span>
+                {s.waiting.length > 0 && <span title={t("pacingReview")}>⏳</span>}
                 {s.quiz_pending > 0 && <span title={t("pacingQuiz")}>❓</span>}
+                <span style={{ flex: 1 }} />
+                {s.current > 1 && (
+                  <ResetPicker
+                    steps={steps}
+                    upTo={Math.min(total, s.current)}
+                    prompt={t("pacingReset")}
+                    who={s.username}
+                    small
+                    onReset={async (n) => { await api.resetSession(s.session_id, n); onChange(); }}
+                  />
+                )}
               </div>
               {s.flags.map((f) => (
                 <details key={f.step} style={{ marginTop: 4 }}>
                   <summary style={{ cursor: "pointer", color: "#b45309", fontSize: 12 }}>
                     {t("pacingFlag", { label: f.label })} {f.missing.join(", ")}
                   </summary>
-                  <pre dir="ltr" style={{
-                    fontFamily: "ui-monospace, Menlo, Consolas, monospace", fontSize: 11, whiteSpace: "pre-wrap",
-                    background: "#f8fafc", padding: 6, borderRadius: 4, maxHeight: 200, overflow: "auto", margin: "4px 0 0",
-                  }}>{f.output}</pre>
+                  <pre dir="ltr" style={mono}>{f.output}</pre>
                 </details>
               ))}
             </div>

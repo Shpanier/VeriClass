@@ -52,6 +52,34 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
   const [cardLang, setCardLang] = useState<Record<number, Lang>>({});
   // Per-card level shown in the question-bank box.
   const [bankLevel, setBankLevel] = useState<Record<number, AnswerLevel>>({});
+  // Deleting: tell the student (per card, default yes), and the "delete stale" confirmation.
+  const [notify, setNotify] = useState<Record<number, boolean>>({});
+  const [confirmStale, setConfirmStale] = useState(false);
+  const stale = allPending.filter((r) => !r.waiting).length;
+
+  const remove = async (r: PendingReview) => {
+    setBusyId(r.id);
+    try {
+      await api.deleteReview(r.id, notify[r.id] ?? !r.looks_like_noise);
+      setPending((p) => p.filter((x) => x.id !== r.id));
+      clearEdits(r.id);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const removeStale = async () => {
+    try {
+      await api.deleteStaleReviews(false);
+      setPending((p) => p.filter((x) => x.waiting));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setConfirmStale(false);
+    }
+  };
 
   const editKey = (id: number, level: AnswerLevel | "bank", l: Lang) => `${id}:${level}:${l}`;
   const langOf = (r: PendingReview): Lang => cardLang[r.id] ?? r.suggested_lang ?? lang;
@@ -149,6 +177,29 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
               {t("otherExercisesWaiting", { n: elsewhere })}
             </div>
           )}
+          {stale > 0 && (
+            <div style={{ marginBottom: 8, fontSize: 13 }}>
+              {confirmStale ? (
+                <span style={{ display: "inline-flex", gap: 8, alignItems: "center", background: "#fef2f2",
+                               border: "1px solid #fca5a5", borderRadius: 4, padding: "3px 8px" }}>
+                  {t("reviewDeleteStaleConfirm", { n: stale })}
+                  <button onClick={removeStale} style={{ border: "none", borderRadius: 4, background: "#b91c1c",
+                                                         color: "white", fontWeight: 600, padding: "2px 8px", cursor: "pointer" }}>
+                    {t("reviewYes")}
+                  </button>
+                  <button onClick={() => setConfirmStale(false)} style={{ border: "1px solid #d1d5db", borderRadius: 4,
+                                                                         background: "white", padding: "2px 8px", cursor: "pointer" }}>
+                    {t("reviewCancel")}
+                  </button>
+                </span>
+              ) : (
+                <button onClick={() => setConfirmStale(true)} style={{ border: "1px solid #d1d5db", borderRadius: 4,
+                                                                      background: "white", padding: "3px 10px", cursor: "pointer" }}>
+                  {t("reviewDeleteStale", { n: stale })}
+                </button>
+              )}
+            </div>
+          )}
           {pending.length === 0 ? (
             <div style={{ color: "#6b7280", fontStyle: "italic" }}>
               {t("noQuestions")}
@@ -176,7 +227,18 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
                 }}>
                   <div style={{ minWidth: 0, flex: "1 1 320px" }}>
                     <strong>{r.username}</strong>{" "}
-                    <span style={{ color: "#6b7280", fontSize: 12 }}>· {r.created_at}</span>
+                    <span style={{ color: "#6b7280", fontSize: 12 }}>· {r.created_at}</span>{" "}
+                    <span title={r.waiting ? undefined : t("reviewNotWaiting")} style={{
+                      fontSize: 12, fontWeight: 600, color: r.waiting ? "#15803d" : "#6b7280",
+                    }}>
+                      · {r.waiting ? t("reviewWaitingNow") : t("reviewNotWaiting").split(":")[0]}
+                    </span>
+                    {r.looks_like_noise && (
+                      <span style={{ marginInlineStart: 6, fontSize: 11, fontWeight: 700, color: "#b91c1c",
+                                     background: "#fee2e2", borderRadius: 4, padding: "1px 6px" }}>
+                        {t("reviewNoise")}
+                      </span>
+                    )}
                     {r.model && (
                       <span style={{ color: "#6b7280", fontSize: 12 }}>
                         {" "}· {t("draftedBy", { m: modelLabel(r.model) })}
@@ -218,6 +280,20 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
                         {opt === "en" ? "EN" : "עב"}
                       </button>
                     ))}
+                    {/* Delete: sent by mistake, or no longer relevant. */}
+                    <span style={{ display: "inline-flex", gap: 4, alignItems: "center", marginInlineStart: 6 }}>
+                      <button disabled={busy} onClick={() => remove(r)} style={{
+                        padding: "3px 8px", borderRadius: 4, fontSize: 12, cursor: busy ? "wait" : "pointer",
+                        border: "1px solid #fca5a5", background: "#fef2f2", color: "#b91c1c", fontWeight: 600,
+                      }}>
+                        {t("reviewDelete")}
+                      </button>
+                      <label style={{ fontSize: 11, color: "#6b7280", display: "inline-flex", gap: 3, alignItems: "center" }}>
+                        <input type="checkbox" checked={notify[r.id] ?? !r.looks_like_noise}
+                               onChange={(e) => setNotify((m) => ({ ...m, [r.id]: e.target.checked }))} />
+                        {t("reviewDeleteNotify")}
+                      </label>
+                    </span>
                   </div>
                 </div>
 

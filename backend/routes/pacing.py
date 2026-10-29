@@ -1,6 +1,7 @@
 """Class-paced labs (backend/pacing.py). Students: where they are, and "done
 with this step" with the pasted output. Teacher: the class's progress, opening
-steps for a course, and approving the quiz questions."""
+steps for a course, letting a student past a step, and approving the quiz
+questions."""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -33,14 +34,24 @@ class FinishRequest(BaseModel):
     session_id: str
     step: int
     output: str = ""
-    # Continue although the output lacks something (the teacher sees it).
-    force: bool = False
 
 
 @router.post("/steps/finish")
 def finish_step(req: FinishRequest, user: dict = Depends(deps.current_user)):
     s = deps.require_owns_session(req.session_id, user)
-    return pacing.finish(s, _paced(s["exercise"]), req.step, req.output, req.force)
+    return pacing.finish(s, _paced(s["exercise"]), req.step, req.output)
+
+
+class DetectRequest(BaseModel):
+    session_id: str
+    text: str
+
+
+@router.post("/steps/detect")
+def detect_output(req: DetectRequest, user: dict = Depends(deps.current_user)):
+    """Is a chat message the current step's pasted output? (exercise.yaml output_in_chat)"""
+    s = deps.require_owns_session(req.session_id, user)
+    return pacing.detect_output(s, _paced(s["exercise"]), req.text)
 
 
 # --- the teacher ---------------------------------------------------------------------------
@@ -59,6 +70,20 @@ class ReleaseRequest(BaseModel):
 def release(exercise_id: str, req: ReleaseRequest, teacher: dict = Depends(deps.require_teacher)):
     ex = _paced(exercise_id)
     return {"released": pacing.set_released(ex, req.course_id, req.released)}
+
+
+class LetThroughRequest(BaseModel):
+    session_id: str
+    step: int
+
+
+@router.post("/pacing/{exercise_id}/let-through")
+def let_through(exercise_id: str, req: LetThroughRequest, teacher: dict = Depends(deps.require_teacher)):
+    """Let a student continue although their output for the step didn't match."""
+    ex = _paced(exercise_id)
+    if not pacing.let_through(ex, req.session_id, req.step):
+        raise HTTPException(409, "Nothing of this student waits at that step.")
+    return {"ok": True}
 
 
 class QuizRequest(BaseModel):

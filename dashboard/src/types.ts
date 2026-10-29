@@ -221,13 +221,23 @@ export interface ExerciseSummary {
   folder?: string | null;
 }
 
-// One step of a step-by-step lab, as the teacher edits it (expected/questions are teacher-only).
+/** A check a pasted output must pass: a regular expression, searched line by line. */
+export interface OutputCheck {
+  match: string;
+  hint?: string | null;
+}
+
+// One step of a step-by-step lab, as the teacher edits it (all but title/text/minutes are teacher-only).
 export interface StepDraft {
   title: string;
   text: string;
   minutes?: number | null;
   expected?: string | null;
   questions?: number | null;
+  /** What the step's commands print; the teacher compares pasted outputs with it. */
+  expected_output?: string | null;
+  /** Checks a pasted output must pass to move the student on (class-paced labs). */
+  expect_output?: OutputCheck[] | null;
 }
 
 // POST /api/exercises/import or /install: a package checked (and installed if ok).
@@ -258,6 +268,14 @@ export interface FullExercise {
   language?: string | null;
   course_name?: string | null;
   check_command?: string | null;
+  /** Keep the chat's transcript and replay it after a new login (default true). */
+  chat_history?: boolean;
+  /** How recent a session must be to be resumed; 0 = always (the effective value). */
+  resume_minutes?: number;
+  /** resume_minutes is set in the exercise (not the default). */
+  resume_minutes_set?: boolean;
+  /** A step's output pasted as a chat message: accept it, ask the student, or ignore. */
+  output_in_chat?: "accept" | "ask" | "off";
   steps?: StepDraft[];
   /** No variants: every student gets the same exercise. */
   implicit_variant?: boolean;
@@ -286,6 +304,9 @@ export interface NewExercise {
   language?: string;
   course_name?: string;
   check_command?: string;
+  chat_history?: boolean;
+  resume_minutes?: number;
+  output_in_chat?: "accept" | "ask" | "off";
   steps?: StepDraft[];
 }
 
@@ -368,6 +389,10 @@ export interface PendingReview {
   /** The language the student wrote in: the card opens on it. */
   suggested_lang: Lang;
   bank_match: BankMatch | null;
+  /** The student's request is still open for it; otherwise an answer reaches them later. */
+  waiting: boolean;
+  /** Most likely sent by mistake (empty, a few characters, no letters). */
+  looks_like_noise: boolean;
 }
 
 // Class-paced labs (GET /api/pacing/{exercise_id}).
@@ -378,6 +403,10 @@ export interface PacingStep {
   minutes?: number | null;
   /** The step checks the pasted output. */
   checked: boolean;
+  /** teacher.yaml: the answer in words, what the commands print, and what each check looks for. */
+  expected: string;
+  expected_output: string;
+  hints: string[];
   quiz: number;
   quiz_approved: number;
 }
@@ -401,6 +430,9 @@ export interface PacingStudent {
   current_label: string | null;
   last_active_at: string;
   quiz_pending: number;
+  /** Their output for the current step didn't match: it waits for the teacher. */
+  waiting: { step: number; label: string; missing: string[]; output: string; created_at: string }[];
+  /** Steps the teacher let them past although the output didn't match. */
   flags: { step: number; label: string; missing: string[]; output: string }[];
   quiz: { key: string; step: number; body: string; answer: string | null; status: string; grade: number | null }[];
 }

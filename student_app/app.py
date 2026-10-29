@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+import uuid
 
 import chainlit as cl
 import httpx
@@ -51,13 +52,160 @@ if AUTH_PAGE:
         return cl.User(identifier=username.strip().lower(), metadata={"login": r.json()})
 
 
-async def _prompt(text: str, timeout: int = 600) -> str:
+async def _prompt(text: str, timeout: int = 600, kind: str = "", step: int = None) -> str:
+    """Ask the student and wait for the answer. With `kind` (e.g. "output",
+    "answer"), the question and the answer go into the transcript; login
+    prompts pass none, so a password is never recorded."""
     res = await cl.AskUserMessage(content=text, timeout=timeout).send()
     # After the answer Chainlit marks a task as running again, for the message
     # handler that asked to end. An action (an HTTP call) or the poller never
     # does, and the chat would stay busy with every button disabled.
     await cl.context.emitter.task_end()
-    return (res or {}).get("output", "").strip()
+    answer = (res or {}).get("output", "").strip()
+    if kind:
+        await _record({"author": "tutor", "kind": "quiz" if kind == "answer" else "text",
+                       "step": step, "content": text},
+                      *([{"author": "student", "kind": kind, "step": step, "content": answer}] if answer else []))
+    return answer
+
+
+# --- the transcript (backend/transcript.py) ----------------------------------------
+# Everything this chat shows after login, and everything the student writes,
+# is appended to the session's transcript on the server, tagged with this
+# chat's id. A new login replays it and carries on from the same place. While
+# the chat is open it shows what it didn't write itself: the server's notes
+# (the teacher sent the student back, deleted a question, answered one the
+# student no longer waited for) and what another open chat of the same session
+# wrote (a second tab, or the chat before a reload).
+
+async def _record(*entries: dict) -> None:
+    """Append entries to the transcript; a failure only costs the replay."""
+    sid = cl.user_session.get("session_id")
+    if not sid or not cl.user_session.get("history") or not entries:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(f"{BACKEND}/api/transcript/{sid}", headers=_auth(),
+                                  json={"entries": list(entries), "client": _client_id()})
+        if r.status_code != 200:
+            log.warning("transcript: HTTP %s %s", r.status_code, r.text[:200])
+    except httpx.HTTPError as e:
+        log.warning("transcript failed: %s", e)
+
+
+async def _say(content: str, kind: str = "text", step: int = None, actions=None, record: bool = True):
+    """Show a message (and record it). Every message after login goes through here."""
+    msg = cl.Message(content=content, actions=actions or [])
+    await msg.send()
+    if record:
+        await _record({"author": "tutor", "kind": kind, "step": step, "content": content})
+    return msg
+
+
+def _client_id() -> str:
+    """This open chat's id (one per browser tab and login)."""
+    cid = cl.user_session.get("client_id")
+    if not cid:
+        cid = uuid.uuid4().hex
+        cl.user_session.set("client_id", cid)
+    return cid
+
+
+async def _transcript(after: int = 0, others_only: bool = False):
+    """GET the transcript (entries after id `after`; others_only: not what this
+    chat wrote). None when it can't be read."""
+    params = {"after": after, **({"exclude_client": _client_id()} if others_only else {})}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{BACKEND}/api/transcript/{cl.user_session.get('session_id')}",
+                                 headers=_auth(), params=params)
+        if r.status_code == 200:
+            return r.json()
+        log.warning("transcript read: HTTP %s", r.status_code)
+    except httpx.HTTPError as e:
+        log.warning("transcript read failed: %s", e)
+    return None
+
+
+async def _replay() -> list[dict]:
+    """Show the session's earlier conversation. Returns its entries ([] = a new session)."""
+    t = await _transcript()
+    if not t or not t.get("enabled"):
+        cl.user_session.set("history", bool(t and t.get("enabled")))
+        return []
+    cl.user_session.set("history", True)
+    cl.user_session.set("seen", t.get("last_id") or 0)
+    entries = t.get("entries") or []
+    if not entries:
+        return []
+    if t.get("truncated"):
+        await cl.Message(content="_…הודעות ישנות יותר לא מוצגות._").send()
+    for e in entries:
+        if e["author"] == "student":
+            await cl.Message(content=e["content"], author="student", type="user_message").send()
+        else:
+            await cl.Message(content=e["content"]).send()
+    await cl.Message(content="↩️ **חזרתם למפגש.** כל מה שהיה עד עכשיו מופיע למעלה, וממשיכים מאותו מקום.").send()
+    return entries
+
+
+async def _sync_others() -> None:
+    """Show what this chat didn't write: the server's notes and another open
+    chat's messages. Call with the lock."""
+    if not cl.user_session.get("history"):
+        return
+    t = await _transcript(after=cl.user_session.get("seen") or 0, others_only=True)
+    for e in (t or {}).get("entries") or []:
+        cl.user_session.set("seen", e["id"])
+        if e["author"] == "student":
+            await cl.Message(content=e["content"], author="student", type="user_message").send()
+        else:
+            await cl.Message(content=e["content"]).send()
+        if e["kind"] == "reset":
+            _forget_shown()
+            cl.user_session.set("reset_shown", True)
+
+
+async def _open_questions() -> None:
+    """After a new login: the questions still with the teacher."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{BACKEND}/api/reviews/open/{cl.user_session.get('session_id')}",
+                                 headers=_auth())
+        open_q = r.json() if r.status_code == 200 else []
+    except httpx.HTTPError as e:
+        log.warning("open questions failed: %s", e)
+        return
+    if open_q:
+        lines = "\n".join(f"- «{' '.join(q['question'].split())[:120]}»" for q in open_q)
+        await _say(f"⏳ **עדיין אצל המרצה:**\n{lines}\n\nהתשובה תופיע כאן כשהמרצה יענה.", record=False)
+
+
+def _forget_shown() -> None:
+    """After a reset: show the step the student is on again, as if new."""
+    for key in ("shown_step", "waiting_for", "in_review"):
+        cl.user_session.set(key, None)
+    cl.user_session.set("finished_note", False)
+
+
+def _resume_marks(entries: list[dict], st: dict) -> None:
+    """What the replayed conversation already shows, since the last reset: the
+    current step's text, the note that the student waits for the teacher, the
+    end of the lab. So a new login doesn't repeat them."""
+    since = entries
+    for i, e in enumerate(entries):
+        if e["kind"] == "reset":
+            since = entries[i + 1:]
+    cur = st["current"]
+    if st.get("open") and any(e["kind"] == "step" and e["step"] == cur for e in since):
+        cl.user_session.set("shown_step", cur)
+        cl.user_session.set("resume_button", True)
+    if st.get("waiting_teacher") and any(e["kind"] == "note" and e["step"] == cur for e in since):
+        cl.user_session.set("waiting_for", cur)
+    if st.get("finished") and any(e["kind"] == "note" and e["step"] == st["total"] + 1 for e in since):
+        cl.user_session.set("finished_note", True)
+    if st.get("waiting_review"):
+        cl.user_session.set("in_review", cur)
 
 
 async def _chat_login():
@@ -173,9 +321,20 @@ async def on_chat_start():
     # One thing at a time: the poller and the "done" button both ask questions.
     cl.user_session.set("lock", asyncio.Lock())
 
-    await _send_briefing(exercise, sess["variant"], sess["mode"], paced)
-    if paced:
-        async with cl.user_session.get("lock"):
+    async with cl.user_session.get("lock"):
+        history = await _replay()
+        if not history:
+            await _send_briefing(exercise, sess["variant"], sess["mode"], paced)
+        else:
+            await _open_questions()
+        if paced:
+            st = await _get_state()
+            if st and history:
+                _resume_marks(history, st)
+            cl.user_session.set("last_current", st["current"] if st else None)
+            if cl.user_session.get("resume_button") and st and st.get("open"):
+                cl.user_session.set("resume_button", False)
+                await _send_finish_button(st["step"])
             await _show_state()
     # Track the poll task so we can cancel it when the chat session ends —
     # otherwise a page refresh leaks a second forever-running poller that
@@ -246,22 +405,60 @@ async def _send_briefing(exercise: dict, variant_id: str, mode: str, paced: bool
         cl.Action(name="suggest", payload={"value": s}, label=s)
         for s in exercise.get("welcome_suggestions", [])
     ]
-    await cl.Message(content="\n\n".join(parts), actions=actions).send()
+    await _say("\n\n".join(parts), kind="brief", actions=actions)
 
 
 @cl.action_callback("suggest")
 async def on_suggest(action: cl.Action):
+    await _record({"author": "student", "kind": "text", "content": action.payload["value"]})
     await _ask(action.payload["value"])
 
 
 @cl.on_message
 async def on_message(msg: cl.Message):
+    await _record({"author": "student", "kind": "text", "content": msg.content or ""})
     if cl.user_session.get("paced") and _DONE_TEXT.match(msg.content or ""):
         st = await _get_state()
         if st and st.get("open"):
             await _finish(st["step"]["n"])
             return
+    if cl.user_session.get("paced") and await _pasted_output(msg.content or ""):
+        return
     await _ask(msg.content)
+
+
+async def _pasted_output(text: str) -> bool:
+    """The student pasted the step's output as a message instead of clicking
+    "Done": the server decides (POST /api/steps/detect, exercise.yaml
+    output_in_chat). It finishes the step with it, or, when the output only
+    partly matches, asks the student first. False = treat it as a question."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(f"{BACKEND}/api/steps/detect", headers=_auth(),
+                                  json={"session_id": cl.user_session.get("session_id"), "text": text})
+        d = r.json() if r.status_code == 200 else None
+    except httpx.HTTPError as e:
+        log.warning("detect output failed: %s", e)
+        d = None
+    if not d or d["kind"] == "question":
+        return False
+    n, label = d["step"], d["label"]
+    if d["kind"] == "maybe":
+        question = f"🤔 זה הפלט של שלב {label}, או שאלה?"
+        chosen = await _pick(question, [("output", f"📋 זה הפלט של שלב {label}"), ("question", "❓ זו שאלה")])
+        await _record({"author": "tutor", "kind": "text", "step": n, "content": question},
+                      *([{"author": "student", "kind": "text", "step": n,
+                          "content": "זה הפלט" if chosen == "output" else "זו שאלה"}] if chosen else []))
+        if chosen != "output":
+            return False
+    async with cl.user_session.get("lock"):
+        st = await _get_state()
+        if not st or not st.get("open") or st["step"]["n"] != n:
+            return False
+        if d["kind"] == "output":
+            await _say(f"📋 זיהיתי שזה הפלט של שלב {label}.", kind="result", step=n)
+        await _after_finish(await _post_finish(n, text), n)
+    return True
 
 
 async def _ask(text: str):
@@ -281,7 +478,9 @@ async def _ask(text: str):
                 "POST",
                 f"{BACKEND}/api/ask",
                 json={"session_id": session_id, "message": text},
-                headers={"Authorization": f"Bearer {token}"},
+                # This chat shows the transcript: an answer the teacher sends after
+                # the wait ended still reaches the student (backend/routes/review.py).
+                headers={"Authorization": f"Bearer {token}", "X-VeriClass-Transcript": "1"},
             ) as resp:
                 if resp.status_code != 200:
                     # Read the error body instead of streaming it in as if it
@@ -299,6 +498,7 @@ async def _ask(text: str):
         await out.update()
         return
     await out.update()
+    await _record({"author": "tutor", "kind": "text", "content": out.content})
 
 
 def _ask_error_message(status: int) -> str:
@@ -341,6 +541,21 @@ async def _show_state():
     st = await _get_state()
     if st is None:
         return
+    last = cl.user_session.get("last_current")
+    cl.user_session.set("last_current", st["current"])
+    if last is not None and st["current"] < last:
+        # The teacher sent the student back. The server's note normally came
+        # through the transcript already; without a transcript, say it here.
+        if not cl.user_session.get("reset_shown"):
+            await _say(f"↩️ המרצה החזיר אתכם לשלב {st.get('current_label') or st['current']}.", kind="note")
+        _forget_shown()
+    cl.user_session.set("reset_shown", False)
+    review = cl.user_session.get("in_review")
+    if review is not None and st["current"] > review:
+        # The teacher let them past the step whose output didn't match.
+        cl.user_session.set("in_review", None)
+        label = (cl.user_session.get("labels") or {}).get(review, str(review))
+        await _say(f"✅ המרצה אישר את שלב {label}. אפשר להמשיך.", kind="result", step=review)
     if st["open"]:
         step = st["step"]
         if cl.user_session.get("shown_step") != step["n"]:
@@ -356,36 +571,35 @@ async def _show_state():
             else:
                 text = (f"⏸️ סיימתם את כל השלבים שפתוחים כרגע. שלב {st['current_label']} יופיע כאן "
                         "כשהמרצה יפתח אותו לכל הכיתה. בינתיים אפשר לשאול כאן שאלות על מה שעשיתם.")
-            await cl.Message(content=text).send()
+            await _say(text, kind="note", step=st["current"])
     elif st["finished"] and not cl.user_session.get("finished_note"):
         cl.user_session.set("finished_note", True)
-        await cl.Message(content="🎉 סיימתם את כל השלבים של המעבדה. כל הכבוד!").send()
+        await _say("🎉 סיימתם את כל השלבים של המעבדה. כל הכבוד!", kind="note", step=st["total"] + 1)
 
 
 async def _send_step(step: dict, unlocked: bool):
     head = f"🔓 **המרצה פתח את שלב {step['label']}.**\n\n" if unlocked else ""
     how = ("כשסיימתם: לחצו **סיימתי**, והדביקו את כל הפלט שקיבלתם בטרמינל."
            if step["needs_output"] else "כשסיימתם: לחצו **סיימתי**.")
-    await cl.Message(
-        content=f"{head}{step['markdown']}\n\n---\n{how}",
-        actions=[cl.Action(name="finish", payload={"step": step["n"]},
-                           label=f"✅ סיימתי את שלב {step['label']}")],
-    ).send()
+    await _say(f"{head}{step['markdown']}\n\n---\n{how}", kind="step", step=step["n"],
+               actions=[_finish_action(step)])
+
+
+def _finish_action(step: dict) -> cl.Action:
+    return cl.Action(name="finish", payload={"step": step["n"]}, label=f"✅ סיימתי את שלב {step['label']}")
+
+
+async def _send_finish_button(step: dict):
+    """After a new login: the step's text is in the replayed conversation; only
+    its button needs to come back."""
+    how = "לחצו **סיימתי** והדביקו את הפלט." if step["needs_output"] else "לחצו **סיימתי**."
+    await _say(f"📍 אתם בשלב **{step['label']}** (למעלה). כשסיימתם: {how}", record=False,
+               actions=[_finish_action(step)])
 
 
 @cl.action_callback("finish")
 async def on_finish(action: cl.Action):
     await _finish(action.payload["step"], action)
-
-
-@cl.action_callback("force")
-async def on_force(action: cl.Action):
-    """Continue although the pasted output lacked something."""
-    n = action.payload["step"]
-    last = cl.user_session.get("last_output") or {}
-    async with cl.user_session.get("lock"):
-        r = await _post_finish(n, last.get(n, ""), force=True)
-        await _after_finish(r, n, action)
 
 
 async def _finish(n: int, action: cl.Action = None):
@@ -403,23 +617,20 @@ async def _finish(n: int, action: cl.Action = None):
         if st["step"]["needs_output"]:
             output = await _prompt(
                 f"📋 הדביקו כאן את הפלט של שלב {st['step']['label']}: כל מה שהופיע בטרמינל אחרי "
-                "הפקודות (אפשר גם עם הפקודות עצמן). ואז שלחו.", timeout=900)
+                "הפקודות (אפשר גם עם הפקודות עצמן). ואז שלחו.", timeout=900, kind="output", step=n)
             if not output:
-                await cl.Message(content="לא התקבל פלט. לחצו שוב על «סיימתי» כשתהיו מוכנים.").send()
+                await _say("לא התקבל פלט. לחצו שוב על «סיימתי» כשתהיו מוכנים.")
                 return
-            last = cl.user_session.get("last_output") or {}
-            last[n] = output
-            cl.user_session.set("last_output", last)
-        r = await _post_finish(n, output, force=False)
+        r = await _post_finish(n, output)
         await _after_finish(r, n, action)
 
 
-async def _post_finish(n: int, output: str, force: bool):
+async def _post_finish(n: int, output: str):
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(f"{BACKEND}/api/steps/finish", headers=_auth(), json={
                 "session_id": cl.user_session.get("session_id"), "step": n,
-                "output": output, "force": force})
+                "output": output})
         if r.status_code == 200:
             return r.json()
         log.warning("finish step: HTTP %s %s", r.status_code, r.text[:200])
@@ -436,24 +647,24 @@ async def _after_finish(r, n: int, action: cl.Action = None):
         await cl.Message(content="⚠️ לא הצלחנו לשמור את השלב. נסו שוב בעוד רגע.").send()
         return
     if r["status"] == "missing":
-        lines = "\n".join(f"- `{h}`" if _looks_like_code(h) else f"- {h}" for h in r["missing"])
-        await cl.Message(
-            content=(f"🔍 בפלט של שלב {label} חסר:\n{lines}\n\n"
-                     "בדקו את «שימו לב» בשלב, הריצו שוב, והדביקו את הפלט החדש. אם אתם בטוחים שהכול "
-                     "בסדר, אפשר להמשיך בכל זאת (המרצה יראה את זה)."),
-            actions=[cl.Action(name="finish", payload={"step": n}, label="📋 להדביק שוב"),
-                     cl.Action(name="force", payload={"step": n}, label="⏭️ להמשיך בכל זאת")],
-        ).send()
+        # The hints would give the expected output away; the teacher sees them.
+        cl.user_session.set("in_review", n)
+        await _say(f"🔍 הפלט של שלב {label} לא נראה כמו מה שציפינו לו.\n\n"
+                   "בדקו את «שימו לב» בשלב, הריצו שוב, והדביקו את הפלט החדש. "
+                   "המרצה רואה את הפלט ששלחתם, ואם הכול בסדר הוא יאשר לכם להמשיך: "
+                   "השלב הבא יופיע כאן לבד.", kind="result", step=n,
+                   actions=[cl.Action(name="finish", payload={"step": n}, label="📋 להדביק שוב")])
         return
     if r["status"] != "done":
         await _not_this_step(r["state"], n)
         return
     if action is not None:
         await action.remove()
+    cl.user_session.set("in_review", None)
     note = " הפלט נראה תקין." if r.get("ok") else ""
     if r.get("quiz"):
         note += " לפני השלב הבא, שאלה קצרה."
-    await cl.Message(content=f"✅ שלב {label} הושלם.{note}").send()
+    await _say(f"✅ שלב {label} הושלם.{note}", kind="result", step=n)
     await _ask_pending_probes()
     await _show_state()
 
@@ -468,11 +679,7 @@ async def _not_this_step(st: dict, n: int):
         text = f"שלב {st['current_label']} עוד לא נפתח. הוא יופיע כאן כשהמרצה יפתח אותו."
     else:
         text = f"שלב {label} כבר הושלם. אתם עכשיו בשלב {st.get('current_label')}."
-    await cl.Message(content=text).send()
-
-
-def _looks_like_code(hint: str) -> bool:
-    return not re.search(r"[֐-׿]", hint)
+    await _say(text)
 
 
 async def _poll(session_id: str, token: str):
@@ -482,6 +689,9 @@ async def _poll(session_id: str, token: str):
         while True:
             try:
                 async with cl.user_session.get("lock"):
+                    await _sync_others()
+                    if cl.user_session.get("in_review") is not None:
+                        await _show_state()  # "the teacher approved" before that step's quiz
                     await _ask_pending_probes()
                     if cl.user_session.get("paced"):
                         await _show_state()
@@ -511,7 +721,7 @@ async def _handle_probe(probe: dict):
         content = f"❓ **שאלת הבנה על שלב {probe.get('quiz_step')}:**\n\n> {probe['body']}\n\nכתבו את התשובה שלכם:"
     else:
         content = f"🎓 **המרצה שואל/ת:**\n\n> {probe['body']}\n\nכתבו את התשובה שלכם:"
-    answer = await _prompt(content)
+    answer = await _prompt(content, kind="answer")
     if not answer:
         return
     try:
@@ -523,12 +733,12 @@ async def _handle_probe(probe: dict):
             )
     except httpx.HTTPError as e:
         log.warning("probe answer failed: %s", e)
-        await cl.Message(content="⚠️ התשובה לא נשלחה. נסו שוב.").send()
+        await _say("⚠️ התשובה לא נשלחה. נסו שוב.", record=False)
         return
     if r.status_code == 200:
         data = r.json()
         grade = f" ציון: **{data['auto_grade']}/2**" if data.get("auto_grade") is not None else ""
         why = f" — {data['why']}" if data.get("why") else ""
-        await cl.Message(content=f"✅ התשובה נשמרה.{grade}{why}").send()
+        await _say(f"✅ התשובה נשמרה.{grade}{why}", kind="result")
     else:
-        await cl.Message(content="⚠️ התשובה לא נשלחה. נסו שוב.").send()
+        await _say("⚠️ התשובה לא נשלחה. נסו שוב.", record=False)

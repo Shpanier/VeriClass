@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from backend import (
     answer_cache, bank, db, deps, environment, exercises, pacing, prompting, steps, student_llm, textutil,
+    transcript,
 )
 from backend.agents import tutor
 from backend.prompts import course_name
@@ -89,6 +90,19 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
         _save_reply(req.session_id, s["mode"], text)
         return StreamingResponse(_stream(text), media_type="text/plain")
 
+    # Class-paced labs: the current step's output pasted as a message finishes the
+    # step, as the "Done" button would (exercise.yaml output_in_chat). A client
+    # that asks /api/steps/detect first (the student chat) never gets here with it.
+    if pacing.is_paced(ex) and pacing.detect_output(s, ex, req.message)["kind"] == "output":
+        r = pacing.finish(s, ex, pacing.state(s, ex)["current"], req.message)
+        lbl = pacing.label(ex, r["state"]["current"] - 1) if r["status"] == "done" else ""
+        text = ((f"📋 זיהיתי את הפלט של שלב {lbl}, והשלב הושלם." if pacing.hebrew(ex) else
+                 f"📋 That's the output of step {lbl}: the step is done.") if r["status"] == "done" else
+                ("כדי לסיים שלב, לחצו על «סיימתי» שמתחת לשלב." if pacing.hebrew(ex) else
+                 "To finish a step, click \"Done\" under the step."))
+        _save_reply(req.session_id, s["mode"], text)
+        return StreamingResponse(_stream(text), media_type="text/plain")
+
     # Step-by-step labs: "Done with step N" goes to the teacher, not the LLM; a
     # decision the students haven't seen yet is delivered before anything else.
     if steps.steps_of(ex) and not pacing.is_paced(ex) and (
@@ -98,7 +112,11 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
 
     if review_mod.review_mode_enabled():
         return StreamingResponse(
-            _gen_review(req, s, sys_prompt, msgs, plain),
+            _gen_review(req, s, sys_prompt, msgs, plain,
+                        # A client that shows the session's transcript (X-VeriClass-Transcript: 1,
+                        # the student chat) can receive an answer after it stopped waiting.
+                        late_ok=request.headers.get("x-vericlass-transcript") == "1"
+                        and transcript.enabled(ex)),
             media_type="text/plain",
         )
 
@@ -214,11 +232,13 @@ def _reask(req: AskRequest, s, ex, sys_prompt: str) -> StreamingResponse:
     return StreamingResponse(gen(), media_type="text/plain")
 
 
-async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict], plain: bool = False):
+async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict], plain: bool = False,
+                      late_ok: bool = False):
     """Review-mode generator: draft four answers, wait for the teacher's pick,
     stream the chosen text."""
     # Tell the student something is happening so they don't think it hung.
-    yield "🧑‍🏫 _Your teacher is reviewing your question — one moment…_\n\n"
+    yield ("🧑‍🏫 _המרצה בודק את השאלה שלכם — רגע…_\n\n" if textutil.detect_lang(req.message) == "he"
+           else "🧑‍🏫 _Your teacher is reviewing your question — one moment…_\n\n")
 
     try:
         variants = await tutor.generate_variants(
@@ -231,14 +251,34 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict], p
         return
 
     review_id = review_mod.enqueue(req.session_id, req.message, variants, plain)
-    ev = review_mod.event_for(review_id)
+    ev = review_mod.start_waiting(review_id)
+    # late_ok: the client shows the transcript, so an answer after the timeout
+    # still reaches the student there. Any other client (the IDE plugin) can't
+    # get one, so for it a timeout still ends the question.
+    he = textutil.detect_lang(req.message) == "he"
     try:
         try:
             await asyncio.wait_for(ev.wait(), timeout=REVIEW_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
+            pass
+        # From here on a decision is delivered late (review_mod.deliver_late).
+        status = review_mod.stop_waiting(review_id)
+        if status == "deleted":
+            with db.conn() as c:
+                note = c.execute("SELECT final_text FROM pending_reviews WHERE id = ?",
+                                 (review_id,)).fetchone()["final_text"]
+            yield review_mod.deleted_message(req.message, note, s["exercise"])
+            return
+        if status != "answered":
+            if late_ok:
+                yield ("⏳ _המרצה עוד לא ענה. כשיענה, התשובה תופיע כאן, גם אם תסגרו את הצ'אט בינתיים._\n"
+                       if he else
+                       "⏳ _Your teacher hasn't answered yet. The answer will appear here when they do, "
+                       "even if you close the chat meanwhile._\n")
+                return
             with db.conn() as c:
                 c.execute(
-                    "UPDATE pending_reviews SET status='expired' WHERE id = ? "
+                    "UPDATE pending_reviews SET status='expired', closed_at=CURRENT_TIMESTAMP WHERE id = ? "
                     "AND status='pending'", (review_id,),
                 )
             yield "_⚠️ No teacher response in time. Please ping the instructor and try again._\n"
@@ -264,7 +304,9 @@ async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict], p
             yield word + " "
             await asyncio.sleep(0.01)
     finally:
-        review_mod.drop_event(review_id)
+        # The request ends however it ends (the student closed the chat, the
+        # connection dropped): the question no longer has anyone waiting.
+        review_mod.stop_waiting(review_id)
 
 
 STEP_WAIT_SECONDS = 540  # under the plugin's 10-minute read timeout

@@ -33,6 +33,7 @@ from backend.routes import (
     submissions,
     terminal as terminal_routes,
     trace as trace_routes,
+    transcript as transcript_routes,
     reports as report_routes,
 )
 
@@ -87,6 +88,7 @@ app.include_router(grade.router, prefix="/api")
 app.include_router(files.router, prefix="/api")
 app.include_router(step_routes.router, prefix="/api")
 app.include_router(pacing_routes.router, prefix="/api")
+app.include_router(transcript_routes.router, prefix="/api")
 app.include_router(terminal_routes.router, prefix="/api")
 app.include_router(trace_routes.router, prefix="/api")
 app.include_router(course_routes.router, prefix="/api")

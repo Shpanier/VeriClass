@@ -33,12 +33,18 @@ interface StepRow {
   minutes: string;
   expected: string;
   questions: string;
+  expected_output: string;
+  checks: { match: string; hint: string }[];
 }
 const toRow = (s: StepDraft): StepRow => ({
   title: s.title ?? "", text: s.text ?? "", minutes: s.minutes != null ? String(s.minutes) : "",
   expected: s.expected ?? "", questions: s.questions != null ? String(s.questions) : "",
+  expected_output: s.expected_output ?? "",
+  checks: (s.expect_output ?? []).map((c) => ({ match: c.match, hint: c.hint ?? "" })),
 });
-const blankStep = (): StepRow => ({ title: "", text: "", minutes: "", expected: "", questions: "" });
+const blankStep = (): StepRow => ({
+  title: "", text: "", minutes: "", expected: "", questions: "", expected_output: "", checks: [],
+});
 
 const blankVariant = (): VariantDraft => ({ id: "", paramsText: "{}", tests: [{ input: "", expected_output: "" }] });
 
@@ -85,6 +91,10 @@ export function ExerciseFormModal({
   const [language, setLanguage] = useState(initial?.language ?? "");
   const [courseName, setCourseName] = useState(initial?.course_name ?? "");
   const [checkCommand, setCheckCommand] = useState(initial?.check_command ?? "");
+  const [chatHistory, setChatHistory] = useState(initial?.chat_history ?? true);
+  const [outputInChat, setOutputInChat] = useState<"accept" | "ask" | "off">(initial?.output_in_chat ?? "accept");
+  const [resumeMinutes, setResumeMinutes] = useState(
+    initial?.resume_minutes_set && initial.resume_minutes != null ? String(initial.resume_minutes) : "");
   const [blockedHint, setBlockedHint] = useState(
     typeof initial?.terminal?.blocked_hint === "string" ? (initial.terminal.blocked_hint as string) : "");
   const [preview, setPreview] = useState<number | null>(null);
@@ -182,7 +192,19 @@ export function ExerciseFormModal({
       if ((minutes !== null && Number.isNaN(minutes)) || (questions !== null && Number.isNaN(questions))) {
         return { error: `${t("previewStep", { n: i + 1 })}: ${t("fldStepMinutes")} / ${t("fldStepQuestions")}` };
       }
-      builtSteps.push({ title: st.title.trim(), text: st.text, minutes, expected: st.expected, questions });
+      const checks = st.checks.filter((c) => c.match.trim());
+      for (const c of checks) {
+        try {
+          new RegExp(c.match);
+        } catch {
+          return { error: `${t("previewStep", { n: i + 1 })}: ${t("fldStepCheckBroken", { p: c.match })}` };
+        }
+      }
+      builtSteps.push({
+        title: st.title.trim(), text: st.text, minutes, expected: st.expected, questions,
+        expected_output: st.expected_output,
+        expect_output: checks.map((c) => ({ match: c.match, hint: c.hint.trim() || null })),
+      });
     }
     const terminal = initial?.terminal || blockedHint.trim()
       ? { ...(initial?.terminal ?? {}), blocked_hint: blockedHint.trim() || undefined }
@@ -204,6 +226,9 @@ export function ExerciseFormModal({
       language: language.trim() || undefined,
       course_name: courseName.trim() || undefined,
       check_command: checkCommand.trim() || undefined,
+      chat_history: chatHistory,
+      output_in_chat: outputInChat,
+      resume_minutes: resumeMinutes.trim() !== "" ? Math.max(0, Math.round(Number(resumeMinutes))) : undefined,
       steps: builtSteps.length || initial?.steps?.length ? builtSteps : undefined,
     };
   };
@@ -313,6 +338,28 @@ export function ExerciseFormModal({
         <Field label={t("fldCheckCommand")} value={checkCommand} onChange={setCheckCommand} monospace />
       </div>
       <Field label={t("fldBlockedHint")} value={blockedHint} onChange={setBlockedHint} />
+      <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", margin: "4px 0 10px", fontSize: 13 }}>
+        <label style={{ display: "flex", gap: 6, alignItems: "center" }} title={t("fldChatHistoryHint")}>
+          <input type="checkbox" checked={chatHistory} onChange={(e) => setChatHistory(e.target.checked)} />
+          {t("fldChatHistory")}
+        </label>
+        <label style={{ display: "flex", gap: 6, alignItems: "center" }} title={t("fldResumeHint")}>
+          {t("fldResumeMinutes")}
+          <input value={resumeMinutes} onChange={(e) => setResumeMinutes(e.target.value.replace(/[^0-9]/g, ""))}
+                 placeholder={initial?.resume_minutes != null ? String(initial.resume_minutes) : "30"}
+                 style={{ width: 70, padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4 }} />
+        </label>
+        <span style={{ color: "#6b7280", fontSize: 12 }} dir="auto">{t("fldResumeHint")}</span>
+      </div>
+      <label style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px", fontSize: 13 }}>
+        {t("fldOutputInChat")}
+        <select value={outputInChat} onChange={(e) => setOutputInChat(e.target.value as "accept" | "ask" | "off")}
+                style={{ padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4 }}>
+          <option value="accept">{t("fldOutputAccept")}</option>
+          <option value="ask">{t("fldOutputAsk")}</option>
+          <option value="off">{t("fldOutputOff")}</option>
+        </select>
+      </label>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
         <strong style={{ fontSize: 14 }}>{t("stepsSection")}</strong>
@@ -363,6 +410,31 @@ export function ExerciseFormModal({
             <input value={st.questions} placeholder={t("fldStepQuestions")} aria-label={t("fldStepQuestions")}
                    title={t("fldStepQuestions")}
                    onChange={(e) => patchStep(i, { questions: e.target.value })} style={{ ...field, width: 90, flex: "none" }} />
+          </div>
+          <textarea value={st.expected_output} dir="ltr" placeholder={t("fldStepExpectedOutput")}
+                    aria-label={t("fldStepExpectedOutput")} title={t("fldStepExpectedOutput")}
+                    onChange={(e) => patchStep(i, { expected_output: e.target.value })}
+                    style={{ ...field, minHeight: 60, marginTop: 6, background: "#ecfdf5",
+                             fontFamily: "ui-monospace, monospace", fontSize: 12 }} />
+          <div style={{ marginTop: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{t("fldStepChecks")}</span>
+              <span style={{ fontSize: 11, color: "#6b7280", flex: 1 }} dir="auto">{t("fldStepChecksHint")}</span>
+              <button onClick={() => patchStep(i, { checks: [...st.checks, { match: "", hint: "" }] })}
+                      style={{ ...iconBtn, width: "auto", padding: "0 8px" }}>+ {t("fldStepAddCheck")}</button>
+            </div>
+            {st.checks.map((c, ci) => (
+              <div key={ci} style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                <input value={c.match} dir="ltr" placeholder={t("fldStepCheckMatch")} aria-label={t("fldStepCheckMatch")}
+                       onChange={(e) => patchStep(i, { checks: st.checks.map((x, k) => (k === ci ? { ...x, match: e.target.value } : x)) })}
+                       style={{ ...field, flex: 1, fontFamily: "ui-monospace, monospace", fontSize: 12 }} />
+                <input value={c.hint} dir="auto" placeholder={t("fldStepCheckHint")} aria-label={t("fldStepCheckHint")}
+                       onChange={(e) => patchStep(i, { checks: st.checks.map((x, k) => (k === ci ? { ...x, hint: e.target.value } : x)) })}
+                       style={{ ...field, flex: 1 }} />
+                <button onClick={() => patchStep(i, { checks: st.checks.filter((_, k) => k !== ci) })}
+                        aria-label={t("remove")} style={{ ...iconBtn, color: "#b91c1c" }}>✕</button>
+              </div>
+            ))}
           </div>
         </div>
       ))}

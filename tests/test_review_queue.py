@@ -246,3 +246,168 @@ def test_environment_block_for_windows(client):
     client.post("/api/ask", json={"session_id": sid2, "message": "hi", "client_os": "Mac OS X 15.5 aarch64"},
                 headers=h)  # not this student's session: refused before anything is stored
     assert environment.client_os(sid2) is None
+
+
+# --- keeping the queue in step with the students -------------------------------------
+
+def _ask_bg(tc, h, sid, message, transcript_client=True):
+    box = {}
+    headers = {**h, **({"X-VeriClass-Transcript": "1"} if transcript_client else {})}
+
+    def run():
+        box["r"] = tc.post("/api/ask", json={"session_id": sid, "message": message}, headers=headers)
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    return t, box
+
+
+def _item(tc, th, rid):
+    return next((r for r in tc.get("/api/reviews/pending", headers=th).json() if r["id"] == rid), None)
+
+
+def _status(rid):
+    with db.conn() as c:
+        return c.execute("SELECT status FROM pending_reviews WHERE id = ?", (rid,)).fetchone()["status"]
+
+
+def _notes(tc, h, sid):
+    return tc.get(f"/api/transcript/{sid}", headers=h, params={"origin": "server"}).json()["entries"]
+
+
+def test_deleting_a_question_the_student_waits_for(client, drafts):
+    h, sid = _student(client)
+    th = _teacher(client)
+    t, box = _ask_bg(client, h, sid, "asdf")
+    item = _wait_pending(client, th, sid)
+    assert item["waiting"] is True and item["looks_like_noise"] is False
+    r = client.post(f"/api/reviews/{item['id']}/delete", json={"note": "Ask about step 2."}, headers=th)
+    assert r.status_code == 200 and r.json()["student_told"] == "now"
+    t.join(10)
+    assert "deleted" in box["r"].text and "Ask about step 2." in box["r"].text
+    assert _status(item["id"]) == "deleted" and _item(client, th, item["id"]) is None
+    assert client.post(f"/api/reviews/{item['id']}/delete", json={}, headers=th).status_code == 409
+    assert _notes(client, h, sid) == []  # told live, no note needed
+
+
+def test_a_late_answer_reaches_a_student_who_stopped_waiting(client, drafts, monkeypatch):
+    monkeypatch.setattr(ask_mod, "REVIEW_TIMEOUT_SECONDS", 0.3)
+    h, sid = _student(client)
+    th = _teacher(client)
+    t, box = _ask_bg(client, h, sid, "מה עושה argv?")
+    item = _wait_pending(client, th, sid)
+    t.join(10)
+    assert "המרצה עוד לא ענה" in box["r"].text   # the wait ended, the question stays
+    item = _item(client, th, item["id"])
+    assert item is not None and item["waiting"] is False
+    r = client.post(f"/api/reviews/{item['id']}/select", json={"chosen": "normal", "lang": "he"}, headers=th)
+    assert r.status_code == 200 and r.json()["delivered"] == "later"
+    notes = _notes(client, h, sid)
+    assert len(notes) == 1 and "המרצה ענה על השאלה" in notes[0]["content"] and "normal he" in notes[0]["content"]
+    with db.conn() as c:
+        assert c.execute("SELECT body FROM messages WHERE session_id = ? AND role = 'assistant'",
+                         (sid,)).fetchone()["body"] == "normal he"
+
+
+def test_a_client_without_a_transcript_still_times_out(client, drafts, monkeypatch):
+    monkeypatch.setattr(ask_mod, "REVIEW_TIMEOUT_SECONDS", 0.3)
+    h, sid = _student(client)
+    th = _teacher(client)
+    t, box = _ask_bg(client, h, sid, "What is argv?", transcript_client=False)
+    item = _wait_pending(client, th, sid)
+    t.join(10)
+    assert "No teacher response in time" in box["r"].text
+    assert _status(item["id"]) == "expired"
+
+
+def test_deleting_old_questions_and_telling_the_student_later(client, drafts):
+    h, sid = _student(client)
+    th = _teacher(client)
+    with db.conn() as c:  # questions left behind: nobody waits for them (a restart, a closed chat)
+        ids = [c.execute("INSERT INTO pending_reviews (session_id, question, variant_nudge, variant_normal, "
+                         "variant_more) VALUES (?, ?, 'n', 'n', 'n')", (sid, q)).lastrowid
+               for q in ("old question one", "??", "old question two")]
+    items = {r["id"]: r for r in client.get("/api/reviews/pending", headers=th).json()}
+    assert all(not items[i]["waiting"] for i in ids)
+    assert items[ids[1]]["looks_like_noise"] is True
+
+    r = client.post(f"/api/reviews/{ids[0]}/delete", json={"notify": True}, headers=th)
+    assert r.json()["student_told"] == "later"
+    assert "old question one" in _notes(client, h, sid)[0]["content"]
+    r = client.post(f"/api/reviews/{ids[1]}/delete", json={"notify": False}, headers=th)
+    assert r.json()["student_told"] == "silent" and len(_notes(client, h, sid)) == 1
+
+    # The student comes back: the chat lists what is still with the teacher.
+    open_q = client.get(f"/api/reviews/open/{sid}", headers=h).json()
+    assert [q["id"] for q in open_q] == [ids[2]] and open_q[0]["waiting"] is False
+    other, _ = _student(client)
+    assert client.get(f"/api/reviews/open/{sid}", headers=other).status_code == 403
+
+    # One click deletes every question nobody waits for; a waiting one stays.
+    t, box = _ask_bg(client, h, sid, "a live question")
+    live = _wait_pending_text(client, th, sid, "a live question")
+    r = client.post("/api/reviews/delete-stale", json={}, headers=th)
+    assert r.status_code == 200 and r.json()["deleted"] >= 1
+    assert _status(ids[2]) == "deleted" and _status(live["id"]) == "pending"
+    client.post(f"/api/reviews/{live['id']}/delete", json={}, headers=th)
+    t.join(10)
+    # Students can't delete questions.
+    assert client.post("/api/reviews/delete-stale", json={}, headers=h).status_code == 403
+
+
+def _wait_pending_text(tc, th, sid, text, timeout=10):
+    end = time.time() + timeout
+    while time.time() < end:
+        for r in tc.get("/api/reviews/pending", headers=th).json():
+            if r["session_id"] == sid and r["question"] == text:
+                return r
+        time.sleep(0.05)
+    raise AssertionError("no pending review appeared")
+
+
+def test_asking_again_replaces_the_copy_nobody_waits_for(client, drafts):
+    h, sid = _student(client)
+    th = _teacher(client)
+    with db.conn() as c:
+        old = c.execute("INSERT INTO pending_reviews (session_id, question, variant_nudge, variant_normal, "
+                        "variant_more) VALUES (?, 'How  do I start?', 'n', 'n', 'n')", (sid,)).lastrowid
+    t, box = _ask_bg(client, h, sid, "how do i start?")
+    new = _wait_pending_text(client, th, sid, "how do i start?")
+    assert new["id"] != old and _status(old) == "replaced"
+    client.post(f"/api/reviews/{new['id']}/select", json={"chosen": "nudge", "lang": "en"}, headers=th)
+    t.join(10)
+    assert "nudge en" in box["r"].text
+
+
+def test_transcript_entries_of_another_chat_are_synced(client):
+    h, sid = _student(client)
+    a = client.post(f"/api/transcript/{sid}", headers=h,
+                    json={"client": "tab-a", "entries": [{"author": "student", "content": "from tab a"}]}).json()["ids"]
+    client.post(f"/api/transcript/{sid}", headers=h,
+                json={"client": "tab-b", "entries": [{"author": "student", "content": "from tab b"}]})
+    seen_by_b = client.get(f"/api/transcript/{sid}", headers=h, params={"exclude_client": "tab-b"}).json()["entries"]
+    assert [e["content"] for e in seen_by_b] == ["from tab a"]
+    seen_by_a = client.get(f"/api/transcript/{sid}", headers=h,
+                           params={"exclude_client": "tab-a", "after": a[0]}).json()["entries"]
+    assert [e["content"] for e in seen_by_a] == ["from tab b"]
+
+
+@pytest.mark.parametrize("question,noise", [("", True), ("??", True), ("123 456", True), ("asd", True),
+                                             ("aaaa", True), ("אאאא אא", True), ("why?", False),
+                                             ("מה זה", False), ("asdf", False)])
+def test_noise_detection(question, noise):
+    assert review_mod.looks_like_noise(question) is noise
+
+
+def test_a_note_follows_the_exercise_language_when_the_question_has_none():
+    import copy
+    he_ex = copy.deepcopy(exercises.get("ex3-mcalc"))
+    he_ex.update(exercise_id="he-brief-test", brief_md="תרגיל בעברית.")
+    exercises._LOADED["he-brief-test"] = he_ex
+    try:
+        assert "המרצה מחק" in review_mod.deleted_message("aaaa", None, "he-brief-test")
+        assert "deleted" in review_mod.deleted_message("What is argv?", None, "he-brief-test")
+        assert "deleted" in review_mod.deleted_message("aaaa", None, "ex3-mcalc")
+        assert "המרצה מחק" in review_mod.deleted_message("מה זה?", None, "ex3-mcalc")
+    finally:
+        exercises._LOADED.pop("he-brief-test")

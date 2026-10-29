@@ -43,7 +43,11 @@ TEACHER_FILE = "teacher.yaml"
 FAQ_FILE = "faq.yaml"
 FILES_DIR = "files"
 # Teacher-only step keys: kept in teacher.yaml, never sent to students or the tutor.
-TEACHER_STEP_KEYS = ("expected", "os_check", "evidence", "questions", "expect_output", "quiz")
+# expected: the answer in words; expected_output: what the step's commands print
+# (the teacher compares a student's pasted output with it); expect_output: the
+# checks a pasted output must pass (backend/pacing.py).
+TEACHER_STEP_KEYS = ("expected", "expected_output", "os_check", "evidence", "questions",
+                     "expect_output", "quiz")
 # The question bank the exercise skill aims for.
 BANK_TARGET = 50
 _ZIP_MAX = 50_000_000
@@ -387,7 +391,8 @@ def export_zip(ex: dict[str, Any]) -> bytes:
 # exercise.yaml keys the dashboard's edit form may change.
 _EDITABLE = ("title_en", "title_he", "default_mode", "brief_md", "welcome_suggestions",
              "required_error_strings", "param_labels", "tutor_notes", "terminal", "language",
-             "course_name", "check_command", "scaffold_filename")
+             "course_name", "check_command", "scaffold_filename", "chat_history", "resume_minutes",
+             "output_in_chat")
 _STEP_KEYS = ("title", "text", "minutes")
 
 
@@ -452,6 +457,18 @@ def write_back(current: dict[str, Any], payload: dict[str, Any]) -> None:
             for k in ("questions", "evidence", "os_check"):
                 if st.get(k) not in (None, "", []):
                     t_item[k] = st[k]
+            # None: the editor didn't send it (keep); empty: removed in the editor.
+            if st.get("expected_output") is not None:
+                if st["expected_output"].strip():
+                    t_item["expected_output"] = _scalar(st["expected_output"])
+                else:
+                    t_item.pop("expected_output", None)
+            if st.get("expect_output") is not None:
+                rules = [{k: v for k, v in r.items() if v} for r in st["expect_output"] if r.get("match")]
+                if rules:
+                    t_item["expect_output"] = rules
+                else:
+                    t_item.pop("expect_output", None)
             t_new.append(t_item)
         doc["steps"] = new_steps
         teacher["steps"] = t_new

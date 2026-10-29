@@ -164,6 +164,54 @@ def test_dashboard_edit_is_written_back_to_the_files(client):
         assert c.execute("SELECT 1 FROM exercises WHERE exercise_id = ?", (PKG,)).fetchone() is None
 
 
+def test_editor_sets_the_expected_output_and_the_output_checks(client):
+    th = _th(client)
+    full = client.get(f"/api/exercises/{PKG}", headers=th).json()
+    assert full["steps"][0]["expected_output"] is None and full["steps"][0]["expect_output"] == []
+    payload = {k: full[k] for k in ("exercise_id", "title_en", "title_he", "default_mode", "brief_md", "variants",
+                                    "welcome_suggestions", "required_error_strings", "param_labels")}
+    payload["steps"] = [dict(full["steps"][0], expected_output="rows: 3\n",
+                             expect_output=[{"match": r"^rows: \d+$", "hint": "the rows line"}]),
+                        full["steps"][1]]
+    bad = {**payload, "steps": [dict(payload["steps"][0], expect_output=[{"match": "(unclosed"}]),
+                                payload["steps"][1]]}
+    r = client.put(f"/api/exercises/{PKG}", json=bad, headers=th)
+    assert r.status_code == 400 and "output check" in r.text
+
+    assert client.put(f"/api/exercises/{PKG}", json=payload, headers=th).status_code == 200
+    teacher = yaml.safe_load((packages.exercises_dir() / PKG / "teacher.yaml").read_text(encoding="utf-8"))
+    assert teacher["steps"][0]["expected_output"] == "rows: 3\n"
+    assert teacher["steps"][0]["expect_output"] == [{"match": r"^rows: \d+$", "hint": "the rows line"}]
+    ex_text = (packages.exercises_dir() / PKG / "exercise.yaml").read_text(encoding="utf-8")
+    assert "rows: 3" not in ex_text and "expect_output" not in ex_text  # teacher-only
+    full = client.get(f"/api/exercises/{PKG}", headers=th).json()
+    assert full["steps"][0]["expected_output"] == "rows: 3\n"
+    assert full["steps"][0]["expect_output"] == [{"match": r"^rows: \d+$", "hint": "the rows line"}]
+
+    # Emptied in the editor: removed from teacher.yaml.
+    payload["steps"][0] = dict(full["steps"][0], expected_output="", expect_output=[])
+    assert client.put(f"/api/exercises/{PKG}", json=payload, headers=th).status_code == 200
+    teacher = yaml.safe_load((packages.exercises_dir() / PKG / "teacher.yaml").read_text(encoding="utf-8"))
+    assert "expected_output" not in teacher["steps"][0] and "expect_output" not in teacher["steps"][0]
+
+
+def test_editor_sets_chat_history_and_resume(client):
+    th = _th(client)
+    full = client.get(f"/api/exercises/{PKG}", headers=th).json()
+    assert full["chat_history"] is True and full["resume_minutes"] == 30 and not full["resume_minutes_set"]
+    payload = {k: full[k] for k in ("exercise_id", "title_en", "title_he", "default_mode", "brief_md", "variants",
+                                    "welcome_suggestions", "required_error_strings", "param_labels")}
+    payload.update(chat_history=False, resume_minutes=0)
+    assert client.put(f"/api/exercises/{PKG}", json=payload, headers=th).status_code == 200
+    doc = yaml.safe_load((packages.exercises_dir() / PKG / "exercise.yaml").read_text(encoding="utf-8"))
+    assert doc["chat_history"] is False and doc["resume_minutes"] == 0
+    full = client.get(f"/api/exercises/{PKG}", headers=th).json()
+    assert full["chat_history"] is False and full["resume_minutes"] == 0 and full["resume_minutes_set"]
+    assert client.put(f"/api/exercises/{PKG}", json={**payload, "resume_minutes": -1}, headers=th).status_code == 422
+    payload.update(chat_history=True)
+    assert client.put(f"/api/exercises/{PKG}", json=payload, headers=th).status_code == 200
+
+
 def test_export(client):
     th = _th(client)
     z = zipfile.ZipFile(io.BytesIO(client.get(f"/api/exercises/{PKG}/export", headers=th).content))

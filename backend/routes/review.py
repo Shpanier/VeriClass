@@ -6,15 +6,33 @@ direct one, each in English and Hebrew. The dashboard polls `/api/reviews/pendin
 can have the four drafted again by a stronger model (`/api/reviews/{id}/regenerate`),
 and calls `/api/reviews/{id}/select` with the answer it picked (possibly edited,
 or the question bank's). The held /ask request then unblocks and streams it back.
+
+Keeping the queue in step with the students (who is still waiting for what):
+- A question is "waiting" while the student's /ask request is open for it
+  (in memory: start_waiting / stop_waiting). It stops waiting when the request
+  ends for any reason: an answer, a deletion, the timeout, the student closing
+  the chat, the connection dropping, a server restart.
+- An answer to a question nobody waits for any more is not lost: it goes into
+  the session's messages and transcript (backend/transcript.py), and the
+  student's chat shows it when they are back, or at once if it is open.
+- The teacher can delete a question (status 'deleted'): a waiting student is
+  told at once, one who left finds the note in their chat when they are back
+  (unless the teacher chose not to tell them).
+- A question asked again by the same session replaces its older copy that
+  nobody waits for (status 'replaced'), so the queue has no duplicates.
+Status: pending | answered | deleted | replaced | expired (an IDE client that
+timed out, which can't receive a late answer).
 """
 import asyncio
 import json
+import re
+import threading
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend import bank, db, deps, exercises, prompting, student_llm, textutil
+from backend import bank, db, deps, exercises, prompting, student_llm, textutil, transcript
 from backend.agents import tutor
 from backend.prompts import course_name
 
@@ -40,6 +58,114 @@ def drop_event(review_id: int) -> None:
     _EVENTS.pop(review_id, None)
 
 
+# --- who is waiting --------------------------------------------------------
+# The teacher's decision and the student's request ending can happen at the same
+# moment (the decision route runs in a worker thread). Both go through _LOCK, so
+# exactly one side delivers: the waiting request, or the late delivery.
+_WAITING: dict[int, asyncio.AbstractEventLoop] = {}
+_LOCK = threading.Lock()
+
+
+def start_waiting(review_id: int) -> asyncio.Event:
+    """Call from the waiting request (in the event loop)."""
+    with _LOCK:
+        _WAITING[review_id] = asyncio.get_running_loop()
+        return event_for(review_id)
+
+
+def stop_waiting(review_id: int) -> str:
+    """The request for this question ends. Returns the question's status at
+    that moment; after this, a decision is delivered late (deliver_late)."""
+    with _LOCK:
+        _WAITING.pop(review_id, None)
+        drop_event(review_id)
+        with db.conn() as c:
+            row = c.execute("SELECT status FROM pending_reviews WHERE id = ?", (review_id,)).fetchone()
+    return row["status"] if row else "deleted"
+
+
+def is_waiting(review_id: int) -> bool:
+    return review_id in _WAITING
+
+
+def _decide(review_id: int, sql: str, args: tuple) -> bool:
+    """Apply the teacher's decision to a pending question. True when a request
+    waits for it (it delivers the decision); False when it must be delivered
+    late. Raises 409 when the question was decided meanwhile."""
+    with _LOCK:
+        with db.conn() as c:
+            cur = c.execute(sql + " WHERE id = ? AND status = 'pending'", (*args, review_id))
+            if cur.rowcount == 0:
+                raise HTTPException(409, "The question was answered or closed meanwhile.")
+        loop = _WAITING.get(review_id)
+        if loop is not None:
+            # The decision routes run in a worker thread; wake the request in its own loop.
+            loop.call_soon_threadsafe(event_for(review_id).set)
+            return True
+    return False
+
+
+def _row(review_id: int):
+    with db.conn() as c:
+        return c.execute(
+            "SELECT r.*, s.exercise, s.mode FROM pending_reviews r JOIN sessions s ON s.id = r.session_id "
+            "WHERE r.id = ?", (review_id,)).fetchone()
+
+
+def _quote(question: str) -> str:
+    q = " ".join((question or "").split())
+    return q if len(q) <= 120 else q[:117] + "…"
+
+
+def _hebrew(question: str, exercise_id: Optional[str] = None) -> bool:
+    """Write the student's note in Hebrew? The question's language; for a
+    question with no clear language ("aaaa", "??"), the exercise's."""
+    if textutil.detect_lang(question or "") == "he":
+        return True
+    if re.search(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}", question or ""):
+        return False  # a few English words: English
+    try:
+        ex = exercises.get(exercise_id) if exercise_id else None
+    except KeyError:
+        ex = None
+    return bool(ex) and textutil.has_hebrew(ex.get("brief_md") or "")  # what students read
+
+
+def deliver_late(review_id: int) -> None:
+    """The teacher answered a question nobody waits for any more: keep the
+    answer in the session's messages, and put it in the transcript so the
+    student's chat shows it (now if it is open, else after the next login)."""
+    r = _row(review_id)
+    chosen, text = chosen_text(review_id)
+    with db.conn() as c:
+        c.execute(
+            "INSERT INTO messages (session_id, role, body, mode_at_time, answer_level, model) "
+            "VALUES (?, 'assistant', ?, ?, ?, ?)",
+            (r["session_id"], text, r["mode"], chosen, model_of(review_id)),
+        )
+    head = (f"🧑‍🏫 **המרצה ענה על השאלה:** «{_quote(r['question'])}»" if _hebrew(r["question"], r["exercise"])
+            else f"🧑‍🏫 **Your teacher answered your question:** “{_quote(r['question'])}”")
+    transcript.record(r["session_id"], "tutor", f"{head}\n\n{text}", kind="text", origin="server")
+
+
+def deleted_message(question: str, note: Optional[str], exercise_id: Optional[str] = None) -> str:
+    """What the student reads when the teacher deleted their question."""
+    he = _hebrew(question, exercise_id)
+    text = (f"🗑️ המרצה מחק את השאלה «{_quote(question)}», והיא לא תיענה." if he
+            else f"🗑️ Your teacher deleted the question “{_quote(question)}”; it won't be answered.")
+    if note and note.strip():
+        text += f"\n\n> {note.strip()}"
+    return text
+
+
+def looks_like_noise(question: str) -> bool:
+    """A question that was most likely sent by mistake: empty, a few characters,
+    or no letters at all."""
+    q = (question or "").strip()
+    chars = set(q.replace(" ", "").lower())
+    return len(q) < 4 or not re.search(r"[^\W\d_]", q) or len(chars) <= 2
+
+
 def review_mode_enabled() -> bool:
     with db.conn() as c:
         row = c.execute(
@@ -54,7 +180,13 @@ def enqueue(session_id: str, question: str, variants: dict, plain: bool = False)
     """Store a question with its drafted answers (and its closest question-bank
     entry, if any) for the teacher. Returns the review id."""
     match = bank.match_for_session(session_id, question)
+    same = " ".join(question.split()).lower()
     with db.conn() as c:
+        for old in c.execute("SELECT id, question FROM pending_reviews WHERE session_id = ? AND status = 'pending'",
+                             (session_id,)).fetchall():
+            if " ".join(old["question"].split()).lower() == same and not is_waiting(old["id"]):
+                c.execute("UPDATE pending_reviews SET status = 'replaced', closed_at = CURRENT_TIMESTAMP "
+                          "WHERE id = ? AND status = 'pending'", (old["id"],))
         cur = c.execute(
             "INSERT INTO pending_reviews(session_id, question, "
             "variant_nudge, variant_normal, variant_more, variant_direct, "
@@ -141,6 +273,9 @@ def _item(r) -> dict:
     # The language the student wrote in, so the card opens on matching answers.
     item["suggested_lang"] = textutil.detect_lang(r["question"])
     item["bank_match"] = json.loads(r["bank_match"]) if r["bank_match"] else None
+    # Is the student's request still open for it? Else an answer reaches them later.
+    item["waiting"] = is_waiting(r["id"])
+    item["looks_like_noise"] = looks_like_noise(r["question"])
     return item
 
 
@@ -179,22 +314,88 @@ def select_variant(review_id: int, req: SelectRequest, teacher: dict = Depends(d
             f"SELECT status, {col or 'NULL'} AS variant FROM pending_reviews WHERE id = ?",
             (review_id,),
         ).fetchone()
-        if not row:
-            raise HTTPException(404, "Unknown review")
-        if row["status"] != "pending":
-            raise HTTPException(409, f"Review already {row['status']}")
-        # The student receives exactly this text (edited box, or the variant).
-        final = (req.text or "").strip() or (row["variant"] or "").strip()
-        if not final:
-            raise HTTPException(422, "Nothing to send (empty answer)")
-        c.execute(
-            "UPDATE pending_reviews SET status='answered', chosen_level=?, "
-            "chosen_lang=?, final_text=?, answered_at=CURRENT_TIMESTAMP "
-            "WHERE id = ?",
-            (req.chosen, req.lang, final, review_id),
-        )
-    event_for(review_id).set()
-    return {"ok": True, "chosen": req.chosen, "lang": req.lang}
+    if not row:
+        raise HTTPException(404, "Unknown review")
+    if row["status"] != "pending":
+        raise HTTPException(409, f"Review already {row['status']}")
+    # The student receives exactly this text (edited box, or the variant).
+    final = (req.text or "").strip() or (row["variant"] or "").strip()
+    if not final:
+        raise HTTPException(422, "Nothing to send (empty answer)")
+    live = _decide(review_id, "UPDATE pending_reviews SET status='answered', chosen_level=?, "
+                   "chosen_lang=?, final_text=?, answered_at=CURRENT_TIMESTAMP",
+                   (req.chosen, req.lang, final))
+    if not live:
+        deliver_late(review_id)
+    return {"ok": True, "chosen": req.chosen, "lang": req.lang, "delivered": "now" if live else "later"}
+
+
+# --- deleting questions ------------------------------------------------------
+
+class DeleteRequest(BaseModel):
+    notify: bool = True          # tell the student (now, or when they are back)
+    note: Optional[str] = None   # a line from the teacher, shown with it
+
+
+def _delete(review_id: int, notify: bool, note: Optional[str]) -> str:
+    """'now' (a waiting request tells the student), 'later' (a note in their
+    transcript) or 'silent'."""
+    r = _row(review_id)
+    if r is None:
+        raise HTTPException(404, "Unknown review")
+    if r["status"] != "pending":
+        raise HTTPException(409, f"Review already {r['status']}")
+    live = _decide(review_id, "UPDATE pending_reviews SET status='deleted', closed_at=CURRENT_TIMESTAMP, "
+                   "final_text=?", ((note or "").strip() or None,))
+    if live:
+        return "now"
+    if notify:
+        transcript.record(r["session_id"], "system", deleted_message(r["question"], note, r["exercise"]),
+                          kind="note", origin="server")
+        return "later"
+    return "silent"
+
+
+@router.post("/reviews/{review_id}/delete")
+def delete_review(review_id: int, req: DeleteRequest, teacher: dict = Depends(deps.require_teacher)):
+    """Delete a question (sent by mistake, or no longer relevant)."""
+    return {"ok": True, "student_told": _delete(review_id, req.notify, req.note)}
+
+
+class DeleteStaleRequest(BaseModel):
+    exercise_id: Optional[str] = None  # None: every exercise
+    notify: bool = False
+
+
+@router.post("/reviews/delete-stale")
+def delete_stale(req: DeleteStaleRequest, teacher: dict = Depends(deps.require_teacher)):
+    """Delete every pending question nobody waits for any more."""
+    with db.conn() as c:
+        rows = c.execute(
+            "SELECT r.id FROM pending_reviews r JOIN sessions s ON s.id = r.session_id "
+            "WHERE r.status = 'pending'" + (" AND s.exercise = ?" if req.exercise_id else ""),
+            (req.exercise_id,) if req.exercise_id else ()).fetchall()
+    deleted = 0
+    for r in rows:
+        if is_waiting(r["id"]):
+            continue
+        try:
+            _delete(r["id"], req.notify, None)
+            deleted += 1
+        except HTTPException:
+            pass  # decided meanwhile
+    return {"deleted": deleted}
+
+
+@router.get("/reviews/open/{session_id}")
+def open_questions(session_id: str, user: dict = Depends(deps.current_user)):
+    """The session's questions still with the teacher (for a chat that comes back)."""
+    deps.require_owns_session(session_id, user)
+    with db.conn() as c:
+        rows = c.execute("SELECT id, question, created_at FROM pending_reviews WHERE session_id = ? "
+                         "AND status = 'pending' ORDER BY id", (session_id,)).fetchall()
+    return [{"id": r["id"], "question": r["question"], "created_at": r["created_at"],
+             "waiting": is_waiting(r["id"])} for r in rows]
 
 
 class RegenerateRequest(BaseModel):

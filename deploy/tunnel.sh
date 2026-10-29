@@ -63,7 +63,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-backend_up() { lsof -ti "tcp:$BACKEND_PORT" >/dev/null 2>&1; }
+# Only a process LISTENING on the port counts: a backend that is shutting down
+# (or a client still connected to it) must not stop a new one from starting.
+backend_up() { lsof -ti "tcp:$BACKEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; }
 
 if [[ "$WITH_BACKEND" -eq 1 ]]; then
   if backend_up; then
@@ -77,7 +79,12 @@ if [[ "$WITH_BACKEND" -eq 1 ]]; then
          exec uvicorn backend.main:app --port "$BACKEND_PORT" ) \
       >"$PROJECT_ROOT/deploy/backend.log" 2>&1 &
     BACKEND_PID=$!
-    sleep 2
+    # Loading the chat (Chainlit) takes a while; give it up to a minute.
+    for _ in $(seq 1 60); do
+      backend_up && break
+      kill -0 "$BACKEND_PID" 2>/dev/null || break
+      sleep 1
+    done
     backend_up || die "Backend failed to start. Check deploy/backend.log"
   fi
 else

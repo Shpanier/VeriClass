@@ -323,3 +323,40 @@ def tutor_context(ex: dict[str, Any], session_id: str, plain: bool = False) -> s
         f"\"Done with step {n}\" followed by their answers, so the teacher can check it."
         + fmt
     )
+
+
+def reset_to(session_id: str, n: int, note: Optional[str] = None) -> dict[str, Any]:
+    """Send a session back to step n (1 = from the beginning), for any
+    step-by-step lab. Its records of step n and later are kept for the record
+    (status 'reset') but no longer count; the quiz questions it still had to
+    answer about those steps are withdrawn. `note`, when given, goes into the
+    session's transcript, so the student's chat shows it. Returns the step the
+    session was on (`from`) and the step it is on now (`to`)."""
+    from backend import transcript  # transcript doesn't import steps; avoids a cycle at import
+
+    before = current_step(session_id)
+    n = max(1, min(int(n), before))
+    if n < before or _has_open_rows(session_id, n):
+        with db.conn() as c:
+            c.execute(
+                "UPDATE step_checks SET status = 'reset', delivered = 1, decided_at = CURRENT_TIMESTAMP "
+                "WHERE session_id = ? AND step >= ? AND status IN ('approved', 'waiting', 'pending', 'returned')",
+                (session_id, n),
+            )
+            c.execute(
+                "UPDATE probes SET status = 'cancelled' WHERE session_id = ? AND status = 'pending' "
+                "AND quiz_step IS NOT NULL AND quiz_step >= ?",
+                (session_id, n),
+            )
+            c.execute("UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
+        if note:
+            transcript.record(session_id, "system", note, kind="reset", step=n, origin="server")
+    return {"session_id": session_id, "from": before, "to": current_step(session_id)}
+
+
+def _has_open_rows(session_id: str, n: int) -> bool:
+    """Anything at step n or later that still counts (an output waiting for the teacher)."""
+    with db.conn() as c:
+        return c.execute(
+            "SELECT 1 FROM step_checks WHERE session_id = ? AND step >= ? "
+            "AND status IN ('waiting', 'pending')", (session_id, n)).fetchone() is not None

@@ -213,6 +213,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ course_id: courseId, released }),
     }),
+  resetSession: (sessionId: string, step: number) =>
+    j<{ from: number; to: number }>(`/api/sessions/${encodeURIComponent(sessionId)}/reset`, {
+      method: "POST",
+      body: JSON.stringify({ step }),
+    }),
+  resetCourse: (exerciseId: string, courseId: string, step: number) =>
+    j<{ sessions: number; moved: number }>(`/api/exercises/${encodeURIComponent(exerciseId)}/reset`, {
+      method: "POST",
+      body: JSON.stringify({ course_id: courseId, step }),
+    }),
+  letThrough: (exerciseId: string, sessionId: string, step: number) =>
+    j<{ ok: boolean }>(`/api/pacing/${encodeURIComponent(exerciseId)}/let-through`, {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, step }),
+    }),
   setQuiz: (exerciseId: string, key: string, approved: boolean, body?: string) =>
     j<PacingQuizItem>(`/api/pacing/${encodeURIComponent(exerciseId)}/quiz/${key}`, {
       method: "POST",
@@ -261,8 +276,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ password }),
     }),
+  deleteReview: (id: number, notify: boolean, note?: string) =>
+    j<{ ok: boolean; student_told: "now" | "later" | "silent" }>(`/api/reviews/${id}/delete`, {
+      method: "POST",
+      body: JSON.stringify({ notify, note: note ?? null }),
+    }),
+  deleteStaleReviews: (notify: boolean) =>
+    j<{ deleted: number }>("/api/reviews/delete-stale", {
+      method: "POST",
+      body: JSON.stringify({ notify }),
+    }),
   selectReview: (id: number, chosen: AnswerLevel | "bank", lang: Lang, text?: string) =>
-    j<{ ok: boolean }>(`/api/reviews/${id}/select`, {
+    j<{ ok: boolean; delivered?: "now" | "later" }>(`/api/reviews/${id}/select`, {
       method: "POST",
       body: JSON.stringify(text === undefined ? { chosen, lang } : { chosen, lang, text }),
     }),

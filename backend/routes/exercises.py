@@ -1,13 +1,14 @@
 import base64
 import binascii
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from backend import db, deps, exercises, packages, pacing, steps, terminal
+from backend import db, deps, exercises, packages, pacing, steps, terminal, transcript
+from backend.routes import sessions as sessions_routes
 from backend import params as param_utils
 
 router = APIRouter()
@@ -151,9 +152,15 @@ def _full(ex: dict[str, Any]) -> dict[str, Any]:
         "pacing": ex.get("pacing"),
         "open_steps": ex.get("open_steps"),
         "workspace": ex.get("workspace"),
+        # The transcript and session resume (backend/transcript.py, routes/sessions.py).
+        "chat_history": transcript.enabled(ex),
+        "resume_minutes": sessions_routes.resume_minutes(ex),
+        "resume_minutes_set": ex.get("resume_minutes") is not None,
+        "output_in_chat": pacing.output_in_chat(ex),
         # Steps with their teacher-only fields (this view is for the teacher).
         "steps": [
-            {k: st.get(k) for k in ("title", "text", "minutes", "expected", "questions")}
+            {**{k: st.get(k) for k in ("title", "text", "minutes", "expected", "questions", "expected_output")},
+             "expect_output": pacing.output_rules(st)}
             for st in ex.get("steps") or []
         ],
         "implicit_variant": bool(ex.get("implicit_variant")),
@@ -278,6 +285,11 @@ class ParamLabel(BaseModel):
     note: Optional[str] = None
 
 
+class OutputCheck(BaseModel):
+    match: str  # a regular expression, searched line by line
+    hint: Optional[str] = None  # what the teacher sees when it doesn't match
+
+
 class StepPayload(BaseModel):
     title: str
     text: str
@@ -285,6 +297,10 @@ class StepPayload(BaseModel):
     # Teacher-only (teacher.yaml in a package).
     expected: Optional[str] = None
     questions: Optional[int] = None
+    # What the step's commands print, and the checks a pasted output must pass.
+    # None keeps what the exercise has.
+    expected_output: Optional[str] = None
+    expect_output: Optional[list[OutputCheck]] = None
 
 
 class ExercisePayload(BaseModel):
@@ -306,6 +322,12 @@ class ExercisePayload(BaseModel):
     language: Optional[str] = None
     course_name: Optional[str] = None
     check_command: Optional[str] = None
+    # Keep the chat's transcript and replay it after a new login (default on),
+    # and how recent a session must be to be resumed (0 = always). None keeps.
+    chat_history: Optional[bool] = None
+    resume_minutes: Optional[int] = Field(default=None, ge=0)
+    # A step's output pasted as a chat message (backend/pacing.py): accept | ask | off.
+    output_in_chat: Optional[Literal["accept", "ask", "off"]] = None
 
 
 @router.post("/exercises")

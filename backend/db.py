@@ -118,6 +118,20 @@ CREATE TABLE IF NOT EXISTS step_checks (
     decided_at   TEXT
 );
 
+-- A session's chat transcript (backend/transcript.py): replayed when the
+-- student logs in again. origin 'client' = the student's chat wrote it,
+-- 'server' = the server did (e.g. the teacher's reset note).
+CREATE TABLE IF NOT EXISTS chat_transcript (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL,
+    author      TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'text',
+    step        INTEGER,
+    content     TEXT NOT NULL,
+    origin      TEXT NOT NULL DEFAULT 'client',
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Class-paced labs (backend/pacing.py): steps 1..released are open to the
 -- course's students. course_id '' = students outside every course.
 CREATE TABLE IF NOT EXISTS step_release (
@@ -330,6 +344,7 @@ CREATE TABLE IF NOT EXISTS answer_cache (
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_submissions_session ON submissions(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_probes_session ON probes(session_id, status);
+CREATE INDEX IF NOT EXISTS idx_transcript_session ON chat_transcript(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, last_active_at);
 CREATE INDEX IF NOT EXISTS idx_pending_reviews_status ON pending_reviews(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_proctor_session ON proctor_events(session_id, id);
@@ -371,6 +386,10 @@ def init_schema() -> None:
             "model": "TEXT",      # the LLM that wrote this reply (NULL: teacher, steps, older rows)
             "cached": "INTEGER NOT NULL DEFAULT 0",  # 1: served from answer_cache, no LLM call
         })
+        _add_missing_columns(c, "pending_reviews", {"closed_at": "TEXT"})
+        # Which open chat wrote a transcript entry (another tab, an earlier
+        # session of the same student): the others show it live.
+        _add_missing_columns(c, "chat_transcript", {"client": "TEXT"})
         _add_missing_columns(c, "pending_reviews", {
             "variant_nudge_he": "TEXT",
             "variant_normal_he": "TEXT",

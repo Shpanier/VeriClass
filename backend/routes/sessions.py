@@ -31,6 +31,14 @@ def _trace_key(c, session_id: str) -> str:
     return key
 
 
+def resume_minutes(exercise: dict) -> int:
+    """How recent a session must be to be resumed; 0 = always."""
+    value = exercise.get("resume_minutes")
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return 0 if pacing.is_paced(exercise) else 30
+
+
 @router.post("/sessions")
 def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_user)):
     user_id = user["id"]
@@ -40,11 +48,13 @@ def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_us
         raise HTTPException(e.status, str(e))
 
     with db.conn() as c:
-        # Resume any session for this (user, exercise) that's still active.
-        # Matches the dashboard's 30-min "active" window so a refresh doesn't
-        # spawn duplicate rows. A class-paced lab resumes however old the session
-        # is: progress is kept per session, and a lab outlasts a break.
-        recent = "" if pacing.is_paced(exercise) else "AND last_active_at >= datetime('now', '-30 minutes')"
+        # Resume this (user, exercise)'s latest session, with its progress and
+        # its transcript (backend/transcript.py), when it was active within the
+        # exercise's resume_minutes (0 = however old). Default: always for a
+        # class-paced lab, which outlasts a break; otherwise 30 minutes, the
+        # dashboard's "active" window, so a refresh doesn't spawn duplicate rows.
+        minutes = resume_minutes(exercise)
+        recent = f"AND last_active_at >= datetime('now', '-{minutes} minutes')" if minutes else ""
         existing = c.execute(
             f"""
             SELECT id, mode, variant FROM sessions

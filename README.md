@@ -115,6 +115,22 @@ Global toggle in the dashboard header. When on:
 5. The chosen level is logged on `messages.answer_level` for later
    correlation with the student's grade.
 
+**Keeping the queue in step with the students.** Each question shows whether
+the student is **waiting now** (their request is open) or **not waiting**: they
+closed the chat, their connection dropped, the 10-minute wait ran out, or the
+server restarted. An answer to a question nobody waits for is not lost: it is
+stored and goes into the student's chat transcript, so the student chat shows it
+at once if it is open again, or after their next login (a client that can show
+it says so with `X-VeriClass-Transcript: 1`; for any other, such as the IDE
+plugin, a timeout still closes the question). **🗑️ Delete** removes a question
+sent by mistake or no longer relevant; with *tell the student* (default, off for
+questions that look sent by mistake) a waiting student is told at once, and one
+who left finds the note when they are back. **🧹 Delete the questions nobody is
+waiting for** clears the leftovers in one click. A question the same student
+asks again replaces its older copy, and a student who logs in again sees which
+of their questions are still with the teacher. API: `POST /api/reviews/{id}/delete`
+(`{"notify", "note"}`), `POST /api/reviews/delete-stale`, `GET /api/reviews/open/{session_id}`.
+
 Use this in high-stakes labs, during summative assessment, or when a
 particular student needs heavily-scaffolded support. The model **never**
 returns a full working solution at any level — that constraint is enforced
@@ -411,20 +427,51 @@ student chat (the Chainlit app) as the only chat they may use. The chat hands ou
 the lab one step at a time; the lecturer keeps the whole class on the same step.
 
 - **Steps open from the start** (`open_steps`, e.g. the setup part) go at each
-  student's own pace. The lecturer opens the rest for a whole course from the
-  dashboard (*Class pacing*: "▶ Open B4", or "Open up to…"). A student who
+  student's own pace, until the lecturer sets the course's marker in the
+  dashboard (*Class pacing*: "▶ Open B4", or "Open up to…" any step, including
+  one of the steps open from the start, e.g. "up to A5" to stop everyone there). A student who
   finished every open step waits in the chat, and the next step appears there by
   itself when it opens.
 - **Done = the step's output.** Every step has a *Done* button (typing "סיימתי"
-  or "done" works too). For a step with `expect_output` patterns the student
-  pastes what the terminal printed; the server checks it and says what is
-  missing. They may continue anyway, and the lecturer sees those steps flagged.
+  or "done" works too). For a step with `expect_output` checks the student
+  pastes what the terminal printed. An output that passes every check moves the
+  student on by itself. One that doesn't waits for the lecturer: the dashboard
+  shows it next to the step's `expected_output`, with *Let them continue*;
+  meanwhile the student may paste again. Students never see the expected output
+  or the checks. A student who pastes the output as an ordinary chat message,
+  without *Done*, gets the same: the server recognizes it (`POST
+  /api/steps/detect`) and finishes the step; an output that passes only some of
+  the checks makes the chat ask "is this the output of step X, or a question?".
 - **Questions after steps** (`quiz` in teacher.yaml) reach students only after
   the lecturer approves them in the dashboard (the wording can be edited there).
   An approved question is asked when a student finishes its step, the next step
   waits for the answer, and the answer is graded against the model answer.
-- Progress is kept across breaks: a class-paced lab resumes the student's
-  session however old it is.
+- **Back to an earlier step.** In *Class pacing*, "↺ Back to step…" on a
+  student (or "↺ Everyone back to step…" for the course) sends them back, to
+  the beginning if need be. Their work from that step on stays in the record
+  (status `reset`) but no longer counts, questions still waiting about those
+  steps are withdrawn, and their chat says so and shows the step again. The
+  API is `POST /api/sessions/{id}/reset` and `POST /api/exercises/{id}/reset`
+  (`{"step": n, "course_id": ...}`); it works for any step-by-step lab.
+
+### Chat history and resuming
+
+The server keeps each session's chat transcript (`backend/transcript.py`):
+everything the student chat showed and everything the student wrote. A student
+who closes the browser or restarts the computer logs in again, gets the same
+session back, sees the whole conversation replayed, and carries on from the
+same step (a step already on screen only gets its *Done* button again). The
+server's own notes to a student, such as a reset, reach an open chat through
+the same transcript. Any client can use it: `GET /api/transcript/{session_id}`
+(`?after=<id>`, `?origin=server`) and `POST` to append; teachers can read any
+session's transcript.
+
+| Setting | Where | Default |
+|---|---|---|
+| `chat_history: false` | exercise.yaml, or *Keep the chat history* in the exercise editor | on |
+| `output_in_chat: accept \| ask \| off` | exercise.yaml, or the exercise editor; a step's output pasted as a chat message: accept it when it passes every check (ask when only some do), always ask, or treat it as a question | `accept` |
+| `resume_minutes: N` | exercise.yaml, or the exercise editor; how recent a session must be to be resumed, `0` = always | always for `pacing: class`, otherwise 30 |
+| `CHAT_HISTORY_REPLAY_MAX` | environment | 400 (the latest entries replayed after a login) |
 
 In `exercise.yaml`:
 
@@ -433,23 +480,30 @@ pacing: class          # the lecturer opens steps for the whole class
 open_steps: 8          # steps 1-8 are open from the start
 workspace: codespace   # students work in a Codespace (no Windows/macOS lint)
 steps:
-  - label: A1          # the step's name in the chat and the dashboard
-    title: Check Python
+  - label: B2          # the step's name in the chat and the dashboard
+    title: Count the rows
     minutes: 4
     text: |
-      ...commands in ```bash blocks, expected output in ```text blocks...
+      ...what to do, and the commands in ```bash blocks (no expected output here:
+      students would see it)...
 ```
 
 In `teacher.yaml`, per step:
 
 ```yaml
-    expect_output:     # regular expressions, searched line by line
-      - match: '^Python 3'
-        hint: the "Python 3.x" line
+    expected: The file has 3 data rows.     # the answer in words
+    expected_output: |                      # what the commands print, shown to the
+      rows: 3                               # lecturer next to a student's paste
+    expect_output:     # checks a paste must pass; regular expressions, line by line
+      - match: '^rows: \d+$'
+        hint: the rows line                  # what the lecturer sees when it's missing
     quiz:
-      - q: What does the program you just ran do?
-        answer: It prints the text to the screen.
+      - q: Why does wc -l print one more than the number of rows?
+        answer: It counts the header line too.
 ```
+
+All of these can also be seen and changed in the dashboard's exercise editor
+(per step: expected answer, expected output, output checks).
 
 A long lab is easier to write as one Markdown file: `python
 scripts/steps_from_markdown.py <package>/source.md` writes exercise.yaml and
@@ -579,9 +633,10 @@ backend/                     # FastAPI app
   prompts.py                 # system prompts per (exercise, mode)
   exercises.py               # YAML loader and accessor
   pacing.py                  # class-paced labs: open steps, output checks, quiz
+  transcript.py              # each session's chat transcript, replayed after a new login
   routes/
     login.py, sessions.py, exercises.py, ask.py,
-    probes.py, students.py, mode.py, review.py, pacing.py
+    probes.py, students.py, mode.py, review.py, pacing.py, transcript.py
 
 student_app/
   app.py                     # Chainlit student UI (login + chat + probes + paced steps)
@@ -624,6 +679,7 @@ scripts/
 | `STUDENT_CLIENT_MODE` | CLion plugin behavior: `chat` (default) or `ide`. Ignored by Chainlit. |
 | `SCAFFOLD_FILENAME`   | File the plugin's `ide` mode scaffolds into the project. Default `mcalc.c`. |
 | `VERICLASS_DATA_DIR`   | The private data folder (exercise packages, login codes, reports). Default `../VeriClassPrivateData`. |
+| `CHAT_HISTORY_REPLAY_MAX` | How many of a session's latest chat-transcript entries a new login replays (default 400). |
 | `STUDENT_CHAT_PATH`   | Serve the student chat inside the backend at this path (e.g. `/chat`); `deploy/tunnel.sh --with-chat` sets it. Off by default. |
 | `BACKEND_URL`         | Where the student chat calls the backend's API. Default `http://127.0.0.1:8010`. |
 | `CLAUDE_STRONG_MODEL`, `CLAUDE_BEST_MODEL` | The review queue's *Redo with* models (Sonnet 5.5, Opus 5.5). |
