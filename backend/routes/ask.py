@@ -11,8 +11,6 @@ from backend import (
     answer_cache, bank, db, deps, environment, exercises, pacing, prompting, steps, student_llm, textutil,
     transcript,
 )
-from backend.agents import tutor
-from backend.prompts import course_name
 from backend.routes import review as review_mod
 
 REVIEW_TIMEOUT_SECONDS = 600  # how long the student request waits for the teacher
@@ -237,25 +235,16 @@ def _reask(req: AskRequest, s, ex, sys_prompt: str) -> StreamingResponse:
 
 async def _gen_review(req: "AskRequest", s, sys_prompt: str, msgs: list[dict], plain: bool = False,
                       late_ok: bool = False):
-    """Review-mode generator: draft four answers, wait for the teacher's pick,
-    stream the chosen text."""
+    """Review-mode generator: hand the question to the teacher at once, draft
+    the answers meanwhile (each shown as soon as it is ready), wait for the
+    teacher's pick, stream the chosen text."""
     # Tell the student something is happening so they don't think it hung.
     he = review_mod.hebrew_for(req.message, s["exercise"])
     yield ("🧑‍🏫 _המרצה בודק את השאלה שלכם — רגע…_\n\n" if he
            else "🧑‍🏫 _Your teacher is reviewing your question — one moment…_\n\n")
 
-    try:
-        variants = await tutor.generate_variants(
-            sys_prompt, req.session_id, req.message,
-            course=course_name(exercises.get(s["exercise"])),
-            translate_to=review_mod.translation_target(),
-        )
-    except Exception as e:
-        log.exception("variant generation failed")
-        yield f"_⚠️ Could not generate review options: {e}_\n"
-        return
-
-    review_id = review_mod.enqueue(req.session_id, req.message, variants, plain)
+    review_id = review_mod.enqueue(req.session_id, req.message, plain)
+    review_mod.start_drafting(review_id, s, sys_prompt, req.message)
     ev = review_mod.start_waiting(review_id)
     # late_ok: the client shows the transcript, so an answer after the timeout
     # still reaches the student there. Any other client (the IDE plugin) can't

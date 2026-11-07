@@ -175,6 +175,27 @@ CREATE TABLE IF NOT EXISTS pending_reviews (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
+-- The answers drafted for a question in the review queue, one row each
+-- (backend/routes/review.py): the teacher sees every answer as soon as its
+-- model is done with it. slot = which answer ('nudge' | 'normal' | 'more' |
+-- 'direct' by the default model, 'best' = the extra answer by the best model);
+-- status 'drafting' | 'ready' | 'failed' | 'replaced' (drafted again).
+CREATE TABLE IF NOT EXISTS review_answers (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    review_id   INTEGER NOT NULL,
+    slot        TEXT NOT NULL,
+    level       TEXT NOT NULL,
+    model       TEXT,
+    status      TEXT NOT NULL DEFAULT 'drafting',
+    text_en     TEXT,
+    text_he     TEXT,
+    error       TEXT,
+    seconds     REAL,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ready_at    TEXT,
+    FOREIGN KEY (review_id) REFERENCES pending_reviews(id)
+);
+
 CREATE TABLE IF NOT EXISTS probes (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id      TEXT NOT NULL,
@@ -347,6 +368,7 @@ CREATE INDEX IF NOT EXISTS idx_probes_session ON probes(session_id, status);
 CREATE INDEX IF NOT EXISTS idx_transcript_session ON chat_transcript(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, last_active_at);
 CREATE INDEX IF NOT EXISTS idx_pending_reviews_status ON pending_reviews(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_review_answers_review ON review_answers(review_id, id);
 CREATE INDEX IF NOT EXISTS idx_proctor_session ON proctor_events(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_terminal_session ON terminal_commands(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_pastes_session ON pastes(session_id, id);
@@ -407,6 +429,12 @@ def init_schema() -> None:
             "regenerated_at": "TEXT",     # set when the teacher had them drafted again
             "render_plain": "INTEGER NOT NULL DEFAULT 0",  # the student's client shows plain text
             "bank_match": "TEXT",         # JSON: the closest question-bank entry (backend/bank.py)
+            # Which drafted answer was sent (review_answers.slot, 'bank' or 'own'),
+            # whether it was saved into the question bank, and how many other
+            # students it was sent to as a class note.
+            "chosen_slot": "TEXT",
+            "saved_to_bank": "INTEGER NOT NULL DEFAULT 0",
+            "sent_to_class": "INTEGER NOT NULL DEFAULT 0",
         })
         _add_missing_columns(c, "submissions", {
             "language": "TEXT",

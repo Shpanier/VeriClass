@@ -1,6 +1,7 @@
 import type {
   ActiveExercise,
   AnswerLevel,
+  AnswerSlot,
   Attendance,
   Meeting,
   Course,
@@ -18,6 +19,7 @@ import type {
   ProctorEvent,
   RegenModel,
   ReviewConfig,
+  SelectResult,
   TranslateTo,
   TranscriptResponse,
   RosterResult,
@@ -207,15 +209,29 @@ export const api = {
     }),
   pendingReviews: () => j<PendingReview[]>("/api/reviews/pending"),
   reviewConfig: () => j<ReviewConfig>("/api/reviews/config"),
-  setReviewTranslate: (translate_to: TranslateTo) =>
+  setReviewConfig: (change: {
+    translate_to?: TranslateTo; best_answer?: boolean; best_level?: AnswerLevel; save_to_bank?: boolean;
+  }) =>
     j<ReviewConfig>("/api/reviews/config", {
       method: "POST",
-      body: JSON.stringify({ translate_to }),
+      body: JSON.stringify(change),
     }),
-  regenerateReview: (id: number, model: RegenModel["key"]) =>
+  /** Draft again: the four levels with a stronger model, or (no model) the failed answers. */
+  regenerateReview: (id: number, model?: RegenModel["key"], slots?: AnswerSlot[]) =>
     j<PendingReview>(`/api/reviews/${id}/regenerate`, {
       method: "POST",
-      body: JSON.stringify({ model }),
+      body: JSON.stringify({ model: model ?? null, slots: slots ?? null }),
+    }),
+  /** How many students a class note reaches now. */
+  broadcastRecipients: (exerciseId: string, courseId?: string | null) =>
+    j<{ count: number; minutes: number }>(
+      `/api/broadcast/recipients?exercise_id=${encodeURIComponent(exerciseId)}`
+      + (courseId ? `&course_id=${encodeURIComponent(courseId)}` : "")),
+  /** A note from the teacher to every student active on the exercise. */
+  broadcast: (exerciseId: string, text: string, courseId?: string | null) =>
+    j<{ sent: number; skipped: number }>("/api/broadcast", {
+      method: "POST",
+      body: JSON.stringify({ exercise_id: exerciseId, text, course_id: courseId ?? null }),
     }),
   pendingStepChecks: () => j<StepChecksResponse>("/api/step-checks/pending"),
   pacing: (exerciseId: string) => j<PacingOverview>(`/api/pacing/${encodeURIComponent(exerciseId)}`),
@@ -306,9 +322,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ notify }),
     }),
-  selectReview: (id: number, chosen: AnswerLevel | "bank", lang: Lang, text?: string) =>
-    j<{ ok: boolean; delivered?: "now" | "later" }>(`/api/reviews/${id}/select`, {
+  /** Send an answer: a drafted one (its slot), the bank's or the teacher's own text;
+   *  optionally saved into the question bank and sent to the whole class too. */
+  selectReview: (id: number, chosen: AnswerSlot | "bank" | "own", lang: Lang, text?: string,
+                 options?: { save_to_bank?: boolean; send_to_class?: boolean; level?: AnswerLevel }) =>
+    j<SelectResult>(`/api/reviews/${id}/select`, {
       method: "POST",
-      body: JSON.stringify(text === undefined ? { chosen, lang } : { chosen, lang, text }),
+      body: JSON.stringify({ chosen, lang, ...(text === undefined ? {} : { text }), ...(options ?? {}) }),
     }),
 };

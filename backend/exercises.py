@@ -316,6 +316,18 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
     return stored
 
 
+def set_faq(exercise_id: str, entries: list[dict[str, Any]]) -> None:
+    """Replace an exercise's question bank (backend/bank.py entries) and persist
+    it: a package's faq.yaml (its folder is the source of truth), else the
+    exercise's database row. Raises KeyError for an unknown exercise."""
+    ex = _LOADED[exercise_id]
+    if exercise_id in _PACKAGE_IDS:
+        packages.write_faq(ex, entries)
+        ex["faq"] = entries
+        return
+    _upsert({**ex, "faq": entries})
+
+
 def set_active(exercise_id: Optional[str]) -> None:
     """Make an exercise the active one; None switches the active exercise off."""
     if exercise_id is None:

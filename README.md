@@ -98,24 +98,61 @@ This is the assessment backbone: probes test whether the student
 ### 3. Teacher-review mode — full gating
 Global toggle in the dashboard header. When on:
 
-1. Student asks a question.
-2. The backend drafts **four answers** in one LLM call, each in English and Hebrew:
+1. Student asks a question. It is in the instructor's review queue at once;
+   the student sees *"Your teacher is reviewing your question…"*.
+2. The backend drafts **five answers**, one model call each, all at the same
+   time, each in English and Hebrew:
    - **Nudge** — one Socratic line, no answer
    - **Normal** — guidance plus a small pointer, no full solution
    - **Normal + more** — same, with an extra explanation or analogy
    - **Direct** — not Socratic: the plain answer to what was asked, with a
      short example (never the whole step's solution)
-3. The question and the four answers appear in the instructor's review
-   queue, opened in the language the student wrote in. The student sees
-   *"Your teacher is reviewing your question…"*. If the drafts aren't good
-   enough, **Redo with Sonnet 5.5 / Opus 5.5** drafts them again with a
-   stronger model (`CLAUDE_STRONG_MODEL`, `CLAUDE_BEST_MODEL`). When the
-   question is close to one in the exercise's **question bank**, the bank's
-   ready answer is shown too.
-4. The instructor picks one (and may edit it). It is stored, then streamed to
-   the student, so a dropped connection doesn't lose it.
-5. The chosen level is logged on `messages.answer_level` for later
-   correlation with the student's grade.
+   - ✨ an extra answer by the **best model** (`CLAUDE_BEST_MODEL`, Opus 5.5;
+     direct by default, the level is a setting of the queue, and it can be
+     switched off)
+
+   The four are written by the default model (`CLAUDE_MODEL`, Haiku). Each
+   answer appears in the queue **the moment its model is done with it**, as a
+   full-width row, the first that finished on top (the nudge is usually
+   first), with the model's name and how long it took; a line under the rows
+   says which are still being written. An answer whose draft failed says so
+   with a *try again* button; **Redo with Sonnet 5.5 / Opus 5.5** drafts the
+   four levels again with a stronger model (`CLAUDE_STRONG_MODEL`,
+   `CLAUDE_BEST_MODEL`). When the question is close to one in the exercise's
+   **question bank**, the bank's ready answer is shown first; and there is
+   always a row for the instructor's **own answer**.
+3. The instructor sends one row (edited or not). It is stored, then streamed
+   to the student, so a dropped connection doesn't lose it. Two boxes go with
+   every send:
+   - 📚 **save to the question bank** (ticked by default; the default is a
+     setting of the queue): the question, its step, the level and the final
+     text go into the exercise's `faq.yaml` (or its database row when it has
+     no package folder), so the next student who asks something similar shows
+     the instructor's own answer first. The bank's answer sent again for a
+     reworded question goes back into the same entry, which learns the new
+     wording as a paraphrase.
+   - 📣 **Send to all students**: for a question the whole class should hear
+     (a conceptual one), the answer also goes to every student active on the
+     exercise in the last 30 minutes (`BROADCAST_ACTIVE_MINUTES`; the same
+     course as the student who asked, when they are in one), as a teacher's
+     note in their chat, web and PyCharm alike, with the question quoted; it
+     is in their chat at once if it is open, or after their next login, and
+     the tutor remembers it as part of the conversation. The dashboard asks
+     first and says how many students it reaches.
+4. The chosen level and model are logged on `messages.answer_level` and
+   `messages.model` for later correlation with the student's grade.
+
+API: `GET /api/reviews/pending` (each item carries `answers`, finished in
+the order they finished, and `drafting`), `POST /api/reviews/{id}/select`
+(`{"chosen": nudge|normal|more|direct|best|bank|own, "lang", "text",
+"save_to_bank", "send_to_class", "level"}`), `POST /api/reviews/{id}/regenerate`
+(`{"model": strong|best}` for the four levels, or `{}` / `{"slots": [...]}`
+for the failed ones), `GET/POST /api/reviews/config` (`best_answer`,
+`best_level`, `save_to_bank`, `translate_to`), `POST /api/broadcast`
+(`{"exercise_id", "text", "course_id"}`: a free note to the class) and
+`GET /api/broadcast/recipients`. Tables: `review_answers` (one row per
+drafted answer), `pending_reviews.chosen_slot`, `saved_to_bank`,
+`sent_to_class`.
 
 **Keeping the queue in step with the students.** Each question shows whether
 the student is **waiting now** (their request is open) or **not waiting**: they
@@ -134,9 +171,9 @@ of their questions are still with the teacher. API: `POST /api/reviews/{id}/dele
 (`{"notify", "note"}`), `POST /api/reviews/delete-stale`, `GET /api/reviews/open/{session_id}`.
 
 **Questions in other languages.** A question in neither Hebrew nor English (say,
-Arabic or Russian) arrives with a translation under it: the same model call that
-drafts the four answers names the question's language and translates it, so it
-costs no extra call. The queue's 🌐 setting picks the language (Hebrew by
+Arabic or Russian) arrives with a translation under it: the model call that
+drafts the nudge (the quickest) also names the question's language and
+translates it, so it costs no extra call. The queue's 🌐 setting picks the language (Hebrew by
 default, English, or off); it applies to questions asked from then on. *Redo
 with* keeps the translation. Stored on `pending_reviews.question_lang`,
 `question_translation` and `translated_to`; the setting is `review_translate_to`
@@ -700,7 +737,9 @@ scripts/
 | `CHAT_HISTORY_REPLAY_MAX` | How many of a session's latest chat-transcript entries a new login replays (default 400). |
 | `STUDENT_CHAT_PATH`   | Serve the student chat inside the backend at this path (e.g. `/chat`); `deploy/tunnel.sh --with-chat` sets it. Off by default. |
 | `BACKEND_URL`         | Where the student chat calls the backend's API. Default `http://127.0.0.1:8010`. |
-| `CLAUDE_STRONG_MODEL`, `CLAUDE_BEST_MODEL` | The review queue's *Redo with* models (Sonnet 5.5, Opus 5.5). |
+| `CLAUDE_STRONG_MODEL`, `CLAUDE_BEST_MODEL` | The review queue's *Redo with* models (Sonnet 5.5, Opus 5.5); the best model also writes the queue's extra answer for every question. |
+| `BROADCAST_ACTIVE_MINUTES` | "All students" (an answer sent to the class, `POST /api/broadcast`) = those active on the exercise in the last this many minutes (default 30). |
+| `TUTOR_TIMEOUT_SEC`, `TUTOR_MAX_TOKENS` | One review draft's model call: timeout (120) and output size (4096). |
 | `BANK_MATCH_THRESHOLD`, `BANK_AUTO_ANSWER`, `BANK_AUTO_THRESHOLD` | When the question bank's answer is shown, or (review mode off) sent directly. |
 
 `config/cloud_llm.yaml` sets the Gemini model and timeout the agent layer

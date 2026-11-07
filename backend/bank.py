@@ -13,7 +13,11 @@ lecturer's Claude Code session, so it costs the server nothing):
         approved: true               # optional, default true
 
 When a student asks something close to a bank question, the teacher's queue
-shows the ready answer next to the drafted ones. Matching is plain text
+shows the ready answer next to the drafted ones. An answer the teacher sends
+can be saved into the bank (save_answer, the queue's "save to the question
+bank" box), so the next similar question shows the teacher's own answer first:
+the entry carries the question, the step, the level and the text, and goes into
+the package's faq.yaml (or the exercise's database row when it has no package). Matching is plain text
 similarity (character trigrams plus words, TF-IDF cosine), so it needs no model
 call and works for Hebrew and English alike. With BANK_AUTO_ANSWER=true and
 review mode off, a very close match (BANK_AUTO_THRESHOLD) is answered straight
@@ -71,14 +75,19 @@ def normalize_entries(raw: Any, where: str = "faq") -> list[dict[str, Any]]:
         step = e.get("step")
         if step is not None and (not isinstance(step, int) or step < 1):
             raise ValueError(f"{where}: question {qid}: step must be a positive number")
-        out.append({
+        entry = {
             "id": qid,
             "step": step,
             "question": str(e["question"]).strip(),
             "paraphrases": [str(p).strip() for p in (e.get("paraphrases") or []) if str(p).strip()],
             "answers": answers,
             "approved": bool(e.get("approved", True)),
-        })
+        }
+        # Who wrote it (save_answer): kept so the file keeps saying so.
+        for k in ("source", "model"):
+            if e.get(k):
+                entry[k] = str(e[k])
+        out.append(entry)
     return out
 
 
@@ -152,3 +161,51 @@ def match_for_session(session_id: str, question: str) -> Optional[dict[str, Any]
         return None
     step = steps.current_step(session_id) if steps.steps_of(ex) else None
     return best_match(entries, question, step)
+
+
+def _same_question(a: str, b: str) -> bool:
+    return _norm(a) == _norm(b)
+
+
+def save_answer(exercise_id: str, question: str, level: str, lang: str, text: str,
+                step: Optional[int] = None, model: Optional[str] = None,
+                source: str = "teacher", merge_into: Optional[str] = None) -> dict[str, Any]:
+    """Add the teacher's answer to the exercise's question bank and persist it
+    (exercises.set_faq). The same question saved again at the same level
+    replaces the earlier answer; at another level it adds that level. With
+    `merge_into` (the id of the bank entry the question matched, whose answer
+    the teacher sent), the answer goes into that entry and the question joins
+    its paraphrases. Only the sent language's text is known, so the other
+    language gets the same text (shown as a fallback). Returns the entry."""
+    if level not in LEVELS:
+        level = "normal"
+    text = (text or "").strip()
+    question = " ".join((question or "").split())
+    if not text or not question:
+        raise ValueError("Nothing to save")
+    ex = exercises.get(exercise_id)
+    entries = [dict(e) for e in (ex.get("faq") or [])]
+    entry = next((e for e in entries if merge_into and e["id"] == merge_into), None)
+    if entry is not None:
+        known = [entry["question"], *entry.get("paraphrases", [])]
+        if not any(_same_question(q, question) for q in known):
+            entry["paraphrases"] = [*entry.get("paraphrases", []), question]
+    else:
+        entry = next((e for e in entries if _same_question(e["question"], question)), None)
+    if entry is None:
+        n = 1
+        while any(e["id"] == f"t{n:02d}" for e in entries):
+            n += 1
+        entry = {"id": f"t{n:02d}", "step": step, "question": question,
+                 "paraphrases": [], "answers": {}, "approved": True}
+        entries.append(entry)
+    elif step is not None and entry.get("step") is None:
+        entry["step"] = step
+    other = "he" if lang == "en" else "en"
+    entry["answers"] = {**entry.get("answers", {}),
+                        level: {lang: text, other: text}}
+    entry["source"] = source
+    if model:
+        entry["model"] = model
+    exercises.set_faq(exercise_id, entries)
+    return entry

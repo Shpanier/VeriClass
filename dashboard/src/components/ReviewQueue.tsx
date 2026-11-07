@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { AnswerLevel, BankMatch, Lang, PendingReview, RegenModel, TranslateTo } from "../types";
+import type {
+  AnswerLevel, AnswerSlot, BankMatch, Lang, PendingReview, RegenModel, ReviewAnswer, ReviewConfig,
+  SelectResult, TranslateTo,
+} from "../types";
 import { useLang } from "../i18n";
 
-const LEVELS: { key: AnswerLevel; tint: string }[] = [
-  { key: "nudge",  tint: "#e0f2fe" },
-  { key: "normal", tint: "#dcfce7" },
-  { key: "more",   tint: "#fef3c7" },
-  { key: "direct", tint: "#ede9fe" },
-];
+const LEVELS: AnswerLevel[] = ["nudge", "normal", "more", "direct"];
+const TINT: Record<AnswerLevel, string> = {
+  nudge: "#e0f2fe", normal: "#dcfce7", more: "#fef3c7", direct: "#ede9fe",
+};
+const BEST_TINT = "#fce7f3";
+const OWN_TINT = "#f3f4f6";
+
+type Chosen = AnswerSlot | "bank" | "own";
 
 /** A language code's name in the dashboard's language ("ar" -> "Arabic" / "ערבית"). */
 function langName(code: string | null, ui: Lang): string {
@@ -20,12 +25,9 @@ function langName(code: string | null, ui: Lang): string {
   }
 }
 
-/** Text of a level in a given language (Hebrew falls back to English if empty). */
-function variantText(r: PendingReview, level: AnswerLevel, lang: Lang): string | null {
-  if (lang === "he") {
-    return r[`variant_${level}_he` as const] ?? r[`variant_${level}` as const];
-  }
-  return r[`variant_${level}` as const];
+/** Text of an answer in a given language (Hebrew falls back to English if empty, and back). */
+function answerText(a: ReviewAnswer, lang: Lang): string {
+  return (lang === "he" ? a.text_he || a.text_en : a.text_en || a.text_he) ?? "";
 }
 
 /** "claude-opus-5-5" -> "Opus 5.5" (other model names are shown as they are). */
@@ -41,7 +43,13 @@ export function modelLabel(model: string | null): string {
 
 /** The bank's answer in the card's language: the normal level if it has one. */
 function bankLevels(m: BankMatch): AnswerLevel[] {
-  return LEVELS.map((l) => l.key).filter((k) => m.answers[k]);
+  return LEVELS.filter((k) => m.answers[k]);
+}
+
+/** Enough rows to show the whole text without an inner scrollbar (up to a limit). */
+function rowsFor(text: string): number {
+  const lines = text.split("\n").reduce((n, l) => n + 1 + Math.floor(l.length / 140), 0);
+  return Math.min(24, Math.max(3, lines + 1));
 }
 
 export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
@@ -52,22 +60,31 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
   const pending = allPending.filter((r) => r.exercise_id === exerciseId);
   const elsewhere = allPending.length - pending.length;
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [regenModels, setRegenModels] = useState<RegenModel[]>([]);
-  // Questions in neither Hebrew nor English arrive translated into this.
-  const [translateTo, setTranslateTo] = useState<TranslateTo>("he");
-  // A card being drafted again: which model, and any error.
-  const [regen, setRegen] = useState<Record<number, { label: string; error?: string }>>({});
-  // Teacher edits, keyed by `${reviewId}:${level}:${lang}` so each language's
+  const [cfg, setCfg] = useState<ReviewConfig | null>(null);
+  // A card being drafted again and failing.
+  const [regenError, setRegenError] = useState<Record<number, string>>({});
+  // Teacher edits, keyed by `${reviewId}:${slot}:${lang}` so each language's
   // box edits independently. Separate state so the 2s poll never clobbers them.
   const [edits, setEdits] = useState<Record<string, string>>({});
   // Per-card language to view/send; defaults to the language the student wrote in.
   const [cardLang, setCardLang] = useState<Record<number, Lang>>({});
   // Per-card level shown in the question-bank box.
   const [bankLevel, setBankLevel] = useState<Record<number, AnswerLevel>>({});
+  // Per-card "save to the question bank" (default from the settings).
+  const [saveBank, setSaveBank] = useState<Record<number, boolean>>({});
+  // "Send to all students": the row waiting for a yes, with how many it reaches.
+  const [confirmAll, setConfirmAll] = useState<{ id: number; key: string; count: number } | null>(null);
   // Deleting: tell the student (per card, default yes), and the "delete stale" confirmation.
   const [notify, setNotify] = useState<Record<number, boolean>>({});
   const [confirmStale, setConfirmStale] = useState(false);
+  // What the last send did ("sent to 12 students"), shown for a few seconds.
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const stale = allPending.filter((r) => !r.waiting).length;
+
+  const say = (text: string, error = false) => {
+    setNotice({ text, error });
+    setTimeout(() => setNotice((n) => (n && n.text === text ? null : n)), error ? 15000 : 8000);
+  };
 
   const remove = async (r: PendingReview) => {
     setBusyId(r.id);
@@ -93,15 +110,12 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
     }
   };
 
-  const editKey = (id: number, level: AnswerLevel | "bank", l: Lang) => `${id}:${level}:${l}`;
+  const editKey = (id: number, chosen: Chosen, l: Lang) => `${id}:${chosen}:${l}`;
   const langOf = (r: PendingReview): Lang => cardLang[r.id] ?? r.suggested_lang ?? lang;
 
   useEffect(() => {
     api.getReviewMode().then((r) => setEnabled(r.enabled)).catch(console.error);
-    api.reviewConfig().then((c) => {
-      setRegenModels(c.regen_models);
-      setTranslateTo(c.translate_to ?? "he");
-    }).catch(console.error);
+    api.reviewConfig().then(setCfg).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -122,6 +136,9 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
     catch (e) { console.error(e); setEnabled(!next); }
   };
 
+  const changeConfig = (change: Parameters<typeof api.setReviewConfig>[0]) =>
+    api.setReviewConfig(change).then(setCfg).catch(console.error);
+
   const clearEdits = (id: number) =>
     setEdits((e) => {
       const next = { ...e };
@@ -129,43 +146,126 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
       return next;
     });
 
-  const pick = async (id: number, level: AnswerLevel | "bank", l: Lang, text: string) => {
-    setBusyId(id);
+  const outcome = (res: SelectResult): { text: string; error: boolean } => {
+    const parts = [res.delivered === "later" ? t("reviewNotWaiting").split(":")[0] : t("send")];
+    if (res.saved_to_bank) parts.push(t("reviewSaved"));
+    if (res.sent_to_class) parts.push(t("reviewSentAll", { n: res.sent_to_class }));
+    if (res.bank_error) return { text: t("reviewBankFailed", { e: res.bank_error }), error: true };
+    if (res.class_error) return { text: t("reviewClassFailed", { e: res.class_error }), error: true };
+    return { text: "✓ " + parts.join(" · "), error: false };
+  };
+
+  const pick = async (r: PendingReview, chosen: Chosen, l: Lang, text: string, toClass = false,
+                      level?: AnswerLevel) => {
+    setBusyId(r.id);
+    setConfirmAll(null);
     try {
-      await api.selectReview(id, level, l, text);
-      setPending((p) => p.filter((r) => r.id !== id));
-      clearEdits(id);
+      const res = await api.selectReview(r.id, chosen, l, text, {
+        save_to_bank: saveBank[r.id] ?? cfg?.save_to_bank ?? true,
+        send_to_class: toClass,
+        ...(level ? { level } : {}),
+      });
+      setPending((p) => p.filter((x) => x.id !== r.id));
+      clearEdits(r.id);
+      const o = outcome(res);
+      say(o.text, o.error);
     } catch (e) {
-      console.error(e);
+      say(t("reviewSendFailed", { e: e instanceof Error ? e.message : String(e) }), true);
     } finally {
       setBusyId(null);
     }
   };
 
-  const redo = async (r: PendingReview, m: RegenModel) => {
-    setRegen((x) => ({ ...x, [r.id]: { label: m.label } }));
+  const askAll = async (r: PendingReview, key: string) => {
     try {
-      const fresh = await api.regenerateReview(r.id, m.key);
-      setPending((p) => p.map((x) => (x.id === r.id ? fresh : x)));
-      clearEdits(r.id);
-      setRegen((x) => { const next = { ...x }; delete next[r.id]; return next; });
+      const who = await api.broadcastRecipients(r.exercise_id ?? "", r.course_id);
+      setConfirmAll({ id: r.id, key, count: who.count });
     } catch (e) {
-      const error = e instanceof Error ? e.message : String(e);
-      setRegen((x) => ({ ...x, [r.id]: { label: m.label, error } }));
+      console.error(e);
+      setConfirmAll({ id: r.id, key, count: 0 });
+    }
+  };
+
+  const redo = async (r: PendingReview, m?: RegenModel, slots?: AnswerSlot[]) => {
+    setRegenError((x) => { const next = { ...x }; delete next[r.id]; return next; });
+    try {
+      const fresh = await api.regenerateReview(r.id, m?.key, slots);
+      setPending((p) => p.map((x) => (x.id === r.id ? fresh : x)));
+    } catch (e) {
+      setRegenError((x) => ({ ...x, [r.id]: e instanceof Error ? e.message : String(e) }));
     }
   };
 
   const box: React.CSSProperties = {
-    flex: 1, minHeight: 120, fontSize: 13, lineHeight: 1.4,
+    width: "100%", boxSizing: "border-box", fontSize: 14, lineHeight: 1.5,
     fontFamily: "inherit", resize: "vertical",
     border: "1px solid rgba(0,0,0,0.12)", borderRadius: 4,
-    padding: 6, background: "white", color: "#111827",
+    padding: 8, background: "white", color: "#111827",
   };
-  const sendBtn = (busy: boolean): React.CSSProperties => ({
-    marginTop: 8, padding: "6px 10px", border: "none",
-    borderRadius: 4, background: "#111827", color: "white",
-    cursor: busy ? "wait" : "pointer",
+  const sendBtn = (busy: boolean, color = "#111827"): React.CSSProperties => ({
+    padding: "6px 12px", border: "none", borderRadius: 4, background: color, color: "white",
+    fontWeight: 600, cursor: busy ? "wait" : "pointer",
   });
+  const lightBtn = (busy: boolean): React.CSSProperties => ({
+    padding: "6px 12px", borderRadius: 4, border: "1px solid #f97316", background: "#fff7ed",
+    color: "#c2410c", fontWeight: 600, cursor: busy ? "wait" : "pointer",
+  });
+
+  /** One answer, a full-width row: who wrote it, the text to edit, and the ways to send it. */
+  const answerRow = (r: PendingReview, chosen: Chosen, l: Lang, head: React.ReactNode, original: string,
+                     tint: string, busy: boolean, placeholder?: string, level?: AnswerLevel) => {
+    const k = editKey(r.id, chosen, l);
+    const value = edits[k] ?? original;
+    const editedFlag = edits[k] !== undefined && edits[k] !== original;
+    const confirming = confirmAll && confirmAll.id === r.id && confirmAll.key === k;
+    const save = saveBank[r.id] ?? cfg?.save_to_bank ?? true;
+    return (
+      <div key={k} style={{ background: tint, padding: "8px 10px", borderRadius: 6, marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+          {head}
+          {editedFlag && <span style={{ color: "#92400e", fontSize: 12 }}>· {t("edited")}</span>}
+        </div>
+        <textarea
+          value={value}
+          dir="auto"
+          placeholder={placeholder}
+          rows={rowsFor(value)}
+          onChange={(e) => setEdits((prev) => ({ ...prev, [k]: e.target.value }))}
+          spellCheck={false}
+          style={box}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+          <button disabled={busy || !value.trim()} onClick={() => pick(r, chosen, l, value, false, level)} style={sendBtn(busy)}>
+            {busyId === r.id ? t("sending") : t("send")}
+          </button>
+          <button disabled={busy || !value.trim()} onClick={() => askAll(r, k)} style={lightBtn(busy)}>
+            {t("reviewSendAll")}
+          </button>
+          <label style={{ fontSize: 12, color: "#374151", display: "inline-flex", gap: 4, alignItems: "center" }}>
+            <input type="checkbox" checked={save}
+                   onChange={(e) => setSaveBank((m) => ({ ...m, [r.id]: e.target.checked }))} />
+            📚 {t("reviewSaveToBank")}
+          </label>
+        </div>
+        {confirming && (
+          <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+                        background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 4, padding: "4px 8px",
+                        fontSize: 13 }}>
+            <span>{confirmAll.count > 0 ? t("reviewSendAllConfirm", { n: confirmAll.count }) : t("reviewSendAllNone")}</span>
+            <button onClick={() => pick(r, chosen, l, value, true, level)} style={sendBtn(busy, "#c2410c")}>
+              {t("reviewSendAll")}
+            </button>
+            <button onClick={() => setConfirmAll(null)} style={{ border: "1px solid #d1d5db", borderRadius: 4,
+                                                                 background: "white", padding: "4px 8px", cursor: "pointer" }}>
+              {t("reviewCancel")}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const best = cfg?.best_answer;
 
   return (
     <section style={{
@@ -187,21 +287,46 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
 
       {enabled && (
         <div style={{ marginTop: 12 }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151",
-                          marginBottom: 8 }}>
-            🌐 {t("reviewTranslateTo")}
-            <select
-              value={translateTo}
-              onChange={(e) => {
-                const to = e.target.value as TranslateTo;
-                api.setReviewTranslate(to).then((c) => setTranslateTo(c.translate_to)).catch(console.error);
-              }}
-            >
-              <option value="he">{t("reviewTranslateHe")}</option>
-              <option value="en">{t("reviewTranslateEn")}</option>
-              <option value="off">{t("reviewTranslateOff")}</option>
-            </select>
-          </label>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", fontSize: 13,
+                        color: "#374151", marginBottom: 8 }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              🌐 {t("reviewTranslateTo")}
+              <select value={cfg?.translate_to ?? "he"}
+                      onChange={(e) => changeConfig({ translate_to: e.target.value as TranslateTo })}>
+                <option value="he">{t("reviewTranslateHe")}</option>
+                <option value="en">{t("reviewTranslateEn")}</option>
+                <option value="off">{t("reviewTranslateOff")}</option>
+              </select>
+            </label>
+            {best && (best.available ? (
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <input type="checkbox" checked={best.enabled}
+                       onChange={(e) => changeConfig({ best_answer: e.target.checked })} />
+                ✨ {t("reviewBest", { m: best.label ?? modelLabel(best.model) })}
+                {" "}{t("reviewBestLevel")}{" "}
+                <select value={best.level} disabled={!best.enabled}
+                        onChange={(e) => changeConfig({ best_level: e.target.value as AnswerLevel })}>
+                  {LEVELS.map((k) => <option key={k} value={k}>{t(k)}</option>)}
+                </select>
+              </label>
+            ) : (
+              <span style={{ color: "#9ca3af" }}>✨ {t("reviewBestOff", { m: best.label ?? "Opus" })}</span>
+            ))}
+            {cfg && (
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <input type="checkbox" checked={cfg.save_to_bank}
+                       onChange={(e) => changeConfig({ save_to_bank: e.target.checked })} />
+                📚 {t("reviewSaveDefault")}
+              </label>
+            )}
+          </div>
+          {notice && (
+            <div style={{ marginBottom: 8, fontSize: 13, fontWeight: 600, padding: "4px 8px", borderRadius: 4,
+                          background: notice.error ? "#fef2f2" : "#ecfdf5",
+                          color: notice.error ? "#b91c1c" : "#047857" }}>
+              {notice.text}
+            </div>
+          )}
           {elsewhere > 0 && (
             <div style={{ color: "#b45309", fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
               {t("otherExercisesWaiting", { n: elsewhere })}
@@ -237,15 +362,16 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
           ) : (
             pending.map((r) => {
               const l = langOf(r);
-              const working = regen[r.id] && !regen[r.id].error;
-              const busy = busyId === r.id || !!working;
-              const levels = LEVELS.filter(({ key }) => variantText(r, key, l));
+              const busy = busyId === r.id;
+              const ready = r.answers.filter((a) => a.status === "ready");
+              const failed = r.answers.filter((a) => a.status === "failed");
               const bank = r.bank_match;
               const bLevels = bank ? bankLevels(bank) : [];
               const bLevel = bankLevel[r.id] ?? (bLevels.includes("normal") ? "normal" : bLevels[0]);
               const bOriginal = bank && bLevel ? bank.answers[bLevel]?.[l] ?? "" : "";
-              const bKey = editKey(r.id, "bank", l);
-              const bValue = edits[bKey] ?? bOriginal;
+              const draftingList = r.drafting.map((d) =>
+                d.slot === "best" ? `✨ ${d.label ?? modelLabel(d.model)}` : `${t(d.level)} (${d.label ?? modelLabel(d.model)})`
+              ).join(", ");
               return (
               <div key={r.id} style={{
                 border: "1px solid #e5e7eb", borderRadius: 6, padding: 12,
@@ -269,12 +395,9 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
                         {t("reviewNoise")}
                       </span>
                     )}
-                    {r.model && (
-                      <span style={{ color: "#6b7280", fontSize: 12 }}>
-                        {" "}· {t("draftedBy", { m: modelLabel(r.model) })}
-                      </span>
-                    )}
-                    <div style={{ marginTop: 4, color: "#374151", whiteSpace: "pre-wrap" }} dir="auto">{r.question}</div>
+                    <div style={{ marginTop: 4, color: "#111827", fontSize: 15, whiteSpace: "pre-wrap" }} dir="auto">
+                      {r.question}
+                    </div>
                     {r.question_translation && (
                       <div style={{ marginTop: 6, padding: "6px 8px", borderRadius: 4, background: "#eef2ff",
                                     border: "1px solid #c7d2fe" }}>
@@ -288,7 +411,7 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     {/* Draft the four answers again with a stronger model. */}
-                    {regenModels.map((m) => (
+                    {(cfg?.regen_models ?? []).map((m) => (
                       <button
                         key={m.key}
                         disabled={busy}
@@ -337,94 +460,68 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
                   </div>
                 </div>
 
-                {regen[r.id] && (
-                  <div style={{ fontSize: 13, marginBottom: 8, color: regen[r.id].error ? "#b91c1c" : "#5b21b6" }}>
-                    {regen[r.id].error
-                      ? t("regenFailed", { e: regen[r.id].error ?? "" })
-                      : t("regenerating", { m: regen[r.id].label })}
+                {regenError[r.id] && (
+                  <div style={{ fontSize: 13, marginBottom: 8, color: "#b91c1c" }}>
+                    {t("regenFailed", { e: regenError[r.id] })}
                   </div>
                 )}
 
-                {bank && bLevel && (
-                  <div style={{
-                    background: "#f0fdfa", border: "1px solid #99f6e4", borderRadius: 6,
-                    padding: 10, marginBottom: 8, display: "flex", flexDirection: "column",
-                  }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", marginBottom: 6 }}>
-                      <strong style={{ color: "#115e59" }}>{t("fromBank", { p: Math.round(bank.score * 100) })}</strong>
-                      <span style={{ fontSize: 12, color: "#134e4a" }} dir="auto">
-                        {t("bankQuestion")}: {bank.question}
-                      </span>
-                      <span style={{ flex: 1 }} />
-                      {bLevels.length > 1 && bLevels.map((k) => (
-                        <button
-                          key={k}
-                          onClick={() => setBankLevel((m) => ({ ...m, [r.id]: k }))}
-                          style={{
-                            padding: "2px 8px", borderRadius: 4, fontSize: 12, cursor: "pointer",
-                            border: "1px solid " + (bLevel === k ? "#115e59" : "#99f6e4"),
-                            background: bLevel === k ? "#115e59" : "white",
-                            color: bLevel === k ? "white" : "#115e59",
-                          }}
-                        >
-                          {t(k)}
-                        </button>
-                      ))}
-                    </div>
-                    <textarea
-                      value={bValue}
-                      dir="auto"
-                      onChange={(e) => setEdits((prev) => ({ ...prev, [bKey]: e.target.value }))}
-                      spellCheck={false}
-                      style={{ ...box, minHeight: 80 }}
-                    />
-                    <button
-                      disabled={busy || !bValue.trim()}
-                      onClick={() => pick(r.id, "bank", l, bValue)}
-                      style={{ ...sendBtn(busy), alignSelf: "flex-start", background: "#115e59" }}
-                    >
-                      {busyId === r.id ? t("sending") : t("sendBank")}
+                {bank && bLevel && answerRow(r, "bank", l, (
+                  <>
+                    <strong style={{ color: "#115e59" }}>{t("fromBank", { p: Math.round(bank.score * 100) })}</strong>
+                    <span style={{ fontSize: 12, color: "#134e4a" }} dir="auto">{t("bankQuestion")}: {bank.question}</span>
+                    {bLevels.length > 1 && bLevels.map((k) => (
+                      <button
+                        key={k}
+                        onClick={() => setBankLevel((m) => ({ ...m, [r.id]: k }))}
+                        style={{
+                          padding: "1px 8px", borderRadius: 4, fontSize: 12, cursor: "pointer",
+                          border: "1px solid " + (bLevel === k ? "#115e59" : "#99f6e4"),
+                          background: bLevel === k ? "#115e59" : "white",
+                          color: bLevel === k ? "white" : "#115e59",
+                        }}
+                      >
+                        {t(k)}
+                      </button>
+                    ))}
+                  </>
+                ), bOriginal, "#f0fdfa", busy, undefined, bLevel)}
+
+                {/* The finished answers, each a row, the first that finished on top. */}
+                {ready.map((a) => answerRow(r, a.slot, l, (
+                  <>
+                    <strong>{a.slot === "best" ? `✨ ${a.label ?? modelLabel(a.model)} · ${t(a.level)}` : t(a.level)}</strong>
+                    <span style={{ color: "#6b7280", fontSize: 12 }}>
+                      {a.slot !== "best" && `· ${a.label ?? modelLabel(a.model)} `}
+                      {a.seconds != null && `· ${t("reviewSeconds", { s: a.seconds })}`}
+                    </span>
+                  </>
+                ), answerText(a, l), a.slot === "best" ? BEST_TINT : TINT[a.level], busy))}
+
+                {failed.map((a) => (
+                  <div key={`${a.slot}-failed`} style={{ fontSize: 13, color: "#b91c1c", marginBottom: 6,
+                                                         display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    ⚠️ {t("reviewAnswerFailed", { m: a.label ?? modelLabel(a.model), level: t(a.level), e: a.error ?? "" })}
+                    <button onClick={() => redo(r, undefined, [a.slot])} style={{ border: "1px solid #fca5a5", borderRadius: 4,
+                                                                                background: "white", padding: "1px 8px", cursor: "pointer", fontSize: 12 }}>
+                      {t("reviewRetry")}
                     </button>
                   </div>
+                ))}
+
+                {r.drafting.length > 0 && (
+                  <div style={{ fontSize: 13, color: "#5b21b6", marginBottom: 8 }}>
+                    {t("reviewDrafting", { list: draftingList })}
+                  </div>
+                )}
+                {ready.length === 0 && r.drafting.length > 0 && !bank && (
+                  <div style={{ fontSize: 13, color: "#6b7280", fontStyle: "italic", marginBottom: 8 }}>
+                    {t("reviewNoAnswersYet")}
+                  </div>
                 )}
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
-                  {levels.map(({ key, tint }) => {
-                    const original = variantText(r, key, l) ?? "";
-                    const k = editKey(r.id, key, l);
-                    const value = edits[k] ?? original;
-                    const editedFlag = edits[k] !== undefined && edits[k] !== original;
-                    return (
-                    <div key={key} style={{
-                      background: tint, padding: 10, borderRadius: 6,
-                      display: "flex", flexDirection: "column", opacity: working ? 0.5 : 1,
-                    }}>
-                      <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                        {t(key)}
-                        {editedFlag && (
-                          <span style={{ color: "#92400e", fontWeight: 400 }}> · {t("edited")}</span>
-                        )}
-                      </div>
-                      <textarea
-                        value={value}
-                        dir="auto"
-                        onChange={(e) =>
-                          setEdits((prev) => ({ ...prev, [k]: e.target.value }))
-                        }
-                        spellCheck={false}
-                        style={box}
-                      />
-                      <button
-                        disabled={busy || !value.trim()}
-                        onClick={() => pick(r.id, key, l, value)}
-                        style={sendBtn(busy)}
-                      >
-                        {busyId === r.id ? t("sending") : `${t("send")} · ${t(key)}`}
-                      </button>
-                    </div>
-                    );
-                  })}
-                </div>
+                {/* The teacher's own text, always possible. */}
+                {answerRow(r, "own", l, <strong>✍️ {t("reviewOwn")}</strong>, "", OWN_TINT, busy, t("reviewOwnPlaceholder"))}
               </div>
               );
             })

@@ -400,7 +400,9 @@ def _rt_yaml():
     from ruamel.yaml import YAML  # round-trip: keeps the lecturer's comments and layout
     rt = YAML()
     rt.preserve_quotes = True
-    rt.width = 100
+    # Never fold a long line: a fold at a run of two spaces (as in an expected
+    # output or a bank answer, "[-0.138  0.037 ...]") comes back as one space.
+    rt.width = 1_000_000
     rt.indent(mapping=2, sequence=4, offset=2)
     return rt
 
@@ -483,6 +485,40 @@ def write_back(current: dict[str, Any], payload: dict[str, Any]) -> None:
     if teacher:
         with t_path.open("w", encoding="utf-8") as f:
             rt.dump(teacher, f)
+
+
+# faq.yaml keys, in the order the skill writes them.
+_FAQ_KEYS = ("id", "step", "question", "paraphrases", "answers", "approved", "source", "model")
+
+
+def write_faq(current: dict[str, Any], entries: list[dict[str, Any]]) -> Path:
+    """Write the question bank into the package's faq.yaml (the previous file is
+    kept in exercises/.previous/). Returns the file's path."""
+    folder = Path(current["package_dir"])
+    path = folder / FAQ_FILE
+    questions = []
+    for e in entries:
+        item = {}
+        for k in _FAQ_KEYS:
+            v = e.get(k)
+            if k in ("step", "source", "model") and v is None:
+                continue
+            if k == "paraphrases" and not v:
+                continue
+            if k == "approved" and v is True:
+                continue
+            if k == "answers":
+                v = {lvl: {lang: _scalar(t) for lang, t in texts.items()} for lvl, texts in v.items()}
+            item[k] = v
+        questions.append(item)
+    if path.is_file():
+        keep = stamped(exercises_dir() / ".previous", folder.name)
+        keep.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, keep / path.name)
+    rt = _rt_yaml()
+    with path.open("w", encoding="utf-8") as f:
+        rt.dump({"questions": questions}, f)
+    return path
 
 
 _RUNTIME_KEYS = {"source", "edited", "package_dir", "files_dir", "download_name", "implicit_variant",

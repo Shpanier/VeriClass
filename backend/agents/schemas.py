@@ -7,21 +7,13 @@ the model output against these shapes and retries on mismatch.
 from pydantic import BaseModel, Field
 
 
-class LevelText(BaseModel):
-    """One help level, written in both languages (same meaning)."""
+class Answer(BaseModel):
+    """One teacher-reviewable answer at a given help level, written in both
+    languages (same meaning), plus what the review queue needs about the
+    question itself (backend/routes/review.py): its language and, when the
+    teacher can't read it, a translation."""
     en: str = Field(description="English text")
     he: str = Field(description="Hebrew text (keep code identifiers in Latin letters)")
-
-
-class VariantSet(BaseModel):
-    """The four teacher-reviewable answers, each bilingual: three Socratic levels
-    and one direct (non-Socratic) answer."""
-    nudge: LevelText
-    normal: LevelText
-    more: LevelText
-    direct: LevelText
-    # For the teacher's queue (backend/routes/review.py): the question's own
-    # language and, when the teacher can't read it, a translation.
     question_lang: str = Field(
         default="",
         description="ISO 639-1 code of the language the student's latest question is written in "

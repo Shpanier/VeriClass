@@ -372,26 +372,41 @@ export interface RegenModel {
   label: string;
 }
 
+/** Which answer: the four levels by the default model, or the best model's. */
+export type AnswerSlot = AnswerLevel | "best";
+
+/** One drafted answer of a question (one model call each, GET /api/reviews/pending). */
+export interface ReviewAnswer {
+  id: number | null; // null: a question from before answers had rows of their own
+  slot: AnswerSlot;
+  level: AnswerLevel;
+  model: string | null;
+  /** The model's short name ("Opus 5.5"). */
+  label: string | null;
+  status: "drafting" | "ready" | "failed";
+  text_en: string | null;
+  text_he: string | null;
+  error: string | null;
+  /** How long the draft took. */
+  seconds: number | null;
+  ready_at: string | null;
+}
+
 export interface PendingReview {
   id: number;
   session_id: string;
   username: string;
   exercise_id?: string;
+  course_id: string | null;
   question: string;
-  // English variants.
-  variant_nudge: string;
-  variant_normal: string;
-  variant_more: string;
-  variant_direct: string | null; // null on rows from before the direct answer existed
-  // Hebrew variants (may be null on rows created before the bilingual feature).
-  variant_nudge_he: string | null;
-  variant_normal_he: string | null;
-  variant_more_he: string | null;
-  variant_direct_he: string | null;
   created_at: string;
-  /** The model that drafted the answers; regenerated_at is set after "redo with". */
+  /** The default drafting model; regenerated_at is set after "redo with". */
   model: string | null;
   regenerated_at: string | null;
+  /** The finished answers (ready or failed), in the order they finished. */
+  answers: ReviewAnswer[];
+  /** The answers still being written. */
+  drafting: ReviewAnswer[];
   /** The language the student wrote in: the card opens on it. */
   suggested_lang: Lang;
   bank_match: BankMatch | null;
@@ -412,6 +427,29 @@ export type TranslateTo = Lang | "off";
 export interface ReviewConfig {
   regen_models: RegenModel[];
   translate_to: TranslateTo;
+  /** The extra answer by the best model (CLAUDE_BEST_MODEL). */
+  best_answer: {
+    available: boolean;
+    enabled: boolean;
+    model: string | null;
+    label: string | null;
+    level: AnswerLevel;
+  };
+  /** The default of the "save to the question bank" box. */
+  save_to_bank: boolean;
+  /** "All students" = those active on the exercise in the last this many minutes. */
+  class_minutes: number;
+}
+
+/** What a send did (POST /api/reviews/{id}/select). */
+export interface SelectResult {
+  ok: boolean;
+  delivered?: "now" | "later";
+  saved_to_bank: boolean;
+  sent_to_class: number;
+  class_skipped?: number;
+  bank_error?: string;
+  class_error?: string;
 }
 
 // Class-paced labs (GET /api/pacing/{exercise_id}).
