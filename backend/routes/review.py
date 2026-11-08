@@ -56,7 +56,8 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from backend import bank, broadcast, claude_student, db, deps, exercises, prompting, steps, student_llm, textutil, transcript
+from backend import (bank, broadcast, claude_student, db, deps, exercises, prompting, steps, student_llm, textutil,
+                     transcript, whereabouts)
 from backend.agents import llm as agent_llm
 from backend.agents import tutor
 from backend.prompts import course_name
@@ -529,6 +530,15 @@ def _item(r) -> dict:
     item["waiting"] = is_waiting(r["id"])
     item["looks_like_noise"] = looks_like_noise(r["question"])
     item["answers"], item["drafting"] = answers_of(r["id"])
+    # Where the student is (the step and its status) and the chat just before
+    # the question: a one-line question means little without them.
+    try:
+        ex = exercises.get(r["exercise_id"])
+    except KeyError:
+        ex = None
+    session = {"id": r["session_id"], "exercise": r["exercise_id"], "course_id": r["course_id"]}
+    item["step"] = whereabouts.step_of(session, ex)
+    item["before"] = whereabouts.before(r["session_id"], ex, r["question"], r["created_at"])
     if not item["answers"] and not item["drafting"]:
         # A question from before answers had rows of their own: its four columns.
         for lvl in LEVELS:

@@ -99,7 +99,16 @@ This is the assessment backbone: probes test whether the student
 Global toggle in the dashboard header. When on:
 
 1. Student asks a question. It is in the instructor's review queue at once;
-   the student sees *"Your teacher is reviewing your question…"*.
+   the student sees *"Your teacher is reviewing your question…"*. The card
+   says **where the student is**: the step (its label and title) and its
+   status (working on it; finished it and waiting for the instructor to open
+   the next one; their output didn't match; answering the step's quiz;
+   waiting for approval; finished all the steps), and shows **the chat just
+   before the question**: the last five entries (steps handed out, pasted
+   outputs, check results, quiz questions, earlier questions and answers),
+   each cut to two lines (click one to see it whole), with a 💬 *Full chat*
+   button that opens the whole chat. An exercise that keeps no transcript
+   shows the model turns instead (`backend/whereabouts.py`).
 2. The backend drafts **five answers**, one model call each, all at the same
    time, each in English and Hebrew:
    - **Nudge** — one Socratic line, no answer

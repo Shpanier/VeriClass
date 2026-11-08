@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, auth, setUnauthorizedHandler } from "./api";
-import type { ExerciseSummary, FullExercise, Student } from "./types";
+import type { ExerciseSummary, FullExercise, PendingReview, Student } from "./types";
 import { ExerciseHeader } from "./components/ExerciseHeader";
 import { StudentGrid } from "./components/StudentGrid";
 import { AskThemModal } from "./components/AskThemModal";
@@ -134,7 +134,19 @@ export function App() {
   }, [visible]);
 
   const askingTarget = students.find((s) => s.session_id === askingSessionId) ?? null;
-  const viewingTarget = students.find((s) => s.session_id === viewingSessionId) ?? null;
+  // A chat opened from the review queue: the student may have left the live
+  // list (last active over 30 min ago), so the card's own data stands in.
+  const [viewingFallback, setViewingFallback] = useState<Student | null>(null);
+  const viewingTarget = students.find((s) => s.session_id === viewingSessionId)
+    ?? (viewingFallback?.session_id === viewingSessionId ? viewingFallback : null);
+  const viewReviewChat = (r: PendingReview) => {
+    setViewingFallback({
+      session_id: r.session_id, username: r.username, exercise: r.exercise_id ?? "", variant: "",
+      mode: "mentor", started_at: r.created_at, last_active_at: r.created_at, probe_count: 0,
+      focus_alerts: 0, last_focus_kind: null, last_focus_at: null, away: false,
+    });
+    setViewingSessionId(r.session_id);
+  };
   const proctorTarget = students.find((s) => s.session_id === proctorSessionId) ?? null;
   const submissionsTarget = students.find((s) => s.session_id === submissionsSessionId) ?? null;
   const terminalTarget = students.find((s) => s.session_id === terminalSessionId) ?? null;
@@ -187,7 +199,7 @@ export function App() {
           {liveId && liveExercise?.exercise_id === liveId && liveExercise.pacing === "class"
             ? <PacingPanel exerciseId={liveId} />
             : <StepChecks exerciseId={liveId} />}
-          <ReviewQueue exerciseId={liveId} />
+          <ReviewQueue exerciseId={liveId} onViewChat={viewReviewChat} />
           <StudentGrid
             students={visible}
             paramLabels={liveExercise?.param_labels}

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type {
-  AnswerLevel, AnswerSlot, BankMatch, Lang, PendingReview, RegenModel, ReviewAnswer, ReviewConfig,
-  SelectResult, TranslateTo,
+  AnswerLevel, AnswerSlot, BankMatch, Lang, PendingReview, RegenModel, ReviewAnswer, ReviewChatEntry,
+  ReviewConfig, ReviewStepStatus, SelectResult, TranslateTo,
 } from "../types";
 import { useLang } from "../i18n";
 
@@ -46,13 +46,61 @@ function bankLevels(m: BankMatch): AnswerLevel[] {
   return LEVELS.filter((k) => m.answers[k]);
 }
 
+/** Markdown as plain text for a one-line summary: no fences, bold marks, code ticks, headings or quote marks. */
+function plain(md: string): string {
+  return md
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("```"))
+    .map((line) => line.replace(/^\s*#{1,6}\s+/, "").replace(/^\s*>\s?/, ""))
+    .join("\n")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "");
+}
+
 /** Enough rows to show the whole text without an inner scrollbar (up to a limit). */
 function rowsFor(text: string): number {
   const lines = text.split("\n").reduce((n, l) => n + 1 + Math.floor(l.length / 140), 0);
   return Math.min(24, Math.max(3, lines + 1));
 }
 
-export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
+/** The step's status on the card, and its colour. */
+const STEP_STATUS: Record<ReviewStepStatus, { key: "reviewStepOpen" | "reviewStepWaitingTeacher" | "reviewStepWaitingReview"
+  | "reviewStepQuiz" | "reviewStepWaitingCheck" | "reviewStepNotStarted" | "reviewStepFinished"; color: string }> = {
+  open: { key: "reviewStepOpen", color: "#15803d" },
+  waiting_teacher: { key: "reviewStepWaitingTeacher", color: "#b45309" },
+  waiting_review: { key: "reviewStepWaitingReview", color: "#b91c1c" },
+  quiz: { key: "reviewStepQuiz", color: "#6d28d9" },
+  waiting_check: { key: "reviewStepWaitingCheck", color: "#b45309" },
+  not_started: { key: "reviewStepNotStarted", color: "#6b7280" },
+  finished: { key: "reviewStepFinished", color: "#15803d" },
+};
+
+/** An icon and a label key for a chat entry before the question, by who wrote it and what it is. */
+function entryTag(e: ReviewChatEntry): { icon: string; key: "reviewKindStudent" | "reviewKindOutput" | "reviewKindAnswer"
+  | "reviewKindStep" | "reviewKindResult" | "reviewKindQuiz" | "reviewKindBrief" | "reviewKindNote" | "reviewKindReturned"
+  | "reviewKindReset" | "reviewKindTutor" } {
+  if (e.author === "student") {
+    if (e.kind === "output") return { icon: "📋", key: "reviewKindOutput" };
+    if (e.kind === "answer") return { icon: "✍️", key: "reviewKindAnswer" };
+    return { icon: "🧑‍🎓", key: "reviewKindStudent" };
+  }
+  switch (e.kind) {
+    case "step": return { icon: "📘", key: "reviewKindStep" };
+    case "result": return { icon: "✅", key: "reviewKindResult" };
+    case "quiz": return { icon: "❓", key: "reviewKindQuiz" };
+    case "brief": return { icon: "📖", key: "reviewKindBrief" };
+    case "note": return { icon: "🧑‍🏫", key: "reviewKindNote" };
+    case "returned": return { icon: "↩️", key: "reviewKindReturned" };
+    case "reset": return { icon: "⏮", key: "reviewKindReset" };
+    default: return { icon: "🤖", key: "reviewKindTutor" };
+  }
+}
+
+export function ReviewQueue({ exerciseId, onViewChat }: {
+  exerciseId: string | null;
+  /** Open the student's whole chat (the dashboard's chat view) for a card. */
+  onViewChat?: (r: PendingReview) => void;
+}) {
   const { t, lang } = useLang();
   const [enabled, setEnabled] = useState(false);
   const [allPending, setPending] = useState<PendingReview[]>([]);
@@ -77,6 +125,8 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
   // Deleting: tell the student (per card, default yes), and the "delete stale" confirmation.
   const [notify, setNotify] = useState<Record<number, boolean>>({});
   const [confirmStale, setConfirmStale] = useState(false);
+  // Chat entries before the question shown whole (default: cut to two lines), keyed by `${reviewId}:${index}`.
+  const [openEntry, setOpenEntry] = useState<Record<string, boolean>>({});
   // What the last send did ("sent to 12 students"), shown for a few seconds.
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const stale = allPending.filter((r) => !r.waiting).length;
@@ -459,6 +509,60 @@ export function ReviewQueue({ exerciseId }: { exerciseId: string | null }) {
                     </span>
                   </div>
                 </div>
+
+                  {/* Where the student is, and what the chat showed just before the question. */}
+                  <div style={{ marginBottom: 8, padding: "6px 10px", borderRadius: 4, background: "#f9fafb",
+                                border: "1px solid #e5e7eb", fontSize: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      {r.step ? (
+                        <span style={{ fontWeight: 600, color: "#1f2937" }} dir="auto">
+                          📍 {t("reviewStep", { label: r.step.label, total: r.step.total, title: r.step.title })}
+                          <span style={{ fontWeight: 500, color: STEP_STATUS[r.step.status].color }}>
+                            {" "}· {t(STEP_STATUS[r.step.status].key)}
+                          </span>
+                        </span>
+                      ) : (
+                        <span style={{ color: "#6b7280" }}>📍 {t("reviewNoSteps")}</span>
+                      )}
+                      {onViewChat && (
+                        <button onClick={() => onViewChat(r)} style={{
+                          padding: "1px 8px", borderRadius: 4, fontSize: 12, cursor: "pointer",
+                          border: "1px solid #d1d5db", background: "white", color: "#374151",
+                        }}>
+                          {t("reviewFullChat")}
+                        </button>
+                      )}
+                    </div>
+                    {r.before.entries.length > 0 ? (
+                      <div style={{ marginTop: 4 }}>
+                        <div style={{ color: "#6b7280", marginBottom: 2 }}>{t("reviewBefore")}</div>
+                        {r.before.entries.map((e, i) => {
+                          const key = `${r.id}:${i}`;
+                          const open = !!openEntry[key];
+                          const tag = entryTag(e);
+                          return (
+                            <div key={key} title={open ? undefined : t("reviewEntryExpand")}
+                                 onClick={() => setOpenEntry((m) => ({ ...m, [key]: !open }))}
+                                 style={{ display: "flex", gap: 6, padding: "2px 0", cursor: "pointer",
+                                          borderTop: i ? "1px dashed #e5e7eb" : undefined }}>
+                              <span style={{ flex: "0 0 auto", color: "#6b7280", whiteSpace: "nowrap" }}>
+                                {tag.icon} {t(tag.key)}{e.step != null && e.kind === "step" ? ` ${e.step}` : ""}
+                              </span>
+                              <span dir="auto" style={{
+                                flex: "1 1 auto", minWidth: 0, color: "#374151", whiteSpace: "pre-wrap",
+                                ...(open ? {} : { display: "-webkit-box", WebkitLineClamp: 2,
+                                                  WebkitBoxOrient: "vertical", overflow: "hidden" }),
+                              }}>
+                                {plain(e.content)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 4, color: "#6b7280" }}>{t("reviewNoBefore")}</div>
+                    )}
+                  </div>
 
                 {regenError[r.id] && (
                   <div style={{ fontSize: 13, marginBottom: 8, color: "#b91c1c" }}>

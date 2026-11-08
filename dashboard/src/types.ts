@@ -419,6 +419,38 @@ export interface PendingReview {
   /** The question translated into `translated_to`, when it is in neither Hebrew nor English. */
   question_translation: string | null;
   translated_to: Lang | null;
+  /** The step the student is on (null for a lab without steps). */
+  step: ReviewStep | null;
+  /** The chat just before the question. */
+  before: ReviewBefore;
+}
+
+export type ReviewStepStatus =
+  | "open" | "waiting_teacher" | "waiting_review" | "quiz" | "waiting_check" | "not_started" | "finished";
+
+/** Where a student is in a step-by-step lab (backend/whereabouts.py). */
+export interface ReviewStep {
+  n: number;
+  total: number;
+  /** The step's name in messages: its label (e.g. "B3") or its number. */
+  label: string;
+  title: string;
+  status: ReviewStepStatus;
+}
+
+/** One chat entry before the question: the transcript's author and kind, or a model turn. */
+export interface ReviewChatEntry {
+  author: "student" | "tutor" | "system";
+  kind: string;
+  step: number | null;
+  content: string;
+  created_at: string;
+}
+
+export interface ReviewBefore {
+  /** transcript = the chat as the student saw it; messages = the model turns (no transcript kept). */
+  source: "transcript" | "messages";
+  entries: ReviewChatEntry[];
 }
 
 /** The language questions in other languages are translated into for the queue. */

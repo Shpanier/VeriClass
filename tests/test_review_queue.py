@@ -808,3 +808,127 @@ def test_the_drafting_prompt_asks_for_one_level_and_a_translation_only_when_on()
         assert lvl.upper() in tutor._LEVEL_RULES[lvl]
     with pytest.raises(ValueError):
         tutor._build_crew("p", "t", "q", "loud")
+
+
+# --- where the student is, and the chat before the question ----------------------------
+
+def _lab(exercise_id, **extra):
+    """A copy of ex3-mcalc registered under `exercise_id` with `extra` on top; pop it when done."""
+    import copy
+    lab = copy.deepcopy(exercises.get("ex3-mcalc"))
+    lab.update(exercise_id=exercise_id, **extra)
+    exercises._LOADED[exercise_id] = lab
+    return lab
+
+
+PACED_STEPS = [
+    {"label": "A1", "title": "Pull", "text": "Run `docker pull alpine`.",
+     "expect_output": [{"match": r"^ALL READY$", "hint": "ALL READY"}]},
+    {"label": "A2", "title": "Read", "text": "Read this."},
+    {"label": "B1", "title": "Kernel", "text": "Run `uname -r`."},
+]
+
+
+def _record(tc, h, sid, *entries):
+    r = tc.post(f"/api/transcript/{sid}", headers=h, json={"entries": list(entries)})
+    assert r.status_code == 200, r.text
+
+
+def _done(tc, th, item, text="ok"):
+    r = tc.post(f"/api/reviews/{item['id']}/select", json={"chosen": "own", "lang": "en", "text": text}, headers=th)
+    assert r.status_code == 200, r.text
+
+
+def test_the_card_says_where_the_student_is_and_what_came_before(client, drafts):
+    """A class-paced lab: the card names the step (its label and title) and its
+    status, and shows the last five transcript entries before the question,
+    each cut short, without the question itself."""
+    _lab("paced-review-test", steps=PACED_STEPS, pacing="class", open_steps=2)
+    try:
+        h, sid = _student(client, "paced-review-test")
+        th = _teacher(client)
+        long_step = "Step one. " * 100  # cut to 400 characters on the card
+        _record(client, h, sid,
+                {"author": "tutor", "kind": "brief", "content": "Welcome to the lab."},
+                {"author": "tutor", "kind": "text", "content": "an old answer, beyond the last five"},
+                {"author": "tutor", "kind": "step", "step": 1, "content": long_step},
+                {"author": "student", "kind": "output", "step": 1, "content": "something else"},
+                {"author": "tutor", "kind": "result", "step": 1, "content": "🔍 That is not the output."},
+                {"author": "tutor", "kind": "quiz", "content": "Why is the kernel shared?"},
+                {"author": "student", "kind": "text", "content": "What does pull do?"})  # the question, as the chat records it
+        t, box = _ask_in_background(client, h, sid, "What does pull do?")
+        item = _wait_pending(client, th, sid)
+        assert item["step"] == {"n": 1, "total": 3, "label": "A1", "title": "Pull", "status": "open"}
+        before = item["before"]
+        assert before["source"] == "transcript"
+        assert [(e["author"], e["kind"], e["step"]) for e in before["entries"]] == [
+            ("tutor", "step", 1), ("student", "output", 1), ("tutor", "result", 1), ("tutor", "quiz", None),
+        ] or [(e["author"], e["kind"]) for e in before["entries"]] == [
+            ("tutor", "text"), ("tutor", "step"), ("student", "output"), ("tutor", "result"), ("tutor", "quiz"),
+        ]
+        assert "What does pull do?" not in [e["content"] for e in before["entries"]]
+        step_entry = next(e for e in before["entries"] if e["kind"] == "step")
+        assert len(step_entry["content"]) == 400 and step_entry["content"].endswith("…")
+        assert all(len(e["content"]) <= 400 for e in before["entries"])
+        _done(client, th, item)
+        t.join(10)
+
+        # Finished every open step: the card shows the last one they did and that they wait for the teacher.
+        with db.conn() as c:
+            c.execute("INSERT INTO step_checks (session_id, step, answer, status) VALUES (?, 1, '', 'approved')", (sid,))
+            c.execute("INSERT INTO step_checks (session_id, step, answer, status) VALUES (?, 2, '', 'approved')", (sid,))
+        t, box = _ask_in_background(client, h, sid, "And now?")
+        item = _wait_pending(client, th, sid)
+        assert item["step"] == {"n": 2, "total": 3, "label": "A2", "title": "Read", "status": "waiting_teacher"}
+        # The previous question is now part of what came before (only the new one is left out).
+        assert [e["content"] for e in item["before"]["entries"]][-2:] == ["Why is the kernel shared?",
+                                                                           "What does pull do?"]
+        _done(client, th, item)
+        t.join(10)
+    finally:
+        exercises._LOADED.pop("paced-review-test", None)
+
+
+def test_a_sign_off_lab_shows_the_step_waiting_for_approval(client, drafts):
+    from backend import steps as steps_mod
+    _lab("signoff-review-test", steps=[{"title": "Count", "text": "Count the rows.", "expected": "3"},
+                                        {"title": "Sum", "text": "Sum them.", "expected": "6"}])
+    try:
+        h, sid = _student(client, "signoff-review-test")
+        th = _teacher(client)
+        steps_mod.submit(sid, 1, "Done with step 1: 3 rows")
+        t, box = _ask_in_background(client, h, sid, "Is 3 right?")
+        item = _wait_pending(client, th, sid)
+        assert item["step"] == {"n": 1, "total": 2, "label": "1", "title": "Count", "status": "waiting_check"}
+        assert item["before"] == {"source": "transcript", "entries": []}  # nothing recorded: the plugin's chat
+        _done(client, th, item)
+        t.join(10)
+    finally:
+        # The pending check must not outlive its exercise: the step-checks list looks the exercise up.
+        with db.conn() as c:
+            c.execute("DELETE FROM step_checks WHERE session_id = ?", (sid,))
+        exercises._LOADED.pop("signoff-review-test", None)
+
+
+def test_without_a_transcript_the_card_shows_the_model_turns(client, drafts):
+    """An exercise that keeps no transcript: the chat before the question is the
+    questions and answers in `messages`; no steps means no step line."""
+    _lab("no-history-review-test", chat_history=False)
+    try:
+        h, sid = _student(client, "no-history-review-test")
+        th = _teacher(client)
+        t, box = _ask_in_background(client, h, sid, "What is a loop?")
+        item = _wait_pending(client, th, sid)
+        assert item["step"] is None
+        assert item["before"] == {"source": "messages", "entries": []}
+        _done(client, th, item, "A repeated block.")
+        t.join(10)
+        t, box = _ask_in_background(client, h, sid, "And a while loop?")
+        item = _wait_pending(client, th, sid)
+        assert [(e["author"], e["kind"], e["content"]) for e in item["before"]["entries"]] == [
+            ("student", "text", "What is a loop?"), ("tutor", "text", "A repeated block."),
+        ]
+        _done(client, th, item)
+        t.join(10)
+    finally:
+        exercises._LOADED.pop("no-history-review-test", None)
