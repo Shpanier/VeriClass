@@ -206,6 +206,8 @@ def validate_package(path: Path) -> dict[str, Any]:
                 errors.append(f"step {i}: a quiz question needs `q:` (the question)")
             elif isinstance(q, str) or not str(q.get("answer") or "").strip():
                 warnings.append(f"step {i}: a quiz question has no `answer:`; the grader will have no model answer")
+            if isinstance(q, dict) and "always" in q and not isinstance(q["always"], bool):
+                errors.append(f"step {i}: a quiz question's `always:` must be true or false")
         if textutil.has_hebrew(st.get("text", "")):
             bare = _bare_identifiers(st["text"])
             if bare:

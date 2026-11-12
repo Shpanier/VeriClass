@@ -231,6 +231,38 @@ def test_quiz_waits_for_approval_and_blocks_the_next_step(client, teacher, monke
     assert _finish(client, h4, sid4, 1, GOOD)["quiz"] == 0
 
 
+def test_always_question_is_asked_without_approval(client, teacher, monkeypatch):
+    qx = "What does the code you just pasted do?"
+    lab = copy.deepcopy(exercises.get(LAB))
+    lab["steps"][0]["quiz"] = [{"q": qx, "answer": "It writes two files.", "always": True}]
+    monkeypatch.setitem(exercises._LOADED, LAB, lab)
+    item = next(q for q in pacing.quiz_items(lab) if q["q"] == qx)
+    assert item["always"] and item["approved"] and item["step"] == 1
+
+    h, sid = _student(client, "PCE-AL1")
+    assert _finish(client, h, sid, 1, GOOD)["quiz"] == 1
+    pending = client.get(f"/api/probes/pending/{sid}", headers=h).json()
+    assert [p["body"] for p in pending] == [qx]
+
+    # The dashboard's choice wins: switched off, later students aren't asked.
+    client.post(f"/api/pacing/{LAB}/quiz/{item['key']}", headers=teacher, json={"approved": False})
+    assert not next(q for q in pacing.quiz_items(lab) if q["q"] == qx)["approved"]
+    h2, sid2 = _student(client, "PCE-AL2")
+    assert _finish(client, h2, sid2, 1, GOOD)["quiz"] == 0
+
+
+def test_package_rejects_a_non_boolean_always(tmp_path):
+    folder = tmp_path / "always-lab"
+    (folder / "files").mkdir(parents=True)
+    (folder / "exercise.yaml").write_text(yaml.safe_dump({
+        "exercise_id": "always-lab", "title_en": "Always", "default_mode": "mentor", "brief_md": "Hi",
+        "steps": [{"title": "One", "text": "Paste it.", "minutes": 1}]}), encoding="utf-8")
+    (folder / "teacher.yaml").write_text(yaml.safe_dump({"steps": [
+        {"expected": "x", "quiz": [{"q": "What does it do?", "answer": "x", "always": "yes"}]}]}), encoding="utf-8")
+    result = packages.validate_package(folder)
+    assert not result["ok"] and any("always" in e for e in result["errors"])
+
+
 def test_changed_question_text_needs_a_new_approval(client):
     ex = exercises.get(LAB)
     key = pacing.quiz_key(Q2)

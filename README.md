@@ -509,6 +509,10 @@ ran since the step appeared, which the student checks (or replaces) and sends.
   the lecturer approves them in the dashboard (the wording can be edited there).
   An approved question is asked when a student finishes its step, the next step
   waits for the answer, and the answer is graded against the model answer.
+  A question marked `always: true` is approved by the package's author and is
+  asked without the dashboard, for example "what does the code you just pasted
+  do?" after every step that pastes code. The dashboard can still switch it
+  off. Questions are asked in the order they are listed.
 - **Back to an earlier step.** In *Class pacing*, "↺ Back to step…" on a
   student (or "↺ Everyone back to step…" for the course) sends them back, to
   the beginning if need be. Their work from that step on stays in the record
@@ -562,6 +566,9 @@ In `teacher.yaml`, per step:
       - match: '^rows: \d+$'
         hint: the rows line                  # what the lecturer sees when it's missing
     quiz:
+      - q: What does the script you just pasted do?
+        answer: It writes the rows of the table to rows.csv, with a header line.
+        always: true                         # asked without the dashboard's approval
       - q: Why does wc -l print one more than the number of rows?
         answer: It counts the header line too.
 ```

@@ -20,6 +20,11 @@ the ones the teacher approved in the dashboard, and the next step waits until
 they are answered. A question approved after some students already finished its
 step can be asked of them at once (ask_finished). Approvals are keyed by the
 question's text, so a question changed in the package needs a new approval.
+
+A question marked `always: true` in the package is approved by its author: it
+is asked without waiting for the dashboard (e.g. "what does the code you just
+pasted do?" after every paste step). The dashboard can still switch it off,
+and its choice then wins.
 """
 import hashlib
 import json
@@ -170,7 +175,8 @@ def _approvals(exercise_id: str) -> dict[str, dict[str, Any]]:
 
 def quiz_items(ex: dict[str, Any]) -> list[dict[str, Any]]:
     """Every quiz question of the exercise, in step order, with the teacher's
-    approval and wording."""
+    approval and wording. A question marked `always` counts as approved until
+    the teacher decides otherwise in the dashboard."""
     approvals = _approvals(ex["exercise_id"])
     items = []
     for n, st in enumerate(steps.steps_of(ex), 1):
@@ -178,12 +184,14 @@ def quiz_items(ex: dict[str, Any]) -> list[dict[str, Any]]:
             if isinstance(q, str):
                 q = {"q": q}
             key = quiz_key(q["q"])
-            a = approvals.get(key) or {}
+            a = approvals.get(key)
+            always = q.get("always") is True
             items.append({
                 "key": key, "step": n, "label": label(ex, n), "q": q["q"],
                 "answer": q.get("answer") or "",
-                "approved": bool(a.get("approved")),
-                "body": a.get("body") or q["q"],
+                "always": always,
+                "approved": bool(a["approved"]) if a else always,
+                "body": (a or {}).get("body") or q["q"],
             })
     return items
 
