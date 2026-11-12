@@ -91,12 +91,7 @@ def decide(check_id: int, req: Decision, teacher: dict = Depends(deps.require_te
 # --- going back to an earlier step ---------------------------------------------------
 
 def _reset_note(ex: dict, n: int) -> str:
-    label = pacing.label(ex, n)
-    if pacing.hebrew(ex):
-        return (f"↩️ המרצה החזיר אתכם להתחלה (שלב {label})." if n == 1
-                else f"↩️ המרצה החזיר אתכם לשלב {label}. ממשיכים משם.")
-    return (f"↩️ Your teacher sent you back to the beginning (step {label})." if n == 1
-            else f"↩️ Your teacher sent you back to step {label}. Carry on from there.")
+    return pacing.move_note(ex, n, "back")
 
 
 def _step_lab(exercise_id: str) -> dict:
@@ -119,6 +114,21 @@ def reset_session(session_id: str, req: ResetRequest, teacher: dict = Depends(de
     s = deps.require_owns_session(session_id, teacher)
     ex = _step_lab(s["exercise"])
     return steps.reset_to(session_id, req.step, _reset_note(ex, max(1, req.step)))
+
+
+class MoveRequest(BaseModel):
+    step: int  # 1..the number of steps
+
+
+@router.post("/sessions/{session_id}/move")
+def move_session(session_id: str, req: MoveRequest, teacher: dict = Depends(deps.require_teacher)):
+    """Move one student to step `step`: back (their work from there on no
+    longer counts), forward (the steps between are skipped, and opened for
+    them), or the step they are on (it starts over). Their chat is interrupted
+    and shows the step (backend/pacing.py move_to)."""
+    s = deps.require_owns_session(session_id, teacher)
+    ex = _step_lab(s["exercise"])
+    return pacing.move_to(ex, session_id, s.get("course_id"), req.step)
 
 
 class CourseResetRequest(BaseModel):

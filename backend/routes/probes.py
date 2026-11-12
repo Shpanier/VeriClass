@@ -78,8 +78,9 @@ async def answer(req: ProbeAnswerRequest, user: dict = Depends(deps.current_user
     if p["status"] != "pending":
         raise HTTPException(409, f"This question is {p['status']}")
     variant = exercises.variant(s["exercise"], s["variant"])
+    ex = exercises.get(s["exercise"])
     # A quiz question is graded against the teacher's model answer.
-    reference = pacing.quiz_reference(exercises.get(s["exercise"]), p["quiz_key"]) if p["quiz_key"] else None
+    reference = pacing.quiz_reference(ex, p["quiz_key"]) if p["quiz_key"] else None
     # Auto-grading is best-effort: a transient LLM outage must never lose the
     # student's answer or 500 the request. On failure, save with no grade so the
     # teacher can grade it manually (via /probe/override) later.
@@ -88,15 +89,22 @@ async def answer(req: ProbeAnswerRequest, user: dict = Depends(deps.current_user
     except Exception:
         log.exception("auto-grading failed for probe %s; saving ungraded", req.probe_id)
         score, why = None, "Auto-grading is temporarily unavailable — your answer was saved."
+    # A quiz answer graded too low waits for the teacher, who lets the student
+    # continue or asks them to answer again (exercise.yaml quiz_review).
+    review = bool(p["quiz_key"]) and pacing.needs_review(ex, score)
     with db.conn() as c:
         cur = c.execute(
-            "UPDATE probes SET answer = ?, auto_grade = ?, status = 'answered', "
-            "answered_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'",
-            (req.answer, score, req.probe_id),
+            "UPDATE probes SET answer = ?, auto_grade = ?, auto_why = ?, review_status = ?, "
+            "status = 'answered', answered_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'",
+            (req.answer, score, why if score is not None else None, "waiting" if review else None,
+             req.probe_id),
         )
         if cur.rowcount == 0:
             raise HTTPException(409, "This question was answered or withdrawn meanwhile")
-    return {"auto_grade": score, "why": why}
+    # review: the next step waits for the teacher's decision about this answer.
+    # The grader's reason then goes to the teacher only (auto_why): it tends to
+    # say what the right answer is, and the student may be asked to answer again.
+    return {"auto_grade": score, "why": None if review else why, "review": review}
 
 
 @router.post("/probe/suggest")

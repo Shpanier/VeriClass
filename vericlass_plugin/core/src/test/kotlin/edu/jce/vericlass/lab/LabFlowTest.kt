@@ -28,7 +28,11 @@ class LabFlowTest {
     private class FakeServer(val steps: Int = 3, var released: Int = 2) : LabBackend {
         var current = 1
         var quizPending = 0
+        var quizReview = 0
         var waitingReview = false
+        var answerResult = ProbeAnswerResponse(2, "good")
+        /** A quiz question the server asks when the next step is finished. */
+        var quizOnFinish: Probe? = null
         var transcriptEnabled = true
         val transcriptEntries = mutableListOf<TranscriptEntry>()
         val recorded = mutableListOf<Map<String, Any?>>()
@@ -44,12 +48,12 @@ class LabFlowTest {
         fun label(n: Int) = "A$n"
 
         override fun stepState(): StepStateResponse {
-            val open = current <= steps && current <= released && quizPending == 0
+            val open = current <= steps && current <= released && quizPending == 0 && quizReview == 0
             return StepStateResponse(
                 total = steps, current = current, current_label = if (current <= steps) label(current) else null,
                 released = released, finished = current > steps, quiz_pending = quizPending,
-                waiting_teacher = current <= steps && current > released && quizPending == 0,
-                open = open, waiting_review = waitingReview,
+                waiting_teacher = current <= steps && current > released && quizPending == 0 && quizReview == 0,
+                open = open, waiting_review = waitingReview, quiz_review = quizReview,
                 step = if (open) OpenStep(current, label(current), "Step $current", "### Step ${label(current)}",
                     needs_output = current == 1) else null,
             )
@@ -63,7 +67,8 @@ class LabFlowTest {
                 return FinishResponse("missing", state = stepState())
             }
             current++
-            return FinishResponse("done", ok = step == 1, quiz = 0, state = stepState())
+            val asked = quizOnFinish?.also { probes += it; quizPending = 1; quizOnFinish = null }
+            return FinishResponse("done", ok = step == 1, quiz = if (asked != null) 1 else 0, state = stepState())
         }
 
         override fun detectOutput(text: String) = detect
@@ -73,7 +78,8 @@ class LabFlowTest {
             answerFails?.let { throw it }
             answered += probeId to answer
             probes.removeIf { it.id == probeId }
-            return ProbeAnswerResponse(2, "good")
+            if (answerResult.review) quizReview++
+            return answerResult
         }
 
         override fun transcript(after: Int, othersOnly: Boolean): TranscriptResponse? {
@@ -233,6 +239,29 @@ class LabFlowTest {
         val shown = view.messages.size
         f.remindQuestion()
         assertEquals(shown, view.messages.size)
+    }
+
+    @Test
+    fun `an answer graded too low waits for the teacher, and the next step with it`() {
+        val server = FakeServer()
+        val view = FakeView()
+        val f = flow(server, view)
+        f.start("brief")
+        // A1 has a quiz question: it is asked when the step is done, and A2 waits for the answer.
+        server.quizOnFinish = Probe(9, "What does the code do?", quiz_step = "A1")
+        view.click(en.doneButton("A1"))
+        view.box!!.third("ALL READY")
+        server.answerResult = ProbeAnswerResponse(0, "not really", review = true)
+        server.quizPending = 0
+        f.answer(server.probes[0], "no idea")
+        assertEquals(en.answerSaved(0, "not really", review = true), view.texts().last { it.startsWith("📝") })
+        assertTrue(view.texts().last { it.startsWith("📝") }.contains("waits for your teacher"))
+        // The next step stays closed until the teacher decides.
+        f.poll()
+        assertTrue(view.texts().none { it.contains("### Step A2") })
+        server.quizReview = 0
+        f.poll()
+        assertTrue(view.texts().any { it.contains("### Step A2") })
     }
 
     @Test

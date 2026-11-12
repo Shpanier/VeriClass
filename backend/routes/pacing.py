@@ -2,10 +2,10 @@
 with this step" with the pasted output. Teacher: the class's progress, opening
 steps for a course, letting a student past a step or sending their output
 back, and approving the quiz questions."""
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend import deps, exercises, pacing
 
@@ -107,6 +107,9 @@ class QuizRequest(BaseModel):
     body: Optional[str] = None  # new wording; None keeps the current one
     # Also ask it now of this course's students who already finished its step.
     ask_finished: bool = False
+    # Withdrawing: also take it back from this course's students who were asked
+    # it (each one is told, with their answer, which no longer counts).
+    withdraw_asked: bool = False
     course_id: Optional[str] = None  # None / "": students outside every course
 
 
@@ -118,4 +121,24 @@ def set_quiz(exercise_id: str, key: str, req: QuizRequest, teacher: dict = Depen
     except KeyError:
         raise HTTPException(404, "Unknown question")
     asked = pacing.ask_finished(ex, key, req.course_id) if req.approved and req.ask_finished else 0
-    return {**item, "asked_now": asked}
+    # Withdrawn: take it back from this course's students who were asked it.
+    told = pacing.withdraw_asked(ex, key, req.course_id) if not req.approved and req.withdraw_asked else 0
+    return {**item, "asked_now": asked, "withdrawn_now": told}
+
+
+class AnswerReviewRequest(BaseModel):
+    probe_id: int
+    action: Literal["approve", "return"]
+    note: Optional[str] = None  # the text for the student, sent with the decision
+    grade: Optional[int] = Field(default=None, ge=0, le=2)  # on an approve: replaces the grader's
+
+
+@router.post("/pacing/{exercise_id}/answer-review")
+def review_answer(exercise_id: str, req: AnswerReviewRequest, teacher: dict = Depends(deps.require_teacher)):
+    """Decide about a quiz answer that waits for the teacher (graded too low,
+    exercise.yaml quiz_review): let the student continue, or ask them again."""
+    ex = _paced(exercise_id)
+    approve = req.action == "approve"
+    if not pacing.review_answer(ex, req.probe_id, approve, req.note, req.grade if approve else None):
+        raise HTTPException(409, "This answer doesn't wait for a decision.")
+    return {"ok": True}

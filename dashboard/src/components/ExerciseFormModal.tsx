@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import type { AnswerInChat, FullExercise, NewExercise, ParamLabel, StepDraft } from "../types";
+import type { AnswerInChat, FullExercise, NewExercise, ParamLabel, QuizReview, StepDraft } from "../types";
 import { scanBriefRefs, substituteBrief, type BriefRef } from "../params";
 import { useLang } from "../i18n";
 import { Modal } from "./ui/Modal";
@@ -94,6 +94,7 @@ export function ExerciseFormModal({
   const [chatHistory, setChatHistory] = useState(initial?.chat_history ?? true);
   const [outputInChat, setOutputInChat] = useState<"confirm" | "accept" | "ask" | "off">(initial?.output_in_chat ?? "confirm");
   const [answerInChat, setAnswerInChat] = useState<AnswerInChat>(initial?.answer_in_chat ?? "detect");
+  const [quizReview, setQuizReview] = useState<QuizReview>(initial?.quiz_review ?? "partial");
   const [resumeMinutes, setResumeMinutes] = useState(
     initial?.resume_minutes_set && initial.resume_minutes != null ? String(initial.resume_minutes) : "");
   const [blockedHint, setBlockedHint] = useState(
@@ -230,6 +231,7 @@ export function ExerciseFormModal({
       chat_history: chatHistory,
       output_in_chat: outputInChat,
       answer_in_chat: answerInChat,
+      quiz_review: quizReview,
       resume_minutes: resumeMinutes.trim() !== "" ? Math.max(0, Math.round(Number(resumeMinutes))) : undefined,
       steps: builtSteps.length || initial?.steps?.length ? builtSteps : undefined,
     };
@@ -370,6 +372,15 @@ export function ExerciseFormModal({
           <option value="detect">{t("fldAnswerDetect")}</option>
           <option value="confirm">{t("fldAnswerConfirm")}</option>
           <option value="answer">{t("fldAnswerAnswer")}</option>
+        </select>
+      </label>
+      <label style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px", fontSize: 13 }}>
+        {t("fldQuizReview")}
+        <select value={quizReview} onChange={(e) => setQuizReview(e.target.value as QuizReview)}
+                style={{ padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4 }}>
+          <option value="partial">{t("fldQuizReviewPartial")}</option>
+          <option value="zero">{t("fldQuizReviewZero")}</option>
+          <option value="off">{t("fldQuizReviewOff")}</option>
         </select>
       </label>
 

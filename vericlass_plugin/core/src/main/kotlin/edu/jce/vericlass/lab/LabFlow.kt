@@ -170,7 +170,7 @@ class LabFlow(
     fun answer(probe: Probe, text: String) = later {
         try {
             val r = backend.answerProbe(probe.id, text)
-            say(texts.answerSaved(r.auto_grade, r.why), kind = "result")
+            say(texts.answerSaved(r.auto_grade, r.why, r.review), kind = "result")
         } catch (e: ProbeClosedException) {
             say(texts.questionClosed(), record = false)
         } catch (e: Exception) {
@@ -447,6 +447,7 @@ class LabFlow(
         say(when {
             st.finished -> texts.alreadyFinishedAll()
             st.quiz_pending > 0 -> texts.answerQuizFirst()
+            st.quiz_review > 0 -> texts.answerWithTeacher()
             st.waiting_teacher -> texts.notOpenYet(current)
             else -> texts.alreadyDone(labels[n] ?: "$n", current)
         })

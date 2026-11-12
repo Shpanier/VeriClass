@@ -102,7 +102,8 @@ Global toggle in the dashboard header. When on:
    the student sees *"Your teacher is reviewing your question…"*. The card
    says **where the student is**: the step (its label and title) and its
    status (working on it; finished it and waiting for the instructor to open
-   the next one; their output didn't match; answering the step's quiz;
+   the next one; their output didn't match; answering the step's quiz; a quiz
+   answer of theirs waiting for the instructor's decision;
    waiting for approval; finished all the steps), and shows **the chat just
    before the question**: the last five entries (steps handed out, pasted
    outputs, check results, quiz questions, earlier questions and answers),
@@ -513,13 +514,41 @@ ran since the step appeared, which the student checks (or replaces) and sends.
   asked without the dashboard, for example "what does the code you just pasted
   do?" after every step that pastes code. The dashboard can still switch it
   off. Questions are asked in the order they are listed.
-- **Back to an earlier step.** In *Class pacing*, "↺ Back to step…" on a
-  student (or "↺ Everyone back to step…" for the course) sends them back, to
-  the beginning if need be. Their work from that step on stays in the record
-  (status `reset`) but no longer counts, questions still waiting about those
-  steps are withdrawn, and their chat says so and shows the step again. The
-  API is `POST /api/sessions/{id}/reset` and `POST /api/exercises/{id}/reset`
-  (`{"step": n, "course_id": ...}`); it works for any step-by-step lab.
+- **Only a 2/2 answer moves on by itself.** An answer graded 0/2 or 1/2
+  doesn't open the next step: the student's chat says the answer is with the
+  lecturer, and the top of *Class pacing* shows it under *Answers waiting for
+  your decision* (the browser tab's title counts them), next to the model
+  answer and the grader's reason (which the student doesn't see for such an
+  answer: it tends to give the right answer away). The lecturer picks what to
+  tell the student (the grader's feedback, the model answer, or their own
+  words), edits it if they like, and then *Let them continue* (the grade can be
+  corrected there, when the grader was wrong) or *Ask to answer again* (the
+  same question again; the first answer stays in the record). Until the
+  decision the student can only ask questions, and the tutor neither answers
+  the question nor shows the next step. `quiz_review` in exercise.yaml sets
+  which grades wait (see the table below); an answer the grader couldn't grade
+  never waits. The API is `POST /api/pacing/{exercise_id}/answer-review`
+  (`{"probe_id": n, "action": "approve" | "return", "note": ..., "grade": 0..2}`).
+- **Moving a student to another step.** In *Class pacing*, "↕ Move to step…"
+  on a student moves them back (their work from that step on, outputs and quiz
+  answers, stays in the record with status `reset` but no longer counts, and
+  the step's questions are asked again), forward (the steps between are marked
+  `skipped`, not done, their questions aren't asked, and the steps up to the
+  target are opened for that student even beyond what the class has open), or
+  to the step they are on (it starts over). Their chat is interrupted: it stops
+  waiting for a paste or a button answer, says "⏸️ Your teacher stopped you
+  here" and why, and shows the step. "↺ Everyone back to step…" does the same
+  backwards for the whole course. The API is `POST /api/sessions/{id}/move`
+  (`{"step": n}`), and `POST /api/sessions/{id}/reset` / `POST
+  /api/exercises/{id}/reset` (`{"step": n, "course_id": ...}`) for going back;
+  they work for any step-by-step lab.
+- **Withdrawing a question during class.** *Withdraw approval* on a question
+  stops asking it and, by default, takes it back from the course's students
+  who were asked it: a student who hasn't answered is told the question was
+  cancelled and their chat moves on; one who answered is told so with that
+  question and their own answer quoted, and the answer no longer counts in the
+  grade or the averages (status `withdrawn`, kept in the record). Approving it
+  again can ask it again of everyone past its step.
 
 ### Chat history and resuming
 
@@ -538,6 +567,7 @@ session's transcript.
 | `chat_history: false` | exercise.yaml, or *Keep the chat history* in the exercise editor | on |
 | `output_in_chat: confirm \| accept \| ask \| off` | exercise.yaml, or the exercise editor; a chat message while a step is open: `confirm` accepts a full match and asks about anything else, `accept` asks only about a partial match, `ask` asks about any match, `off` treats every message as a question | `confirm` |
 | `answer_in_chat: detect \| confirm \| answer` | exercise.yaml, or the exercise editor; a chat message while a quiz or teacher's question is open (the question doesn't lock the chat, so the student can still ask): `detect` takes it as the answer unless it looks like a question (a question mark, a question word, "I don't understand"), and then asks "your answer, or a question of yours?"; `confirm` always asks; `answer` always takes it as the answer. "Done", or a message that matches the open step's output checks, still goes to the step. A question of the student's own goes to the tutor, or to the teacher in review mode; while it waits for the teacher (`X-VeriClass-Review` on the reply) the chat isn't busy, so the student can answer meanwhile | `detect` |
+| `quiz_review: zero \| partial \| off` | exercise.yaml, or the exercise editor; a quiz answer in a class-paced lab that waits for the lecturer's decision before the next step: `partial` when the grader gave it 0/2 or 1/2 (only 2/2 moves on by itself), `zero` only when it gave 0/2, `off` never (the grade is only recorded) | `partial` |
 | `resume_minutes: N` | exercise.yaml, or the exercise editor; how recent a session must be to be resumed, `0` = always | always for `pacing: class`, otherwise 30 |
 | `CHAT_HISTORY_REPLAY_MAX` | environment | 400 (the latest entries replayed after a login) |
 

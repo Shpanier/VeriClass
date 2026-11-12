@@ -64,12 +64,24 @@ def classify(session: dict[str, Any], ex: Optional[dict[str, Any]], text: str) -
 def tutor_block(session_id: str) -> str:
     """System-prompt block: the questions the student was asked and hasn't
     answered, so the tutor helps them understand what is asked but doesn't
-    answer for them. Empty when none is open."""
+    answer for them; and the quiz answers that wait for the teacher, which
+    the student may have to give again. Empty when there is neither."""
     open_q = pending(session_id)
-    if not open_q:
-        return ""
-    lines = "\n".join(f"- {q['body']}" for q in open_q)
-    return ("OPEN QUESTIONS: the student was asked these and hasn't answered yet:\n" + lines + "\n"
+    # Answered, graded too low, and waiting for the teacher, who may ask again.
+    held = pacing.held_quiz(session_id)
+    blocks = []
+    if open_q:
+        lines = "\n".join(f"- {q['body']}" for q in open_q)
+        blocks.append(
+            "OPEN QUESTIONS: the student was asked these and hasn't answered yet:\n" + lines + "\n"
             "They may ask you about them. Help them understand what is asked (a term, where to "
             "look in their own output), but never answer them, never say what to write, and never "
             "judge or correct a draft answer. Their answer goes to the teacher.")
+    if held:
+        lines = "\n".join(f"- {q['body']}" for q in held)
+        blocks.append(
+            "ANSWERS WITH THE TEACHER: the student answered these, and the teacher is reading the "
+            "answer and may ask them to answer again:\n" + lines + "\n"
+            "Never answer these questions, never say what they should have written, and never "
+            "judge their answer. You may explain the ideas of the steps they did.")
+    return "\n\n".join(blocks)

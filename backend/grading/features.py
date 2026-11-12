@@ -136,7 +136,8 @@ def extract(session_id: str) -> dict[str, Any]:
         ).fetchall()
         probes = c.execute(
             "SELECT body, answer, auto_grade, override_grade, status FROM probes "
-            "WHERE session_id = ? ORDER BY sent_at ASC",
+            # Withdrawn by the teacher, or done again after a reset: no longer counts.
+            "WHERE session_id = ? AND status NOT IN ('withdrawn', 'reset') ORDER BY sent_at ASC",
             (session_id,),
         ).fetchall()
         proctor = c.execute(

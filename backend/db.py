@@ -447,6 +447,9 @@ def init_schema() -> None:
             "trace_key": "TEXT",
             "course_id": "TEXT",  # the course the student picked (NULL: no courses set up)
             "client_os": "TEXT",  # e.g. "Windows 11 amd64", from the plugin (0.4.3+)
+            # Class-paced labs: steps opened for this student only, up to this one
+            # (the teacher moved them forward past what the course has open).
+            "released_to": "INTEGER",
         })
         # A step submission's attachment from the plugin (0.4.3+): the open file,
         # the Run console and the output of the exercise's check command.
@@ -466,6 +469,15 @@ def init_schema() -> None:
         _add_missing_columns(c, "probes", {
             "quiz_key": "TEXT",
             "quiz_step": "INTEGER",
+            # A quiz answer whose grade is too low waits for the teacher
+            # (exercise.yaml quiz_review): 'waiting', then 'approved' (the
+            # student continues) or 'returned' (asked again, in a new row);
+            # 'reset' when the student was sent back meanwhile. NULL: no
+            # review was needed. teacher_note: the teacher's note on a return.
+            "review_status": "TEXT",
+            "teacher_note": "TEXT",
+            "reviewed_at": "TEXT",
+            "auto_why": "TEXT",  # the grader's one-line reason for auto_grade
         })
         # NULL = the password is still the login code (backend/passwords.py).
         # email / student_id / group_name come from a CSV import (backend/roster.py).

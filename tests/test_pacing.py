@@ -493,7 +493,11 @@ def test_chat_history_can_be_switched_off(client):
     assert client.get(f"/api/transcript/{sid}", headers=h).json()["entries"] == []  # nothing was kept
 
 
-def test_teacher_sends_a_student_back_and_the_chat_hears_it(client, teacher):
+def test_teacher_sends_a_student_back_and_the_chat_hears_it(client, teacher, monkeypatch):
+    async def right(question, answer, params, reference=None):
+        return 2, "right"
+
+    monkeypatch.setattr(grader, "grade", right)  # 2/2: moves on by itself
     ex = exercises.get(LAB)
     for q in pacing.quiz_items(ex):
         pacing.set_quiz(ex, q["key"], q["q"] == Q2)  # only Q2 (step A1) is asked
@@ -837,6 +841,417 @@ def test_answer_in_chat_is_validated():
     exercises._validate({**base, "answer_in_chat": "confirm"}, "t")
     with pytest.raises(ValueError, match="answer_in_chat"):
         exercises._validate({**base, "answer_in_chat": "maybe"}, "t")
+
+
+# --- a quiz answer graded 0/2 waits for the teacher (exercise.yaml quiz_review) --------
+
+def _held_answer(client, teacher, monkeypatch, code, grade=0, why="not about the kernel"):
+    """A student who finished A1 and answered its quiz question; the grader gave `grade`."""
+    async def fake_grade(question, answer, params, reference=None):
+        return grade, why
+
+    monkeypatch.setattr(grader, "grade", fake_grade)
+    q1 = next(q for q in client.get(f"/api/pacing/{LAB}", headers=teacher).json()["quiz"] if q["q"] == Q1)
+    client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher, json={"approved": True})
+    h, sid = _student(client, code)
+    assert _finish(client, h, sid, 1, GOOD)["quiz"] == 1
+    probe = client.get(f"/api/probes/pending/{sid}", headers=h).json()[0]
+    r = client.post("/api/probes/answer", headers=h, json={"probe_id": probe["id"], "answer": "no idea"})
+    assert r.status_code == 200, r.text
+    return h, sid, q1, probe, r.json()
+
+
+def _pacing_student(client, teacher, code):
+    view = client.get(f"/api/pacing/{LAB}", headers=teacher).json()
+    return next(s for c in view["courses"] for s in c["students"] if s["username"] == code)
+
+
+def _server_notes(client, h, sid):
+    return client.get(f"/api/transcript/{sid}", headers=h, params={"origin": "server"}).json()["entries"]
+
+
+def _review(client, teacher, probe_id, action, **more):
+    return client.post(f"/api/pacing/{LAB}/answer-review", headers=teacher,
+                       json={"probe_id": probe_id, "action": action, **more})
+
+
+def test_a_zero_answer_waits_for_the_teacher_who_lets_the_student_continue(client, teacher, monkeypatch):
+    h, sid, q1, probe, r = _held_answer(client, teacher, monkeypatch, "PCE-ZR1")
+    try:
+        assert r["auto_grade"] == 0 and r["review"] is True
+        assert r["why"] is None  # the grader's reason is the teacher's: it may give the answer away
+        st = _state(client, h, sid)
+        assert st["quiz_review"] == 1 and st["quiz_pending"] == 0
+        assert not st["open"] and not st["waiting_teacher"] and st["current"] == 2
+        assert _finish(client, h, sid, 2)["status"] == "quiz_review"
+        assert client.get(f"/api/probes/pending/{sid}", headers=h).json() == []  # nothing to answer meanwhile
+
+        # The teacher sees the answer, the grade and the grader's reason.
+        s = _pacing_student(client, teacher, "PCE-ZR1")
+        assert s["quiz_review"] == 1 and s["quiz_pending"] == 0
+        row = s["quiz"][0]
+        assert (row["id"], row["review"], row["grade"], row["answer"], row["why"]) == (
+            probe["id"], "waiting", 0, "no idea", "not about the kernel")
+
+        # The tutor knows, and neither answers the question nor shows the next step.
+        prompt = prompting.system_prompt_for(_session_row(sid))
+        assert "ANSWERS WITH THE TEACHER" in prompt and probe["body"] in prompt
+        assert "Step A1 · Pull" in prompt and "Step A2" not in prompt
+
+        # Only the teacher decides.
+        assert _review(client, h, probe["id"], "approve").status_code in (401, 403)
+        assert _review(client, teacher, probe["id"], "approve", grade=3).status_code == 422
+        assert _review(client, teacher, probe["id"], "approve").status_code == 200
+        st = _state(client, h, sid)
+        assert st["quiz_review"] == 0 and st["open"] and st["step"]["label"] == "A2"
+        row = _pacing_student(client, teacher, "PCE-ZR1")["quiz"][0]
+        assert (row["review"], row["grade"]) == ("approved", 0)  # let through; the grade stays
+        notes = _server_notes(client, h, sid)
+        assert len(notes) == 1 and notes[0]["kind"] == "result" and "A1" in notes[0]["content"]
+        assert _review(client, teacher, probe["id"], "approve").status_code == 409  # decided already
+        assert "ANSWERS WITH THE TEACHER" not in prompting.system_prompt_for(_session_row(sid))
+    finally:
+        client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher, json={"approved": False})
+
+
+def test_the_teacher_can_correct_the_grade_when_approving(client, teacher, monkeypatch):
+    h, sid, q1, probe, _ = _held_answer(client, teacher, monkeypatch, "PCE-ZR2")
+    try:
+        assert _review(client, teacher, probe["id"], "approve", grade=2).status_code == 200
+        row = _pacing_student(client, teacher, "PCE-ZR2")["quiz"][0]
+        assert (row["review"], row["grade"]) == ("approved", 2)
+        assert "2/2" in _server_notes(client, h, sid)[0]["content"]
+        assert _state(client, h, sid)["open"]
+    finally:
+        client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher, json={"approved": False})
+
+
+def test_the_teacher_asks_for_another_answer(client, teacher, monkeypatch):
+    h, sid, q1, probe, _ = _held_answer(client, teacher, monkeypatch, "PCE-ZR3")
+    try:
+        r = _review(client, teacher, probe["id"], "return", note="Think about what a container shares.", grade=2)
+        assert r.status_code == 200
+        # The same question is open again; the first answer is kept for the record.
+        pending = client.get(f"/api/probes/pending/{sid}", headers=h).json()
+        assert len(pending) == 1 and pending[0]["id"] != probe["id"]
+        assert pending[0]["body"] == probe["body"] and pending[0]["quiz_step"] == "A1"
+        st = _state(client, h, sid)
+        assert st["quiz_pending"] == 1 and st["quiz_review"] == 0 and not st["open"]
+        rows = _pacing_student(client, teacher, "PCE-ZR3")["quiz"]
+        assert [(q["review"], q["status"], q["grade"]) for q in rows] == [("returned", "answered", 0),
+                                                                        (None, "pending", None)]
+        notes = _server_notes(client, h, sid)
+        assert len(notes) == 1 and notes[0]["kind"] == "note"
+        assert "A1" in notes[0]["content"] and "Think about what a container shares." in notes[0]["content"]
+        assert _review(client, teacher, probe["id"], "return").status_code == 409
+
+        # A second 0/2 waits again; a better answer moves them on.
+        again = client.post("/api/probes/answer", headers=h, json={"probe_id": pending[0]["id"], "answer": "?"})
+        assert again.json()["review"] is True
+        second = pending[0]["id"]
+        assert _review(client, teacher, second, "return").status_code == 200
+        third = client.get(f"/api/probes/pending/{sid}", headers=h).json()[0]
+
+        async def good(question, answer, params, reference=None):
+            return 2, "right"
+
+        monkeypatch.setattr(grader, "grade", good)
+        r = client.post("/api/probes/answer", headers=h, json={"probe_id": third["id"], "answer": "the host's kernel"})
+        assert r.json()["review"] is False and r.json()["auto_grade"] == 2
+        st = _state(client, h, sid)
+        assert st["open"] and st["step"]["label"] == "A2" and st["quiz_review"] == 0
+    finally:
+        client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher, json={"approved": False})
+
+
+def test_quiz_review_decides_which_grades_wait(client, teacher, monkeypatch):
+    ex = exercises.get(LAB)
+    try:
+        # partial (the default): 1/2 waits too; only 2/2 moves on by itself.
+        h, sid, q1, _, r = _held_answer(client, teacher, monkeypatch, "PCE-ZR5", grade=1)
+        assert r["review"] is True and _state(client, h, sid)["quiz_review"] == 1
+        h, sid, _, _, r = _held_answer(client, teacher, monkeypatch, "PCE-ZR6", grade=2)
+        assert r["review"] is False and _state(client, h, sid)["open"]
+        # zero: a partial answer moves on by itself.
+        ex["quiz_review"] = "zero"
+        h, sid, _, _, r = _held_answer(client, teacher, monkeypatch, "PCE-ZR4", grade=1)
+        assert r["review"] is False and _state(client, h, sid)["open"]
+        # off: as before, the grade is only recorded.
+        ex["quiz_review"] = "off"
+        h, sid, _, _, r = _held_answer(client, teacher, monkeypatch, "PCE-ZR7", grade=0)
+        assert r["review"] is False and r["auto_grade"] == 0 and _state(client, h, sid)["open"]
+        assert r["why"] == "not about the kernel"  # not held: the student sees the reason, as before
+        assert _pacing_student(client, teacher, "PCE-ZR7")["quiz"][0]["review"] is None
+    finally:
+        ex.pop("quiz_review", None)
+        client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher, json={"approved": False})
+
+
+def test_an_ungraded_answer_does_not_wait(client, teacher, monkeypatch):
+    q1 = next(q for q in client.get(f"/api/pacing/{LAB}", headers=teacher).json()["quiz"] if q["q"] == Q1)
+    client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher, json={"approved": True})
+    try:
+        async def broken(question, answer, params, reference=None):
+            raise RuntimeError("the grader is down")
+
+        monkeypatch.setattr(grader, "grade", broken)
+        h, sid = _student(client, "PCE-ZR8")
+        assert _finish(client, h, sid, 1, GOOD)["quiz"] == 1
+        probe = client.get(f"/api/probes/pending/{sid}", headers=h).json()[0]
+        r = client.post("/api/probes/answer", headers=h, json={"probe_id": probe["id"], "answer": "x"}).json()
+        assert r["auto_grade"] is None and r["review"] is False
+        assert _state(client, h, sid)["open"]
+    finally:
+        client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher, json={"approved": False})
+
+
+def test_a_reset_withdraws_an_answer_that_waited(client, teacher, monkeypatch):
+    h, sid, q1, probe, _ = _held_answer(client, teacher, monkeypatch, "PCE-ZR9")
+    try:
+        assert _state(client, h, sid)["quiz_review"] == 1
+        assert client.post(f"/api/sessions/{sid}/reset", headers=teacher, json={"step": 1}).status_code == 200
+        st = _state(client, h, sid)
+        assert st["quiz_review"] == 0 and st["open"] and st["current"] == 1
+        assert _pacing_student(client, teacher, "PCE-ZR9")["quiz"][0]["review"] == "reset"
+        assert _review(client, teacher, probe["id"], "approve").status_code == 409  # nothing waits any more
+    finally:
+        client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher, json={"approved": False})
+
+
+def test_a_teachers_own_question_never_waits(client, teacher, monkeypatch):
+    # Only a step's quiz holds the next step; a question the teacher sent is just graded.
+    async def zero(question, answer, params, reference=None):
+        return 0, "no"
+
+    monkeypatch.setattr(grader, "grade", zero)
+    h, sid = _student(client, "PCE-ZR10")
+    pid = client.post("/api/probe/send", headers=teacher,
+                      json={"session_id": sid, "bodies": ["What did you pull?"]}).json()["probe_ids"][0]
+    r = client.post("/api/probes/answer", headers=h, json={"probe_id": pid, "answer": "x"}).json()
+    assert r["auto_grade"] == 0 and r["review"] is False
+    assert _state(client, h, sid)["open"]
+    assert _review(client, teacher, pid, "approve").status_code == 409
+
+
+def test_quiz_review_is_validated():
+    base = {"exercise_id": "x", "title_en": "x", "default_mode": "mentor", "brief_md": "x",
+            "variants": [{"id": "v1", "params": {}, "test_inputs": []}]}
+    for value in ("zero", "partial", "off"):
+        exercises._validate({**base, "quiz_review": value}, "t")
+    with pytest.raises(ValueError, match="quiz_review"):
+        exercises._validate({**base, "quiz_review": "always"}, "t")
+    assert pacing.quiz_review({}) == "partial" and pacing.quiz_review({"quiz_review": "off"}) == "off"
+
+
+# --- the teacher moves a student, or withdraws a question (interrupting their chat) -----
+
+def _approve_only(*questions):
+    ex = exercises.get(LAB)
+    for q in pacing.quiz_items(ex):
+        pacing.set_quiz(ex, q["key"], q["q"] in questions)
+
+
+def _grade_with(monkeypatch, grade, why="ok"):
+    async def fake(question, answer, params, reference=None):
+        return grade, why
+
+    monkeypatch.setattr(grader, "grade", fake)
+
+
+def _move(client, teacher, sid, n):
+    r = client.post(f"/api/sessions/{sid}/move", headers=teacher, json={"step": n})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _checks(sid):
+    with db.conn() as c:
+        return [(k["step"], k["status"]) for k in c.execute(
+            "SELECT step, status FROM step_checks WHERE session_id = ? ORDER BY id", (sid,))]
+
+
+def test_moving_a_student_forward_skips_the_steps_and_opens_them_for_that_student(client, teacher):
+    _approve_only()
+    _release(client, teacher, 1)
+    try:
+        h, sid = _student(client, "PCE-MV1")
+        h2, sid2 = _student(client, "PCE-MV2")
+        assert _finish(client, h, sid, 1, GOOD)["status"] == "done"
+        assert _state(client, h, sid)["waiting_teacher"]  # A2 isn't open to the class
+
+        r = _move(client, teacher, sid, 4)
+        assert (r["from"], r["to"], r["how"]) == (2, 4, "forward")
+        st = _state(client, h, sid)
+        assert st["open"] and st["step"]["label"] == "B2" and st["released"] == 4
+        assert _checks(sid) == [(1, "approved"), (2, "skipped"), (3, "skipped")]
+        assert _state(client, h2, sid2)["released"] == 1  # only for that student
+        note = _server_notes(client, h, sid)[-1]
+        assert (note["kind"], note["step"]) == ("reset", 4) and "stopped" in note["content"] and "B2" in note["content"]
+        s = _pacing_student(client, teacher, "PCE-MV1")
+        assert (s["current"], s["skipped"], s["released_to"]) == (4, ["A2", "B1"], 4)
+        assert _finish(client, h, sid, 4)["status"] == "done"
+        assert _state(client, h, sid)["finished"]
+        # Students can't move anyone; the step is clamped to the lab.
+        assert client.post(f"/api/sessions/{sid}/move", headers=h, json={"step": 1}).status_code == 403
+        assert _move(client, teacher, sid2, 99)["to"] == 4
+    finally:
+        _release(client, teacher, 2)
+
+
+def test_moving_a_student_back_drops_their_answers_and_asks_again(client, teacher, monkeypatch):
+    _approve_only(Q2)
+    _grade_with(monkeypatch, 2)
+    _release(client, teacher, 4)
+    try:
+        h, sid = _student(client, "PCE-MV3")
+        assert _finish(client, h, sid, 1, GOOD)["quiz"] == 1
+        probe = client.get(f"/api/probes/pending/{sid}", headers=h).json()[0]
+        assert client.post("/api/probes/answer", headers=h, json={"probe_id": probe["id"], "answer": "6.8"}).json()["review"] is False
+        _finish(client, h, sid, 2)
+        assert _state(client, h, sid)["current"] == 3
+
+        r = _move(client, teacher, sid, 1)
+        assert (r["from"], r["to"], r["how"]) == (3, 1, "back")
+        assert _checks(sid) == [(1, "reset"), (2, "reset")]
+        rows = _pacing_student(client, teacher, "PCE-MV3")["quiz"]
+        assert [(q["status"], q["answer"]) for q in rows] == [("reset", "6.8")]  # kept, no longer counts
+        assert "stopped" in _server_notes(client, h, sid)[-1]["content"]
+        # Done again: the question is asked again.
+        assert _finish(client, h, sid, 1, GOOD)["quiz"] == 1
+        assert len(client.get(f"/api/probes/pending/{sid}", headers=h).json()) == 1
+    finally:
+        _approve_only()
+
+
+def test_moving_a_student_to_their_own_step_starts_it_over(client, teacher):
+    _approve_only()
+    _release(client, teacher, 4)
+    h, sid = _student(client, "PCE-MV4")
+    _finish(client, h, sid, 1, GOOD)
+    _finish(client, h, sid, 2)
+    assert _finish(client, h, sid, 3, "nothing useful")["status"] == "missing"
+    assert _state(client, h, sid)["waiting_review"]
+    r = _move(client, teacher, sid, 3)
+    assert (r["from"], r["to"], r["how"]) == (3, 3, "again")
+    st = _state(client, h, sid)
+    assert st["open"] and st["step"]["label"] == "B1" and not st["waiting_review"]
+    assert _checks(sid)[-1] == (3, "reset")
+    notes = _server_notes(client, h, sid)
+    assert (notes[-1]["kind"], notes[-1]["step"]) == ("reset", 3)
+    # Nothing pending: the chat is still told, so it shows the step again.
+    _move(client, teacher, sid, 3)
+    assert len(_server_notes(client, h, sid)) == len(notes) + 1
+
+
+def test_moving_a_student_to_their_step_shows_it_even_when_the_class_hasnt_opened_it(client, teacher):
+    _approve_only()
+    _release(client, teacher, 1)
+    try:
+        h, sid = _student(client, "PCE-MV5")
+        _finish(client, h, sid, 1, GOOD)
+        assert _state(client, h, sid)["waiting_teacher"]          # A2 isn't open to the class
+        assert _move(client, teacher, sid, 2)["how"] == "again"
+        st = _state(client, h, sid)
+        assert st["open"] and st["step"]["label"] == "A2"
+    finally:
+        _release(client, teacher, 2)
+
+
+def _course_student(tc, code, course):
+    with db.conn() as c:
+        c.execute("INSERT OR IGNORE INTO courses (course_id, name) VALUES (?, ?)", (course, course))
+        c.execute("INSERT OR IGNORE INTO course_exercises (course_id, exercise_id) VALUES (?, ?)", (course, LAB))
+        c.execute("INSERT INTO users (username, login_code, role) VALUES (?, ?, 'student')", (code, code))
+        uid = c.execute("SELECT id FROM users WHERE login_code = ?", (code,)).fetchone()["id"]
+        c.execute("INSERT INTO course_members (course_id, user_id) VALUES (?, ?)", (course, uid))
+    tok = tc.post("/api/login", json={"code": code, "password": code}).json()["token"]
+    h = {"Authorization": f"Bearer {tok}"}
+    sid = tc.post("/api/sessions", json={"course_id": course, "exercise_id": LAB}, headers=h).json()["session_id"]
+    return h, sid
+
+
+def test_withdrawing_a_question_tells_each_student_their_own_question_and_answer(client, teacher, monkeypatch):
+    _approve_only(Q1, Q2)
+    _grade_with(monkeypatch, 2)
+    _release(client, teacher, 4, "course-wd")
+    try:
+        hx, sx = _course_student(client, "PCE-WD1", "course-wd")   # answers one question, the other still open
+        hy, sy = _course_student(client, "PCE-WD2", "course-wd")   # answers both
+        for h, sid in ((hx, sx), (hy, sy)):
+            assert _finish(client, h, sid, 1, GOOD)["quiz"] == 2
+        px = client.get(f"/api/probes/pending/{sx}", headers=hx).json()
+        py = client.get(f"/api/probes/pending/{sy}", headers=hy).json()
+        body1, body2 = px[0]["body"], px[1]["body"]
+        assert body2 == Q2
+        client.post("/api/probes/answer", headers=hx, json={"probe_id": px[0]["id"], "answer": "x answers one"})
+        client.post("/api/probes/answer", headers=hy, json={"probe_id": py[0]["id"], "answer": "y answers one"})
+        client.post("/api/probes/answer", headers=hy, json={"probe_id": py[1]["id"], "answer": "y answers two"})
+        assert not _state(client, hx, sx)["open"]  # x still has Q2 open
+
+        key2 = pacing.quiz_key(Q2)
+        r = client.post(f"/api/pacing/{LAB}/quiz/{key2}", headers=teacher,
+                        json={"approved": False, "withdraw_asked": True, "course_id": "course-wd"})
+        assert r.status_code == 200 and r.json()["withdrawn_now"] == 2
+
+        # x: the open question is gone; told so, about that question only.
+        assert client.get(f"/api/probes/pending/{sx}", headers=hx).json() == []
+        assert _state(client, hx, sx)["open"]
+        nx = _server_notes(client, hx, sx)[-1]
+        assert nx["kind"] == "cancelled" and Q2 in nx["content"] and "No need to answer" in nx["content"]
+        assert body1 not in nx["content"] and "x answers one" not in nx["content"]
+        # y: told with their own answer to that question, not the other one.
+        ny = _server_notes(client, hy, sy)[-1]
+        assert ny["kind"] == "cancelled" and Q2 in ny["content"] and "y answers two" in ny["content"]
+        assert body1 not in ny["content"] and "y answers one" not in ny["content"]
+        rows = {q["body"]: q["status"] for q in _pacing_student(client, teacher, "PCE-WD2")["quiz"]}  # noqa
+        assert rows == {body1: "answered", Q2: "withdrawn"}
+        with db.conn() as c:
+            counted = [r["body"] for r in c.execute(
+                "SELECT body FROM probes WHERE session_id = ? AND status NOT IN ('withdrawn', 'reset')", (sy,))]
+        assert counted == [body1]
+
+        # Approved again: asked again of both (a withdrawn answer counts as not asked).
+        r = client.post(f"/api/pacing/{LAB}/quiz/{key2}", headers=teacher,
+                        json={"approved": True, "ask_finished": True, "course_id": "course-wd"})
+        assert r.json()["asked_now"] == 2
+        # Without withdraw_asked, withdrawing only stops asking it.
+        r = client.post(f"/api/pacing/{LAB}/quiz/{key2}", headers=teacher, json={"approved": False})
+        assert r.json()["withdrawn_now"] == 0 and len(client.get(f"/api/probes/pending/{sx}", headers=hx).json()) == 1
+    finally:
+        _approve_only()
+
+
+def test_withdrawing_releases_an_answer_that_waited_for_the_teacher(client, teacher, monkeypatch):
+    h, sid, q1, probe, r = _held_answer(client, teacher, monkeypatch, "PCE-WD3", grade=1)
+    try:
+        assert r["review"] is True and _state(client, h, sid)["quiz_review"] == 1
+        client.post(f"/api/pacing/{LAB}/quiz/{q1['key']}", headers=teacher,
+                    json={"approved": False, "withdraw_asked": True, "course_id": None})
+        st = _state(client, h, sid)
+        assert st["quiz_review"] == 0 and st["open"]
+        row = _pacing_student(client, teacher, "PCE-WD3")["quiz"][0]
+        assert (row["status"], row["review"]) == ("withdrawn", "withdrawn")
+        assert "no idea" in _server_notes(client, h, sid)[-1]["content"]
+    finally:
+        _approve_only()
+
+
+def test_the_teachers_text_goes_with_either_decision(client, teacher, monkeypatch):
+    h, sid, q1, probe, _ = _held_answer(client, teacher, monkeypatch, "PCE-TX1", grade=1)
+    try:
+        assert _review(client, teacher, probe["id"], "return", note="Line one.\nLine two.").status_code == 200
+        note = _server_notes(client, h, sid)[-1]["content"]
+        assert "> Line one.\n> Line two." in note
+        again = client.get(f"/api/probes/pending/{sid}", headers=h).json()[0]
+        client.post("/api/probes/answer", headers=h, json={"probe_id": again["id"], "answer": "still partial"})
+        assert _review(client, teacher, again["id"], "approve", note="Close enough: a container has no kernel.").status_code == 200
+        note = _server_notes(client, h, sid)[-1]["content"]
+        assert note.startswith("✅") and "> Close enough: a container has no kernel." in note
+        with db.conn() as c:
+            assert c.execute("SELECT teacher_note FROM probes WHERE id = ?", (again["id"],)).fetchone()[0] == \
+                "Close enough: a container has no kernel."
+    finally:
+        _approve_only()
 
 
 @pytest.mark.parametrize("text, asks", [

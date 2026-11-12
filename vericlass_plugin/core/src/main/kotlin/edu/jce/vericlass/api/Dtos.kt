@@ -106,6 +106,8 @@ data class ProbeAnswerResponse(
     /** Null when grading was unavailable (the answer was still saved). */
     val auto_grade: Int? = null,
     val why: String? = null,
+    /** Graded too low to move on by itself (exercise.yaml quiz_review): the teacher decides. */
+    val review: Boolean = false,
 )
 
 /**
@@ -133,6 +135,8 @@ data class StepStateResponse(
     val open: Boolean = false,
     /** Their last output didn't match; it waits for the teacher. */
     val waiting_review: Boolean = false,
+    /** Quiz answers of theirs graded too low: the teacher lets them continue or asks again. */
+    val quiz_review: Int = 0,
     /** The open step (when [open]). */
     val step: OpenStep? = null,
 )
@@ -146,7 +150,7 @@ data class OpenStep(
     val needs_output: Boolean = false,
 )
 
-/** POST /api/steps/finish. status: done, missing, wrong_step, not_open, quiz_pending, finished. */
+/** POST /api/steps/finish. status: done, missing, wrong_step, not_open, quiz_pending, quiz_review, finished. */
 data class FinishResponse(
     val status: String = "",
     val ok: Boolean? = null,

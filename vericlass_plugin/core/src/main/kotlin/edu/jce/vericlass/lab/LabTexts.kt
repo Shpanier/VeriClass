@@ -102,10 +102,21 @@ class LabTexts(val hebrew: Boolean) {
     fun remind(body: String) = t(
         "✍️ כשתהיו מוכנים, כתבו כאן את התשובה לשאלה:\n\n> $body",
         "✍️ When you're ready, write your answer to the question here:\n\n> $body")
-    fun answerSaved(grade: Int?, why: String?) =
-        t("✅ התשובה נשמרה.", "✅ Your answer was saved.") +
+    /** [review]: the grade is too low to move on by itself, so the answer waits for the teacher. */
+    fun answerSaved(grade: Int?, why: String?, review: Boolean = false) =
+        (if (review) t("📝 התשובה נשמרה.", "📝 Your answer was saved.")
+        else t("✅ התשובה נשמרה.", "✅ Your answer was saved.")) +
             (grade?.let { t(" ציון: **$it/2**", " Grade: **$it/2**") } ?: "") +
-            (why?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: "")
+            (why?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: "") +
+            (if (review) "\n\n" + t(
+                "⏳ **התשובה ממתינה למרצה.** הוא יקרא אותה, ואז יאשר לכם להמשיך או יבקש שתענו שוב; " +
+                    "ההמשך יופיע כאן לבד. בינתיים אפשר לשאול כאן שאלות.",
+                "⏳ **Your answer waits for your teacher**, who will read it and then let you continue or ask " +
+                    "you to answer again; what comes next will appear here by itself. Meanwhile you can ask questions here.")
+            else "")
+    fun answerWithTeacher() = t(
+        "התשובה שלכם לשאלה ממתינה למרצה. השלב הבא יופיע כשהמרצה יאשר לכם להמשיך.",
+        "Your answer to the question waits for your teacher. The next step appears when they let you continue.")
     fun questionClosed() = t(
         "השאלה הזו כבר לא פתוחה (כבר עניתם עליה, או שהמרצה ביטל אותה).",
         "This question is no longer open (you already answered it, or your teacher withdrew it).")

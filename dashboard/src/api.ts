@@ -245,6 +245,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ step }),
     }),
+  /** Move one student to a step: back, forward (skipping), or the same one (start over). */
+  moveSession: (sessionId: string, step: number) =>
+    j<{ from: number; to: number; how: "back" | "forward" | "again" }>(`/api/sessions/${encodeURIComponent(sessionId)}/move`, {
+      method: "POST",
+      body: JSON.stringify({ step }),
+    }),
   resetCourse: (exerciseId: string, courseId: string, step: number) =>
     j<{ sessions: number; moved: number }>(`/api/exercises/${encodeURIComponent(exerciseId)}/reset`, {
       method: "POST",
@@ -261,13 +267,21 @@ export const api = {
       body: JSON.stringify({ session_id: sessionId, step }),
     }),
   setQuiz: (exerciseId: string, key: string, approved: boolean, body?: string,
-            askFinished?: { courseId: string }) =>
-    j<PacingQuizItem & { asked_now: number }>(`/api/pacing/${encodeURIComponent(exerciseId)}/quiz/${key}`, {
+            course?: { courseId: string }, withdrawAsked = false) =>
+    j<PacingQuizItem & { asked_now: number; withdrawn_now: number }>(`/api/pacing/${encodeURIComponent(exerciseId)}/quiz/${key}`, {
       method: "POST",
       body: JSON.stringify({
         approved, body: body ?? null,
-        ask_finished: !!askFinished, course_id: askFinished?.courseId ?? null,
+        ask_finished: approved && !!course, withdraw_asked: !approved && withdrawAsked,
+        course_id: course?.courseId ?? null,
       }),
+    }),
+  /** Decide about a quiz answer that waits for the teacher (graded too low). */
+  reviewAnswer: (exerciseId: string, probeId: number, action: "approve" | "return",
+                 more?: { note?: string; grade?: number }) =>
+    j<{ ok: boolean }>(`/api/pacing/${encodeURIComponent(exerciseId)}/answer-review`, {
+      method: "POST",
+      body: JSON.stringify({ probe_id: probeId, action, note: more?.note ?? null, grade: more?.grade ?? null }),
     }),
   decideStepCheck: (id: number, action: "approve" | "return", note: string) =>
     j<{ ok: boolean }>(`/api/step-checks/${id}/decide`, {

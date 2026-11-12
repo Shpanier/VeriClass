@@ -11,7 +11,8 @@ Entries come from two origins:
 - 'client': written by the student's chat (POST /api/transcript/{session_id}),
   tagged with that chat's `client` id.
 - 'server': written by the server itself: the note that the teacher sent the
-  student back to an earlier step (backend/steps.py reset_to), deleted a
+  student to another step (backend/pacing.py move_to: kind 'reset'), withdrew
+  a question they were asked (kind 'cancelled'), deleted a
   question, or answered one the student no longer waited for (routes/review.py).
 An open chat polls GET ...?after=<last id>&exclude_client=<its id> and shows
 what it didn't write itself: the server's notes, and what another open chat of
@@ -32,7 +33,8 @@ from backend import db
 AUTHORS = ("student", "tutor", "system")
 # What an entry is, so a client can resume sensibly (e.g. a "step" entry with
 # its step number tells the chat the step's text is already on screen).
-KINDS = ("text", "brief", "step", "output", "result", "quiz", "answer", "note", "reset", "returned")
+KINDS = ("text", "brief", "step", "output", "result", "quiz", "answer", "note", "reset", "returned",
+         "cancelled")
 _CONTENT_MAX = 60_000
 
 

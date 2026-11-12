@@ -35,7 +35,8 @@ def step_of(session: dict[str, Any], ex: Optional[dict[str, Any]]) -> Optional[d
     status: open (working on it) · waiting_teacher (finished every open step,
     the teacher opens the next) · waiting_review (their output didn't match;
     the teacher can let them through) · quiz (answering the step's quiz) ·
-    waiting_check (wrote "done", waiting for the teacher's approval) ·
+    quiz_review (a quiz answer about the step was graded too low and waits
+    for the teacher) · waiting_check (wrote "done", waiting for the teacher's approval) ·
     not_started (the first step isn't open yet) · finished (all steps done).
     """
     lab = steps.steps_of(ex)
@@ -52,6 +53,8 @@ def step_of(session: dict[str, Any], ex: Optional[dict[str, Any]]) -> Optional[d
             status = "waiting_review"
         elif st["quiz_pending"]:
             status = "quiz"
+        elif st["quiz_review"]:
+            status = "quiz_review"
         elif st["waiting_teacher"]:
             status = "not_started" if cur == 1 else "waiting_teacher"
         else:

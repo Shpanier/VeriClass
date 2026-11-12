@@ -65,11 +65,12 @@ function rowsFor(text: string): number {
 
 /** The step's status on the card, and its colour. */
 const STEP_STATUS: Record<ReviewStepStatus, { key: "reviewStepOpen" | "reviewStepWaitingTeacher" | "reviewStepWaitingReview"
-  | "reviewStepQuiz" | "reviewStepWaitingCheck" | "reviewStepNotStarted" | "reviewStepFinished"; color: string }> = {
+  | "reviewStepQuiz" | "reviewStepQuizReview" | "reviewStepWaitingCheck" | "reviewStepNotStarted" | "reviewStepFinished"; color: string }> = {
   open: { key: "reviewStepOpen", color: "#15803d" },
   waiting_teacher: { key: "reviewStepWaitingTeacher", color: "#b45309" },
   waiting_review: { key: "reviewStepWaitingReview", color: "#b91c1c" },
   quiz: { key: "reviewStepQuiz", color: "#6d28d9" },
+  quiz_review: { key: "reviewStepQuizReview", color: "#b91c1c" },
   waiting_check: { key: "reviewStepWaitingCheck", color: "#b45309" },
   not_started: { key: "reviewStepNotStarted", color: "#6b7280" },
   finished: { key: "reviewStepFinished", color: "#15803d" },
@@ -78,7 +79,7 @@ const STEP_STATUS: Record<ReviewStepStatus, { key: "reviewStepOpen" | "reviewSte
 /** An icon and a label key for a chat entry before the question, by who wrote it and what it is. */
 function entryTag(e: ReviewChatEntry): { icon: string; key: "reviewKindStudent" | "reviewKindOutput" | "reviewKindAnswer"
   | "reviewKindStep" | "reviewKindResult" | "reviewKindQuiz" | "reviewKindBrief" | "reviewKindNote" | "reviewKindReturned"
-  | "reviewKindReset" | "reviewKindTutor" } {
+  | "reviewKindReset" | "reviewKindCancelled" | "reviewKindTutor" } {
   if (e.author === "student") {
     if (e.kind === "output") return { icon: "📋", key: "reviewKindOutput" };
     if (e.kind === "answer") return { icon: "✍️", key: "reviewKindAnswer" };
@@ -92,6 +93,7 @@ function entryTag(e: ReviewChatEntry): { icon: string; key: "reviewKindStudent" 
     case "note": return { icon: "🧑‍🏫", key: "reviewKindNote" };
     case "returned": return { icon: "↩️", key: "reviewKindReturned" };
     case "reset": return { icon: "⏮", key: "reviewKindReset" };
+    case "cancelled": return { icon: "🚫", key: "reviewKindCancelled" };
     default: return { icon: "🤖", key: "reviewKindTutor" };
   }
 }

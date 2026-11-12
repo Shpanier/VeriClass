@@ -25,6 +25,25 @@ A question marked `always: true` in the package is approved by its author: it
 is asked without waiting for the dashboard (e.g. "what does the code you just
 pasted do?" after every paste step). The dashboard can still switch it off,
 and its choice then wins.
+
+Only a quiz answer the grader gave 2/2 moves the student on by itself. One
+graded 0/2 or 1/2 waits for the teacher, who sees it in the dashboard next to
+the model answer and either lets the student continue (correcting the grade if
+the grader was wrong) or asks them to answer again; either way with a text for
+the student (the grader's feedback, the model answer, or the teacher's own).
+The student is told so in their chat and can still ask questions meanwhile;
+the grader's reason for the grade is shown to the teacher only, since it tends
+to give the answer away. exercise.yaml `quiz_review` sets which grades wait:
+'partial' (0/2 and 1/2, the default), 'zero' (0/2 only), 'off'.
+
+The teacher can move a student to any step (move_to): back (their work from
+there on no longer counts and is done again), forward (the steps between are
+skipped and the target step is opened for that student, even beyond what the
+class has open), or the step they are on (start it over). Withdrawing a
+question that students were asked tells each of them, quoting the question and
+their own answer, and the answer no longer counts. Every such change reaches
+the student's chat as a note in the transcript, which interrupts whatever the
+chat was waiting for.
 """
 import hashlib
 import json
@@ -79,6 +98,15 @@ def released(ex: dict[str, Any], course_id: Optional[str]) -> int:
             (_course(course_id), ex["exercise_id"]),
         ).fetchone()
     return max(0, min(row["released"], total(ex))) if row else open_from_start(ex)
+
+
+def released_for(ex: dict[str, Any], session_id: str, course_id: Optional[str]) -> int:
+    """Steps open to this student: the course's, or more when the teacher moved
+    the student forward past them (sessions.released_to)."""
+    with db.conn() as c:
+        row = c.execute("SELECT released_to FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    own = (row["released_to"] or 0) if row else 0
+    return max(released(ex, course_id), min(own, total(ex)))
 
 
 def set_released(ex: dict[str, Any], course_id: Optional[str], n: int) -> int:
@@ -198,7 +226,9 @@ def quiz_items(ex: dict[str, Any]) -> list[dict[str, Any]]:
 
 def set_quiz(ex: dict[str, Any], key: str, approved: bool, body: Optional[str] = None) -> dict[str, Any]:
     """Approve (or withdraw) a quiz question, optionally with new wording.
-    Raises KeyError for a key the exercise doesn't have."""
+    Raises KeyError for a key the exercise doesn't have. Withdrawing changes
+    only what is asked from now on; withdraw_asked() takes it back from the
+    students already asked."""
     item = next((i for i in quiz_items(ex) if i["key"] == key), None)
     if item is None:
         raise KeyError(key)
@@ -215,6 +245,63 @@ def set_quiz(ex: dict[str, Any], key: str, approved: bool, body: Optional[str] =
     return next(i for i in quiz_items(ex) if i["key"] == key)
 
 
+# Statuses of a quiz probe that no longer counts: withdrawn before the answer
+# (cancelled), after it (withdrawn), or done again after a reset (reset).
+GONE = ("cancelled", "withdrawn", "reset")
+
+
+def withdraw_asked(ex: dict[str, Any], key: str, course_id: Optional[str]) -> int:
+    """The teacher withdrew a question: take it back from the course's students
+    who were asked it. A question still open is cancelled (its next step no
+    longer waits for it); an answer no longer counts (status 'withdrawn', kept
+    for the record), and one that waited for the teacher no longer holds the
+    student back. Each student's chat says so, quoting that question and the
+    student's own answer to it. Returns how many students were told."""
+    from backend import transcript  # transcript doesn't import pacing; avoids a cycle at import
+
+    item = next((i for i in quiz_items(ex) if i["key"] == key), None)
+    if item is None:
+        raise KeyError(key)
+    he = hebrew(ex)
+    told = 0
+    with db.conn() as c:
+        sessions = [r["id"] for r in _latest_sessions(c, ex["exercise_id"], _course(course_id))]
+    for sid in sessions:
+        with db.conn() as c:
+            rows = c.execute(
+                "SELECT id, body, answer, status, quiz_step FROM probes WHERE session_id = ? AND quiz_key = ? "
+                "AND status IN ('pending', 'answered') ORDER BY id", (sid, key)).fetchall()
+            if not rows:
+                continue
+            c.execute("UPDATE probes SET status = 'cancelled' WHERE session_id = ? AND quiz_key = ? "
+                      "AND status = 'pending'", (sid, key))
+            c.execute("UPDATE probes SET status = 'withdrawn', "
+                      "review_status = CASE WHEN review_status = 'waiting' THEN 'withdrawn' ELSE review_status END "
+                      "WHERE session_id = ? AND quiz_key = ? AND status = 'answered'", (sid, key))
+            c.execute("UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?", (sid,))
+        # The latest one is what the student last saw: still open, or answered.
+        last = rows[-1]
+        lbl = label(ex, last["quiz_step"])
+        question = _quote(last["body"])
+        if last["status"] == "pending":
+            text = (f"🚫 **המרצה ביטל את השאלה על שלב {lbl}.** אין צורך לענות עליה:\n\n{question}" if he else
+                    f"🚫 **Your teacher cancelled the question about step {lbl}.** No need to answer it:\n\n{question}")
+        else:
+            answer = _quote(last["answer"] or "")
+            text = (f"🚫 **המרצה ביטל את השאלה על שלב {lbl}:**\n\n{question}\n\nהתשובה שלכם הייתה:\n\n"
+                    f"{answer}\n\nהיא לא נחשבת בציון." if he else
+                    f"🚫 **Your teacher cancelled the question about step {lbl}:**\n\n{question}\n\n"
+                    f"Your answer was:\n\n{answer}\n\nIt doesn't count in your grade.")
+        transcript.record(sid, "system", text, kind="cancelled", step=last["quiz_step"], origin="server")
+        told += 1
+    return told
+
+
+def _quote(text: str) -> str:
+    """Markdown quote of a (multi-line) text."""
+    return "\n".join("> " + line for line in (text or "").strip().splitlines()) or ">"
+
+
 def ask_finished(ex: dict[str, Any], key: str, course_id: Optional[str]) -> int:
     """Ask an approved question now of the course's students who already
     finished its step without being asked it. Their next step waits for the
@@ -229,8 +316,8 @@ def ask_finished(ex: dict[str, Any], key: str, course_id: Optional[str]) -> int:
         for r in _latest_sessions(c, ex["exercise_id"], _course(course_id)):
             if _current(c, r["id"]) <= item["step"]:
                 continue  # not there yet: asked when they finish the step
-            if c.execute("SELECT 1 FROM probes WHERE session_id = ? AND quiz_key = ? AND status != 'cancelled'",
-                         (r["id"], key)).fetchone():
+            if c.execute("SELECT 1 FROM probes WHERE session_id = ? AND quiz_key = ? "
+                         "AND status NOT IN ('cancelled', 'withdrawn', 'reset')", (r["id"], key)).fetchone():
                 continue
             c.execute("INSERT INTO probes (session_id, body, source, quiz_key, quiz_step) "
                       "VALUES (?, ?, 'quiz', ?, ?)", (r["id"], item["body"], key, item["step"]))
@@ -251,6 +338,90 @@ def pending_quiz(session_id: str) -> list[dict[str, Any]]:
             "AND quiz_key IS NOT NULL ORDER BY id", (session_id,))]
 
 
+# --- a quiz answer that waits for the teacher ------------------------------------------
+# exercise.yaml `quiz_review`: which grades (0..2, by the grader) keep the
+# student from moving on until the teacher decides:
+#   partial (default): an answer graded 0/2 or 1/2; only 2/2 moves on by itself.
+#   zero: an answer graded 0/2.
+#   off: none; the grade is only recorded (as it was before November 2026).
+# An answer the grader couldn't grade (an LLM outage) never waits.
+QUIZ_REVIEW = ("zero", "partial", "off")
+
+
+def quiz_review(ex: Optional[dict[str, Any]]) -> str:
+    value = (ex or {}).get("quiz_review")
+    return value if value in QUIZ_REVIEW else "partial"
+
+
+def needs_review(ex: Optional[dict[str, Any]], grade: Optional[int]) -> bool:
+    """Does a quiz answer with this grade wait for the teacher?"""
+    mode = quiz_review(ex)
+    if grade is None or mode == "off" or not is_paced(ex):
+        return False
+    return grade <= (1 if mode == "partial" else 0)
+
+
+def held_quiz(session_id: str) -> list[dict[str, Any]]:
+    """The session's quiz answers that wait for the teacher, oldest first."""
+    with db.conn() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT id, body, quiz_step FROM probes WHERE session_id = ? AND review_status = 'waiting' "
+            "AND quiz_key IS NOT NULL ORDER BY id", (session_id,))]
+
+
+def review_answer(ex: dict[str, Any], probe_id: int, approve: bool, note: Optional[str] = None,
+                  grade: Optional[int] = None) -> bool:
+    """The teacher decides about a quiz answer that waits for them. Approve:
+    the student continues; `grade` (0..2), when given, replaces the grader's.
+    Otherwise the answer is kept as 'returned' and the question is asked again.
+    Either way the student's chat says so (the transcript), with `note`: the
+    text the teacher chose for the student (the grader's feedback, the model
+    answer, or their own). False when the answer doesn't wait (decided already, or the
+    student was sent back meanwhile) or isn't of this exercise."""
+    from backend import transcript  # transcript doesn't import pacing; avoids a cycle at import
+
+    note = (note or "").strip() or None
+    with db.conn() as c:
+        p = c.execute(
+            "SELECT p.id, p.session_id, p.body, p.quiz_key, p.quiz_step FROM probes p "
+            "JOIN sessions s ON s.id = p.session_id "
+            "WHERE p.id = ? AND s.exercise = ? AND p.review_status = 'waiting' AND p.quiz_key IS NOT NULL",
+            (probe_id, ex["exercise_id"])).fetchone()
+        if p is None:
+            return False
+        if approve:
+            c.execute(
+                "UPDATE probes SET review_status = 'approved', teacher_note = ?, reviewed_at = CURRENT_TIMESTAMP, "
+                "override_grade = COALESCE(?, override_grade) WHERE id = ?", (note, grade, probe_id))
+        else:
+            c.execute(
+                "UPDATE probes SET review_status = 'returned', teacher_note = ?, "
+                "reviewed_at = CURRENT_TIMESTAMP WHERE id = ?", (note, probe_id))
+            c.execute(
+                "INSERT INTO probes (session_id, body, source, quiz_key, quiz_step) VALUES (?, ?, 'quiz', ?, ?)",
+                (p["session_id"], p["body"], p["quiz_key"], p["quiz_step"]))
+        c.execute("UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?", (p["session_id"],))
+    lbl = label(ex, p["quiz_step"])
+    he = hebrew(ex)
+    if approve:
+        text = (f"✅ המרצה קרא את התשובה שלכם לשאלה על שלב {lbl} ואישר לכם להמשיך." if he else
+                f"✅ Your teacher read your answer to the question about step {lbl}: you can continue.")
+        if grade is not None:
+            text += f" הציון עודכן ל־{grade}/2." if he else f" The grade is now {grade}/2."
+        if note:
+            text += "\n\n" + _quote(note)
+        transcript.record(p["session_id"], "system", text, kind="result", step=p["quiz_step"], origin="server")
+    else:
+        text = (f"↩️ המרצה קרא את התשובה שלכם לשאלה על שלב {lbl} וביקש שתענו עליה שוב. "
+                "השאלה מופיעה כאן שוב." if he else
+                f"↩️ Your teacher read your answer to the question about step {lbl} and asks you to "
+                "answer it again. The question is shown here again.")
+        if note:
+            text += "\n\n" + _quote(note)
+        transcript.record(p["session_id"], "system", text, kind="note", origin="server")
+    return True
+
+
 # --- a student's progress ----------------------------------------------------------------
 
 def step_text(ex: dict[str, Any], n: int) -> str:
@@ -269,8 +440,9 @@ def state(session: dict[str, Any], ex: dict[str, Any]) -> dict[str, Any]:
     sid = session["id"]
     n_total = total(ex)
     cur = steps.current_step(sid)
-    rel = released(ex, session.get("course_id"))
+    rel = released_for(ex, sid, session.get("course_id"))
     quiz = pending_quiz(sid)
+    held = held_quiz(sid)
     with db.conn() as c:
         review = c.execute(
             "SELECT 1 FROM step_checks WHERE session_id = ? AND step = ? AND status = 'waiting'",
@@ -282,9 +454,11 @@ def state(session: dict[str, Any], ex: dict[str, Any]) -> dict[str, Any]:
         "released": rel,
         "finished": cur > n_total,
         "quiz_pending": len(quiz),
+        # Quiz answers graded too low: the teacher lets them continue or asks again.
+        "quiz_review": len(held),
         # Finished every open step: the teacher opens the next one.
-        "waiting_teacher": cur <= n_total and cur > rel and not quiz,
-        "open": cur <= n_total and cur <= rel and not quiz,
+        "waiting_teacher": cur <= n_total and cur > rel and not quiz and not held,
+        "open": cur <= n_total and cur <= rel and not quiz and not held,
         # Their last output didn't match; the teacher can let them continue.
         "waiting_review": review,
     }
@@ -314,7 +488,8 @@ def _complete(c, ex: dict[str, Any], sid: str, n: int) -> int:
 def finish(session: dict[str, Any], ex: dict[str, Any], n: int, output: str) -> dict[str, Any]:
     """The student says step n is done. `status` is one of:
     done, missing (the output lacks something; it waits for the teacher),
-    wrong_step, not_open, quiz_pending, finished."""
+    wrong_step, not_open, quiz_pending, quiz_review (a quiz answer of theirs
+    waits for the teacher), finished."""
     sid = session["id"]
     st_now = state(session, ex)
     cur = st_now["current"]
@@ -324,6 +499,8 @@ def finish(session: dict[str, Any], ex: dict[str, Any], n: int, output: str) -> 
         return {"status": "wrong_step", "state": st_now}
     if st_now["quiz_pending"]:
         return {"status": "quiz_pending", "state": st_now}
+    if st_now["quiz_review"]:
+        return {"status": "quiz_review", "state": st_now}
     if cur > st_now["released"]:
         return {"status": "not_open", "state": st_now}
 
@@ -398,10 +575,59 @@ def decline(ex: dict[str, Any], session_id: str, n: int, note: Optional[str] = N
     return True
 
 
+# --- the teacher moves a student ------------------------------------------------------------
+
+def move_note(ex: dict[str, Any], n: int, how: str) -> str:
+    """The note the student's chat shows when the teacher moves them to step n.
+    how: back, forward, or again (the step they are on, from its start)."""
+    lbl = label(ex, n)
+    if hebrew(ex):
+        head = "⏸️ **המרצה עצר אתכם.**"
+        if how == "forward":
+            return f"{head} המרצה העביר אתכם קדימה לשלב {lbl}. השלבים שבדרך דולגו; ממשיכים מכאן."
+        if how == "again":
+            return f"{head} מתחילים את שלב {lbl} מההתחלה (פלט שהדבקתם לשלב הזה, אם היה, לא נשמר). השלב מופיע כאן שוב."
+        where = "להתחלה (שלב 1)" if n == 1 and lbl == "1" else f"לשלב {lbl}"
+        return (f"{head} המרצה החזיר אתכם {where}. מה שעשיתם מהשלב הזה והלאה (פלטים ותשובות) "
+                "לא נחשב, ועושים אותו שוב: השלב מופיע כאן שוב.")
+    head = "⏸️ **Your teacher stopped you here.**"
+    if how == "forward":
+        return f"{head} They moved you ahead to step {lbl}; the steps in between were skipped. Carry on from here."
+    if how == "again":
+        return f"{head} Start step {lbl} over (an output you sent for it, if any, wasn't kept). The step is shown again."
+    return (f"{head} They sent you back to step {lbl}. Your work from that step on (outputs and answers) "
+            "no longer counts, and you do it again: the step is shown again.")
+
+
+def move_to(ex: dict[str, Any], session_id: str, course_id: Optional[str], n: int) -> dict[str, Any]:
+    """Move a student to step n (1..total) and interrupt their chat (a note in
+    the transcript). Back: steps.reset_to; their work from n on no longer
+    counts. Forward: steps.skip_to, and the steps up to n are opened for this
+    student (sessions.released_to) when the course hasn't opened them. The step
+    they are on: it starts over (a pending output is dropped). Returns from, to
+    and how ('back' | 'forward' | 'again')."""
+    n = max(1, min(int(n), total(ex)))
+    cur = steps.current_step(session_id)
+    # The step they are moved to is shown to them, open to the class or not.
+    if is_paced(ex) and n > released_for(ex, session_id, course_id):
+        with db.conn() as c:
+            c.execute("UPDATE sessions SET released_to = ? WHERE id = ?", (n, session_id))
+    if n > cur:
+        out = steps.skip_to(session_id, n, move_note(ex, n, "forward"))
+        how = "forward"
+    elif n < cur:
+        out = steps.reset_to(session_id, n, move_note(ex, n, "back"))
+        how = "back"
+    else:
+        out = steps.reset_to(session_id, n, move_note(ex, n, "again"), again=True)
+        how = "again"
+    return {**out, "how": how}
+
+
 def _current(c, session_id: str) -> int:
     """steps.current_step inside an open transaction."""
-    row = c.execute("SELECT MAX(step) AS s FROM step_checks WHERE session_id = ? AND status = 'approved'",
-                    (session_id,)).fetchone()
+    row = c.execute("SELECT MAX(step) AS s FROM step_checks WHERE session_id = ? "
+                    "AND status IN ('approved', 'skipped')", (session_id,)).fetchone()
     return (row["s"] or 0) + 1
 
 
@@ -455,13 +681,15 @@ def overview(ex: dict[str, Any]) -> dict[str, Any]:
             for r in sorted(latest.values(), key=lambda r: r["username"].lower()):
                 checks = c.execute(
                     "SELECT step, status, auto_ok, forced, missing, answer, created_at FROM step_checks "
-                    "WHERE session_id = ? AND status IN ('approved', 'waiting') ORDER BY step, id",
+                    "WHERE session_id = ? AND status IN ('approved', 'skipped', 'waiting') ORDER BY step, id",
                     (r["id"],)).fetchall()
+                own = c.execute("SELECT released_to FROM sessions WHERE id = ?", (r["id"],)).fetchone()
                 quiz_rows = c.execute(
-                    "SELECT quiz_key, quiz_step, body, answer, status, auto_grade, override_grade "
+                    "SELECT id, quiz_key, quiz_step, body, answer, status, auto_grade, override_grade, "
+                    "review_status, auto_why, answered_at "
                     "FROM probes WHERE session_id = ? AND quiz_key IS NOT NULL ORDER BY id",
                     (r["id"],)).fetchall()
-                cur = (max((k["step"] for k in checks if k["status"] == "approved"), default=0)) + 1
+                cur = (max((k["step"] for k in checks if k["status"] in ("approved", "skipped")), default=0)) + 1
                 waiting = [k for k in checks if k["status"] == "waiting" and k["step"] == cur]
                 students.append({
                     "session_id": r["id"],
@@ -469,7 +697,13 @@ def overview(ex: dict[str, Any]) -> dict[str, Any]:
                     "current": cur,
                     "current_label": label(ex, cur) if cur <= n_total else None,
                     "last_active_at": r["last_active_at"],
+                    # Opened for this student beyond the course (moved forward): up to this step.
+                    "released_to": (own["released_to"] or None) if own else None,
+                    # Steps the teacher moved them past without doing them.
+                    "skipped": [label(ex, k["step"]) for k in checks if k["status"] == "skipped"],
                     "quiz_pending": sum(1 for q in quiz_rows if q["status"] == "pending"),
+                    # Quiz answers graded too low: the teacher decides (review_answer).
+                    "quiz_review": sum(1 for q in quiz_rows if q["review_status"] == "waiting"),
                     # Their output for the current step didn't match: the teacher decides.
                     "waiting": [{
                         "step": k["step"], "label": label(ex, k["step"]),
@@ -484,9 +718,14 @@ def overview(ex: dict[str, Any]) -> dict[str, Any]:
                         "output": (k["answer"] or "")[-2000:],
                     } for k in checks if k["status"] == "approved" and k["auto_ok"] == 0],
                     "quiz": [{
+                        "id": q["id"],
                         "key": q["quiz_key"], "step": q["quiz_step"], "body": q["body"],
                         "answer": q["answer"], "status": q["status"],
                         "grade": q["override_grade"] if q["override_grade"] is not None else q["auto_grade"],
+                        # waiting | approved | returned | reset | skipped | withdrawn; None: needed no review.
+                        "review": q["review_status"],
+                        "why": q["auto_why"],
+                        "answered_at": q["answered_at"],
                     } for q in quiz_rows],
                 })
             courses.append({
@@ -502,7 +741,7 @@ def overview(ex: dict[str, Any]) -> dict[str, Any]:
                 # (it wasn't approved yet when they finished the step).
                 "quiz_missed": {q["key"]: sum(
                     1 for s in students if s["current"] > q["step"]
-                    and not any(a["key"] == q["key"] and a["status"] != "cancelled" for a in s["quiz"])
+                    and not any(a["key"] == q["key"] and a["status"] not in GONE for a in s["quiz"])
                 ) for q in quiz},
             })
     return {
@@ -523,7 +762,7 @@ def tutor_context(ex: dict[str, Any], session_id: str, course_id: Optional[str])
     if cur > n_total:
         return ("PROGRESS: the student finished all the steps. Help with questions about "
                 "their work; there is nothing more to hand out.")
-    rel = released(ex, course_id)
+    rel = released_for(ex, session_id, course_id)
     how = ("When the student finishes a step, they click the 'סיימתי' (done) button under the "
            "step in this chat and paste the step's terminal output; the server checks it and "
            "shows the next step. If it doesn't match, the teacher sees it and can let them "
@@ -532,6 +771,12 @@ def tutor_context(ex: dict[str, Any], session_id: str, course_id: Optional[str])
     if cur > rel and cur == 1:
         return ("PROGRESS: the teacher has not opened the first step yet. Answer general "
                 "questions; never describe or hint at the steps.")
+    if cur > 1 and held_quiz(session_id):
+        return (f"PROGRESS: the student finished step {label(ex, cur - 1)}. Their answer to a "
+                "question about it waits for the teacher, who will let them continue or ask them "
+                "to answer again; the next step appears only then. Answer questions about the "
+                "steps so far; never describe, hint at, or list later steps.\n\n"
+                "LAST STEP THEY DID:\n" + step_text(ex, cur - 1) + "\n\n" + how)
     if cur > rel:
         return (f"PROGRESS: the student finished step {label(ex, cur - 1)} and waits for the "
                 "teacher to open the next step for the whole class. Answer questions about the "

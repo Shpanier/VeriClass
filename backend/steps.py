@@ -44,10 +44,10 @@ def parse_done(message: str) -> Optional[int]:
 
 
 def current_step(session_id: str) -> int:
-    """1-based step the session is working on = highest approved step + 1."""
+    """1-based step the session is working on = highest approved (or skipped) step + 1."""
     with db.conn() as c:
         row = c.execute(
-            "SELECT MAX(step) AS s FROM step_checks WHERE session_id = ? AND status = 'approved'",
+            "SELECT MAX(step) AS s FROM step_checks WHERE session_id = ? AND status IN ('approved', 'skipped')",
             (session_id,),
         ).fetchone()
     return (row["s"] or 0) + 1
@@ -325,22 +325,27 @@ def tutor_context(ex: dict[str, Any], session_id: str, plain: bool = False) -> s
     )
 
 
-def reset_to(session_id: str, n: int, note: Optional[str] = None) -> dict[str, Any]:
+def reset_to(session_id: str, n: int, note: Optional[str] = None, again: bool = False) -> dict[str, Any]:
     """Send a session back to step n (1 = from the beginning), for any
     step-by-step lab. Its records of step n and later are kept for the record
-    (status 'reset') but no longer count; the quiz questions it still had to
-    answer about those steps are withdrawn. `note`, when given, goes into the
-    session's transcript, so the student's chat shows it. Returns the step the
+    (status 'reset') but no longer count: the outputs, and the answers to the
+    quiz questions about those steps, which are asked again when the student
+    does the steps again; questions still open about them are withdrawn.
+    `note`, when given, goes into the session's transcript, so the student's
+    chat shows it (and stops whatever the student was doing there). `again`:
+    also when n is the step the student is on (start that step over); without
+    it a student already at or before n is left alone. Returns the step the
     session was on (`from`) and the step it is on now (`to`)."""
     from backend import transcript  # transcript doesn't import steps; avoids a cycle at import
 
     before = current_step(session_id)
     n = max(1, min(int(n), before))
-    if n < before or _has_open_rows(session_id, n):
+    if n < before or again or _has_open_rows(session_id, n):
         with db.conn() as c:
             c.execute(
                 "UPDATE step_checks SET status = 'reset', delivered = 1, decided_at = CURRENT_TIMESTAMP "
-                "WHERE session_id = ? AND step >= ? AND status IN ('approved', 'waiting', 'pending', 'returned')",
+                "WHERE session_id = ? AND step >= ? "
+                "AND status IN ('approved', 'skipped', 'waiting', 'pending', 'returned')",
                 (session_id, n),
             )
             c.execute(
@@ -348,9 +353,48 @@ def reset_to(session_id: str, n: int, note: Optional[str] = None) -> dict[str, A
                 "AND quiz_step IS NOT NULL AND quiz_step >= ?",
                 (session_id, n),
             )
+            # Their answers about those steps no longer count (asked again on the way).
+            c.execute(
+                "UPDATE probes SET status = 'reset', "
+                "review_status = CASE WHEN review_status = 'waiting' THEN 'reset' ELSE review_status END "
+                "WHERE session_id = ? AND status = 'answered' AND quiz_step IS NOT NULL AND quiz_step >= ?",
+                (session_id, n),
+            )
             c.execute("UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
         if note:
             transcript.record(session_id, "system", note, kind="reset", step=n, origin="server")
+    return {"session_id": session_id, "from": before, "to": current_step(session_id)}
+
+
+def skip_to(session_id: str, n: int, note: Optional[str] = None) -> dict[str, Any]:
+    """Move a session forward to step n: the steps from the one it is on up to
+    n - 1 are marked skipped (status 'skipped': passed, not done; their quiz
+    questions are not asked), and the questions it still had to answer, or
+    answers of its that waited for the teacher, no longer hold it back. `note`
+    goes into the transcript (the chat stops what the student was doing and
+    shows step n). n at or before the current step changes nothing."""
+    from backend import transcript  # transcript doesn't import steps; avoids a cycle at import
+
+    before = current_step(session_id)
+    n = int(n)
+    if n <= before:
+        return {"session_id": session_id, "from": before, "to": before}
+    with db.conn() as c:
+        c.execute(
+            "UPDATE step_checks SET status = 'skipped', decided_at = CURRENT_TIMESTAMP "
+            "WHERE session_id = ? AND step < ? AND status IN ('waiting', 'pending', 'returned')",
+            (session_id, n))
+        for k in range(before, n):
+            c.execute(
+                "INSERT INTO step_checks (session_id, step, answer, status, delivered, decided_at, forced) "
+                "VALUES (?, ?, '', 'skipped', 1, CURRENT_TIMESTAMP, 1)", (session_id, k))
+        c.execute("UPDATE probes SET status = 'cancelled' WHERE session_id = ? AND status = 'pending' "
+                  "AND quiz_step IS NOT NULL", (session_id,))
+        c.execute("UPDATE probes SET review_status = 'skipped' WHERE session_id = ? AND review_status = 'waiting'",
+                  (session_id,))
+        c.execute("UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
+    if note:
+        transcript.record(session_id, "system", note, kind="reset", step=n, origin="server")
     return {"session_id": session_id, "from": before, "to": current_step(session_id)}
 
 

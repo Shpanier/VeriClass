@@ -158,6 +158,7 @@ def _full(ex: dict[str, Any]) -> dict[str, Any]:
         "resume_minutes_set": ex.get("resume_minutes") is not None,
         "output_in_chat": pacing.output_in_chat(ex),
         "answer_in_chat": open_questions.answer_in_chat(ex),
+        "quiz_review": pacing.quiz_review(ex),
         # Steps with their teacher-only fields (this view is for the teacher).
         "steps": [
             {**{k: st.get(k) for k in ("title", "text", "minutes", "expected", "questions", "expected_output")},
@@ -331,6 +332,8 @@ class ExercisePayload(BaseModel):
     output_in_chat: Optional[Literal["confirm", "accept", "ask", "off"]] = None
     # A chat message while a quiz/teacher's question is open (backend/open_questions.py).
     answer_in_chat: Optional[Literal["detect", "confirm", "answer"]] = None
+    # Which quiz grades wait for the teacher before the next step (backend/pacing.py).
+    quiz_review: Optional[Literal["zero", "partial", "off"]] = None
 
 
 @router.post("/exercises")

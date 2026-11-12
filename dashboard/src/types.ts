@@ -278,6 +278,8 @@ export interface FullExercise {
   output_in_chat?: "confirm" | "accept" | "ask" | "off";
   /** A chat message while a quiz/teacher's question is open: its answer, or ask the student. */
   answer_in_chat?: AnswerInChat;
+  /** Which quiz grades wait for the teacher before the next step. */
+  quiz_review?: QuizReview;
   steps?: StepDraft[];
   /** No variants: every student gets the same exercise. */
   implicit_variant?: boolean;
@@ -310,11 +312,17 @@ export interface NewExercise {
   resume_minutes?: number;
   output_in_chat?: "confirm" | "accept" | "ask" | "off";
   answer_in_chat?: AnswerInChat;
+  quiz_review?: QuizReview;
   steps?: StepDraft[];
 }
 
 /** backend/open_questions.py: detect (default) | confirm | answer. */
 export type AnswerInChat = "detect" | "confirm" | "answer";
+
+/** backend/pacing.py: a quiz answer graded 0/2 or 1/2 (partial, the default:
+ *  only 2/2 moves on by itself), 0/2 (zero), or never (off) waits for the
+ *  teacher before the next step. */
+export type QuizReview = "zero" | "partial" | "off";
 
 export interface ProbeSuggestion {
   kind: string;
@@ -426,7 +434,8 @@ export interface PendingReview {
 }
 
 export type ReviewStepStatus =
-  | "open" | "waiting_teacher" | "waiting_review" | "quiz" | "waiting_check" | "not_started" | "finished";
+  | "open" | "waiting_teacher" | "waiting_review" | "quiz" | "quiz_review" | "waiting_check" | "not_started"
+  | "finished";
 
 /** Where a student is in a step-by-step lab (backend/whereabouts.py). */
 export interface ReviewStep {
@@ -512,6 +521,23 @@ export interface PacingQuizItem {
   approved: boolean;
 }
 
+/** One quiz question a student was asked, with their answer (once given). */
+export interface PacingAnswer {
+  id: number;
+  key: string;
+  step: number;
+  body: string;
+  answer: string | null;
+  status: string;
+  grade: number | null;
+  /** waiting: graded too low, the teacher decides · approved · returned (asked again) · reset ·
+   *  skipped (moved past it) · withdrawn (the question was withdrawn). */
+  review: "waiting" | "approved" | "returned" | "reset" | "skipped" | "withdrawn" | null;
+  /** The grader's one-line reason. */
+  why: string | null;
+  answered_at: string | null;
+}
+
 export interface PacingStudent {
   session_id: string;
   username: string;
@@ -519,11 +545,17 @@ export interface PacingStudent {
   current_label: string | null;
   last_active_at: string;
   quiz_pending: number;
+  /** Opened for this student beyond the course (the teacher moved them forward). */
+  released_to: number | null;
+  /** Labels of the steps the teacher moved them past without doing them. */
+  skipped: string[];
+  /** Quiz answers of theirs graded too low: they wait for the teacher's decision. */
+  quiz_review: number;
   /** Their output for the current step didn't match: it waits for the teacher. */
   waiting: { step: number; label: string; missing: string[]; output: string; created_at: string }[];
   /** Steps the teacher let them past although the output didn't match. */
   flags: { step: number; label: string; missing: string[]; output: string }[];
-  quiz: { key: string; step: number; body: string; answer: string | null; status: string; grade: number | null }[];
+  quiz: PacingAnswer[];
 }
 
 export interface PacingCourse {

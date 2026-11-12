@@ -6,6 +6,7 @@ import uuid
 
 import chainlit as cl
 import httpx
+from chainlit.session import WebsocketSession
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -157,6 +158,14 @@ async def _sync_others() -> None:
     t = await _transcript(after=cl.user_session.get("seen") or 0, others_only=True)
     for e in (t or {}).get("entries") or []:
         cl.user_session.set("seen", e["id"])
+        if e["author"] != "student" and e["kind"] == "reset":
+            # The teacher moved the student (back, forward, or the same step over):
+            # stop whatever the chat was waiting for. The note says so.
+            cl.user_session.set("awaiting_output", None)
+            _interrupt_pick()
+        elif e["author"] != "student" and e["kind"] == "cancelled":
+            # A question was withdrawn: "your answer, or a question?" about it is void.
+            _interrupt_pick("probe")
         if e["author"] == "student":
             await cl.Message(content=e["content"], author="student", type="user_message").send()
         elif e["kind"] == "returned" and e.get("step"):
@@ -187,9 +196,10 @@ async def _open_questions() -> None:
 
 def _forget_shown() -> None:
     """After a reset: show the step the student is on again, as if new."""
-    for key in ("shown_step", "waiting_for", "in_review"):
+    for key in ("shown_step", "waiting_for", "in_review", "awaiting_output"):
         cl.user_session.set(key, None)
     cl.user_session.set("finished_note", False)
+    cl.user_session.set("quiz_held", False)
 
 
 def _resume_marks(entries: list[dict], st: dict) -> None:
@@ -210,6 +220,8 @@ def _resume_marks(entries: list[dict], st: dict) -> None:
         cl.user_session.set("finished_note", True)
     if st.get("waiting_review"):
         cl.user_session.set("in_review", cur)
+    if st.get("quiz_review"):
+        cl.user_session.set("quiz_held", True)
 
 
 async def _chat_login():
@@ -246,19 +258,55 @@ async def _chat_login():
     return r.json()
 
 
-async def _pick(question: str, options: list[tuple[str, str]]):
-    """One button per (value, label); the chosen value, or None on timeout."""
+# What _pick returns when the teacher's change (a reset, a withdrawn question)
+# or a reconnect made the question void (_interrupt_pick).
+_INTERRUPTED = "__interrupted__"
+
+
+async def _pick(question: str, options: list[tuple[str, str]], about: str = ""):
+    """One button per (value, label); the chosen value, None on timeout, or
+    _INTERRUPTED when it was cancelled meanwhile. `about`: what it is about
+    ("step", "probe"), so a change can cancel only the questions it makes void."""
     ask = cl.AskActionMessage(
         content=question,
         actions=[cl.Action(name="pick", payload={"value": v}, label=label) for v, label in options],
         timeout=600,
     )
-    res = await ask.send()
+    task = asyncio.ensure_future(ask.send())
+    cl.user_session.set("open_pick", {"task": task, "about": about})
+    try:
+        res = await task
+    except asyncio.CancelledError:
+        if cl.user_session.get("interrupted_pick") is not task:
+            raise  # the chat itself is being stopped
+        for action in ask.actions:
+            try:
+                await action.remove()
+            except Exception:  # the browser may be gone; nothing to tidy then
+                pass
+        ask.content = f"{question}\n\n_⏸️ הופסק._"
+        await ask.update()
+        await cl.context.emitter.clear("clear_ask")
+        await cl.context.emitter.task_end()
+        return _INTERRUPTED
+    finally:
+        if (cl.user_session.get("open_pick") or {}).get("task") is task:
+            cl.user_session.set("open_pick", None)
     # Chainlit then replaces the question with "Selected: …" in English; keep
     # the question, with the answer under it, in the chat's language.
     ask.content = f"{question}\n\n**{res['label']}**" if res else f"{question}\n\n_לא נבחרה תשובה._"
     await ask.update()
     return ((res or {}).get("payload") or {}).get("value")
+
+
+def _interrupt_pick(about: str = None) -> bool:
+    """Cancel the open button question (only one about `about`, when given)."""
+    op = cl.user_session.get("open_pick")
+    if not op or op["task"].done() or (about is not None and op["about"] != about):
+        return False
+    cl.user_session.set("interrupted_pick", op["task"])
+    op["task"].cancel()
+    return True
 
 
 async def _choose(courses: list[dict]):
@@ -270,7 +318,7 @@ async def _choose(courses: list[dict]):
     course = courses[0]
     if len(courses) > 1:
         chosen = await _pick("בחרו קורס:", [(c["course_id"], c["name"]) for c in courses])
-        if chosen is None:
+        if chosen in (None, _INTERRUPTED):
             return False
         course = next(c for c in courses if c["course_id"] == chosen)
     exercises = course["exercises"]
@@ -280,7 +328,7 @@ async def _choose(courses: list[dict]):
     options = [(e["exercise_id"], (e.get("title_he") or e["title_en"])
                 + (" ⭐" if e["exercise_id"] == course["default_exercise"] else "")) for e in exercises]
     chosen = await _pick(f"**{course['name']}**: בחרו תרגיל (⭐ = הבחירה של המרצה):", options)
-    if chosen is None:
+    if chosen in (None, _INTERRUPTED):
         return False
     return course["course_id"], chosen
 
@@ -354,9 +402,13 @@ async def on_chat_start():
 
 @cl.on_chat_end
 async def on_chat_end():
-    task = cl.user_session.get("probe_task")
-    if task:
-        task.cancel()
+    # Chainlit calls this on every disconnect, a short one too (Wi-Fi, a laptop
+    # lid), and restores the same session when the browser reconnects, without
+    # on_chat_start. Cancelling the poller here left a reconnected chat deaf to
+    # the teacher (steps opened, students moved, questions) in November 2026.
+    # So the poller only pauses until the browser is back, and stops when
+    # Chainlit drops the session (_poll).
+    cl.user_session.set("dead_socket", cl.context.session.socket_id)
 
 
 def _format_param_value(value) -> str:
@@ -425,6 +477,13 @@ async def on_suggest(action: cl.Action):
 
 @cl.on_message
 async def on_message(msg: cl.Message):
+    awaiting = cl.user_session.get("awaiting_output") if cl.user_session.get("paced") else None
+    if awaiting is not None:
+        # Asked for after "Done": this message is the step's output.
+        cl.user_session.set("awaiting_output", None)
+        await _record({"author": "student", "kind": "output", "step": awaiting, "content": msg.content or ""})
+        await _send_output(awaiting, msg.content or "")
+        return
     await _record({"author": "student", "kind": "text", "content": msg.content or ""})
     # "Done" finishes the open step, even while a question of ours is open.
     if cl.user_session.get("paced") and _DONE_TEXT.match(msg.content or ""):
@@ -466,7 +525,9 @@ async def _pasted_output(text: str) -> bool:
     if d["kind"] == "maybe":
         question = f"🤔 שלחתם שאלה, או את התשובה לשלב {label}?"
         answer_label = f"📋 זה הפלט של שלב {label}" if needs_output else f"✅ סיימתי את שלב {label}"
-        chosen = await _pick(question, [("answer", answer_label), ("question", "❓ זו שאלה")])
+        chosen = await _pick(question, [("answer", answer_label), ("question", "❓ זו שאלה")], about="step")
+        if chosen == _INTERRUPTED:
+            return True  # the teacher moved the student meanwhile; their note says where
         await _record({"author": "tutor", "kind": "text", "step": n, "content": question},
                       *([{"author": "student", "kind": "text", "step": n,
                           "content": answer_label if chosen == "answer" else "❓ זו שאלה"}] if chosen else []))
@@ -569,10 +630,19 @@ async def _show_state():
         return
     last = cl.user_session.get("last_current")
     cl.user_session.set("last_current", st["current"])
+    awaiting = cl.user_session.get("awaiting_output")
+    if awaiting is not None and not (st.get("open") and st["step"]["n"] == awaiting):
+        # Waiting for this step's output, but it isn't open any more (a question
+        # was added, the teacher moved the student): stop waiting, and say why.
+        cl.user_session.set("awaiting_output", None)
+        label = (cl.user_session.get("labels") or {}).get(awaiting, str(awaiting))
+        why = ("נוספה שאלה (היא כאן בצ'אט). ענו עליה, ואז לחצו שוב «סיימתי»."
+               if st.get("quiz_pending") else "השלב השתנה.")
+        await _say(f"⏸️ **המרצה עצר אתכם:** ההדבקה לשלב {label} הופסקה. {why}", kind="note", step=awaiting)
     if last is not None and st["current"] < last:
         # The teacher sent the student back. The server's note normally came
         # through the transcript already; without a transcript, say it here.
-        if not cl.user_session.get("reset_shown"):
+        if not cl.user_session.get("reset_shown") and not cl.user_session.get("history"):
             await _say(f"↩️ המרצה החזיר אתכם לשלב {st.get('current_label') or st['current']}.", kind="note")
         _forget_shown()
     cl.user_session.set("reset_shown", False)
@@ -589,6 +659,12 @@ async def _show_state():
         cl.user_session.set("in_review", None)
         label = (cl.user_session.get("labels") or {}).get(review, str(review))
         await _say(f"✅ המרצה אישר את שלב {label}. אפשר להמשיך.", kind="result", step=review)
+    if cl.user_session.get("quiz_held") and not st.get("quiz_review"):
+        # The teacher decided about the quiz answer that waited. The server's note
+        # says what (the transcript); without a transcript, say it here.
+        cl.user_session.set("quiz_held", False)
+        if not cl.user_session.get("history"):
+            await _say("📬 המרצה קרא את התשובה שלכם לשאלה.", kind="note")
     if st["open"]:
         step = st["step"]
         if cl.user_session.get("shown_step") != step["n"]:
@@ -650,16 +726,25 @@ async def _finish(n: int, action: cl.Action = None):
         if not st.get("open") or st["step"]["n"] != n:
             await _not_this_step(st, n)
             return
-        output = ""
         if st["step"]["needs_output"]:
-            output = await _prompt(
-                f"📋 הדביקו כאן את הפלט של שלב {st['step']['label']}: כל מה שהופיע בטרמינל אחרי "
-                "הפקודות (אפשר גם עם הפקודות עצמן). ואז שלחו.", timeout=900, kind="output", step=n)
-            if not output:
-                await _say("לא התקבל פלט. לחצו שוב על «סיימתי» כשתהיו מוכנים.")
-                return
-        r = await _post_finish(n, output)
+            # The next message is the output (on_message). Nothing waits here, so
+            # the poller can still interrupt: the teacher may move the student
+            # or ask a question meanwhile.
+            cl.user_session.set("awaiting_output", n)
+            cl.user_session.set("awaiting_action", action)
+            await _say(f"📋 הדביקו כאן את הפלט של שלב {st['step']['label']}: כל מה שהופיע בטרמינל אחרי "
+                       "הפקודות (אפשר גם עם הפקודות עצמן). ואז שלחו.", step=n)
+            return
+        r = await _post_finish(n, "")
         await _after_finish(r, n, action)
+
+
+async def _send_output(n: int, text: str):
+    """The message after "Done" (and its paste request) is step n's output."""
+    async with cl.user_session.get("lock"):
+        action = cl.user_session.get("awaiting_action")
+        cl.user_session.set("awaiting_action", None)
+        await _after_finish(await _post_finish(n, text), n, action)
 
 
 async def _post_finish(n: int, output: str):
@@ -694,6 +779,7 @@ async def _after_finish(r, n: int, action: cl.Action = None):
         return
     if r["status"] != "done":
         await _not_this_step(r["state"], n)
+        await _show_state()  # e.g. moved meanwhile: show the step they are on
         return
     if action is not None:
         await action.remove()
@@ -712,6 +798,8 @@ async def _not_this_step(st: dict, n: int):
         text = "כבר סיימתם את כל השלבים. 🎉"
     elif st.get("quiz_pending"):
         text = "קודם ענו על השאלה שלמעלה, ואז השלב הבא יופיע."
+    elif st.get("quiz_review"):
+        text = "התשובה שלכם לשאלה ממתינה למרצה. השלב הבא יופיע כשהמרצה יאשר לכם להמשיך."
     elif st.get("waiting_teacher"):
         text = f"שלב {st['current_label']} עוד לא נפתח. הוא יופיע כאן כשהמרצה יפתח אותו."
     else:
@@ -720,10 +808,23 @@ async def _not_this_step(st: dict, n: int):
 
 
 async def _poll(session_id: str, token: str):
-    """Every 2 seconds: the teacher's questions, and (class-paced) a step the
-    teacher just opened."""
+    """Every 2 seconds: the server's notes (the teacher moved the student,
+    withdrew a question, answered one), the questions asked, and (class-paced)
+    a step the teacher just opened. Pauses while the browser is disconnected
+    and ends when Chainlit drops the session (a reload starts a new one)."""
+    session = cl.context.session
     try:
         while True:
+            if WebsocketSession.get_by_id(session.id) is None:
+                return
+            dead = cl.user_session.get("dead_socket")
+            if dead is not None:
+                if session.socket_id == dead:
+                    await asyncio.sleep(2)
+                    continue
+                # Reconnected: Chainlit cleared any open question on screen.
+                cl.user_session.set("dead_socket", None)
+                _interrupt_pick()
             try:
                 async with cl.user_session.get("lock"):
                     await _sync_others()
@@ -792,7 +893,9 @@ async def _probe_answer(text: str):
     if d["kind"] == "maybe":
         question = "🤔 זו התשובה שלכם לשאלה, או שאלה שלכם?"
         options = [("answer", "✍️ זו התשובה שלי"), ("question", "❓ זו שאלה שלי")]
-        chosen = await _pick(question, options)
+        chosen = await _pick(question, options, about="probe")
+        if chosen == _INTERRUPTED:
+            return "answered"  # the question was withdrawn (or the student moved); nothing more to do
         await _record({"author": "tutor", "kind": "text", "content": question},
                       *([{"author": "student", "kind": "text", "content": dict(options)[chosen]}] if chosen else []))
         if chosen != "answer":
@@ -829,7 +932,15 @@ async def _answer_probe(probe: dict, answer: str):
         data = r.json()
         grade = f" ציון: **{data['auto_grade']}/2**" if data.get("auto_grade") is not None else ""
         why = f" — {data['why']}" if data.get("why") else ""
-        await _say(f"✅ התשובה נשמרה.{grade}{why}", kind="result")
+        if data.get("review"):
+            # Graded too low to move on by itself (exercise.yaml quiz_review): the
+            # teacher lets them continue or asks again; the server's note says which.
+            cl.user_session.set("quiz_held", True)
+            await _say(f"📝 התשובה נשמרה.{grade}{why}\n\n"
+                       "⏳ **התשובה ממתינה למרצה.** הוא יקרא אותה, ואז יאשר לכם להמשיך או יבקש שתענו "
+                       "שוב; ההמשך יופיע כאן לבד. בינתיים אפשר לשאול כאן שאלות.", kind="result")
+        else:
+            await _say(f"✅ התשובה נשמרה.{grade}{why}", kind="result")
     elif r.status_code == 409:
         await _say("השאלה הזו כבר לא פתוחה (כבר עניתם עליה, או שהמרצה ביטל אותה).", record=False)
     else:
