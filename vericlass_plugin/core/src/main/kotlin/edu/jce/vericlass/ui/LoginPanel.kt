@@ -83,4 +83,11 @@ class LoginPanel(private val onSubmit: (code: String, password: String) -> Unit)
     }
 
     fun preferredFocus(): JComponent = codeField
+
+    /** After logging out: an empty password and a [message] (e.g. "You logged out."), the username kept. */
+    fun reset(message: String = " ") {
+        passwordField.text = ""
+        setBusy(false)
+        status.text = message
+    }
 }

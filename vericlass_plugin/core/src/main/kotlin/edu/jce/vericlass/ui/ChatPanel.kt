@@ -13,6 +13,7 @@ import com.intellij.util.ui.UIUtil
 import edu.jce.vericlass.api.VeriClassApiClient
 import edu.jce.vericlass.api.VeriClassApiException
 import edu.jce.vericlass.exam.PasteSources
+import edu.jce.vericlass.lab.Interrupt
 import edu.jce.vericlass.lab.LabButton
 import edu.jce.vericlass.lab.LabFlow
 import edu.jce.vericlass.lab.LabTexts
@@ -140,6 +141,10 @@ class ChatPanel(
     private var reaskRow: JComponent? = null
     /** "Send these as your step answers?" / "No answers yet" above the box; removed on the next send. */
     private var promptRow: JComponent? = null
+    /** What the prompt above the box is about, so a teacher's change can take it away ([LabView.interrupt]). */
+    private var promptAbout: Interrupt? = null
+    /** Called when the prompt goes away without being answered (the "Done" box: [LabView.outputBox]'s onClose). */
+    private var promptOnClose: (() -> Unit)? = null
 
     init {
         Disposer.register(parent, this)
@@ -273,6 +278,7 @@ class ChatPanel(
                 texts.myAnswer() to { current().let { echo(it); f.answer(route.probe, it) } },
                 // Their own question: answered, then the chat reminds them of its own.
                 texts.myQuestion() to { send(current(), remind = true) },
+                about = Interrupt.PROBE,
             )
             is Route.Output -> sendOutput(f, route.step, route.label, text, route.needsOutput, detected = true)
             is Route.OutputOrQuestion -> showPrompt(
@@ -281,6 +287,7 @@ class ChatPanel(
                     sendOutput(f, route.step, route.label, current(), route.needsOutput, detected = false)
                 },
                 texts.itsAQuestion() to { send(current()) },
+                about = Interrupt.STEP,
             )
         }
     }
@@ -342,8 +349,8 @@ class ChatPanel(
             onDone = if (remind) ({ flow?.remindQuestion() }) else null)
     }
 
-    /** EDT. A short question above the input box with one button per choice. */
-    private fun showPrompt(message: String, vararg choices: Pair<String, () -> Unit>) {
+    /** EDT. A short question above the input box with one button per choice; [about]: see [promptAbout]. */
+    private fun showPrompt(message: String, vararg choices: Pair<String, () -> Unit>, about: Interrupt? = null) {
         removePrompt()
         val panel = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
             isOpaque = true
@@ -357,14 +364,18 @@ class ChatPanel(
             }, BorderLayout.SOUTH)
         }
         promptRow = panel
+        promptAbout = about
         south.add(panel, BorderLayout.SOUTH)
         south.revalidate()
         south.repaint()
     }
 
+    /** EDT. Take the prompt (or the "Done" box) above the message box away; the box's text stays. */
     private fun removePrompt() {
         promptRow?.let { south.remove(it); south.revalidate(); south.repaint() }
         promptRow = null
+        promptAbout = null
+        promptOnClose?.let { close -> promptOnClose = null; close() }
     }
 
     /** EDT. A notice from VeriClass itself (not the tutor), e.g. a project folder that will cause trouble. */
@@ -506,8 +517,12 @@ class ChatPanel(
             }
         }
 
-        override fun outputBox(title: String, prefill: String, onSend: (String) -> Unit) =
-            onEdt { showOutputBox(title, prefill, onSend) }
+        override fun outputBox(title: String, prefill: String, onSend: (String) -> Unit, onClose: () -> Unit) =
+            onEdt { showOutputBox(title, prefill, onSend, onClose) }
+
+        override fun interrupt(what: Set<Interrupt>) = onEdt {
+            if (promptAbout in what) removePrompt()
+        }
 
         override fun introDone(replayed: Boolean) = onEdt {
             afterIntro?.invoke(replayed)
@@ -549,7 +564,7 @@ class ChatPanel(
      * EDT. A class-paced step's "Done" box above the message box: [prefill] (what
      * the terminal printed) to check, edit or replace, then send to [onSend].
      */
-    private fun showOutputBox(title: String, prefill: String, onSend: (String) -> Unit) {
+    private fun showOutputBox(title: String, prefill: String, onSend: (String) -> Unit, onClose: () -> Unit) {
         removePrompt()
         val area = object : JBTextArea(prefill, 10, 0) {
             override fun paste() {
@@ -572,6 +587,7 @@ class ChatPanel(
                     error.text = texts.pasteFirst()
                     return@addActionListener
                 }
+                promptOnClose = null // sent, not closed
                 removePrompt()
                 addMessage(Role.USER, fenced(output))
                 scrollToBottom()
@@ -593,6 +609,8 @@ class ChatPanel(
             }, BorderLayout.SOUTH)
         }
         promptRow = panel
+        promptAbout = Interrupt.STEP
+        promptOnClose = onClose
         south.add(panel, BorderLayout.SOUTH)
         south.revalidate()
         south.repaint()

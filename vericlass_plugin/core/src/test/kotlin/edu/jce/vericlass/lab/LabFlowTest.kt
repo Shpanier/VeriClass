@@ -102,7 +102,9 @@ class LabFlowTest {
     private class FakeView : LabView {
         val messages = mutableListOf<Message>()
         var box: Triple<String, String, (String) -> Unit>? = null
+        var boxClose: (() -> Unit)? = null
         var intro: Boolean? = null
+        val interrupts = mutableListOf<Set<Interrupt>>()
 
         override fun show(author: String, kind: String, markdown: String, buttons: List<LabButton>): Shown {
             val m = Message(author, kind, markdown, buttons)
@@ -110,8 +112,17 @@ class LabFlowTest {
             return Shown { m.removed = true }
         }
 
-        override fun outputBox(title: String, prefill: String, onSend: (String) -> Unit) {
+        override fun outputBox(title: String, prefill: String, onSend: (String) -> Unit, onClose: () -> Unit) {
             box = Triple(title, prefill, onSend)
+            boxClose = onClose
+        }
+
+        override fun interrupt(what: Set<Interrupt>) {
+            interrupts += what
+            if (Interrupt.STEP in what && box != null) {
+                box = null
+                boxClose?.invoke()
+            }
         }
 
         override fun introDone(replayed: Boolean) {
@@ -382,6 +393,91 @@ class LabFlowTest {
         assertTrue(view.texts().contains("↩️ back to A1"))
         assertFalse("no second note", view.texts().contains(en.movedBack("A1")))
         assertEquals("### Step A1\n\n" + en.howToFinish(true), view.last().text)
+    }
+
+    @Test
+    fun `a move while the Done box is open closes it, and the old buttons go`() {
+        val server = FakeServer()
+        val view = FakeView()
+        val f = flow(server, view)
+        f.start("brief")
+        view.click(en.doneButton("A1"))
+        assertTrue(view.box != null)
+        // The teacher starts A1 over (the same step): the server's note interrupts the box.
+        server.transcriptEntries += TranscriptEntry(21, "system", "reset", 1, "⏸️ start A1 over", "server")
+        f.poll()
+        assertEquals(null, view.box)
+        assertTrue(view.texts().contains("⏸️ start A1 over"))
+        assertFalse("the server's note is enough", view.texts().any { it.startsWith("⏸️ **Your teacher stopped you") })
+        assertEquals("A1 is shown again", "### Step A1\n\n" + en.howToFinish(true), view.last().text)
+        assertEquals("one live Done button", 1,
+            view.messages.filter { !it.removed }.flatMap { it.buttons }.count { it.label == en.doneButton("A1") })
+    }
+
+    @Test
+    fun `a move forward shows the step the student was moved to`() {
+        val server = FakeServer(steps = 4, released = 2)
+        val view = FakeView()
+        val f = flow(server, view)
+        f.start("brief")
+        server.current = 3
+        server.released = 3 // opened for this student
+        server.transcriptEntries += TranscriptEntry(22, "system", "reset", 3, "⏸️ moved ahead to A3", "server")
+        f.poll()
+        assertTrue(view.texts().any { it.contains("### Step A3") })
+        assertTrue("A1's Done is gone", view.messages.filter { !it.removed }.flatMap { it.buttons }
+            .none { it.label == en.doneButton("A1") })
+    }
+
+    @Test
+    fun `a question added while the Done box is open stops it and says why`() {
+        val server = FakeServer()
+        val view = FakeView()
+        val f = flow(server, view)
+        f.start("brief")
+        view.click(en.doneButton("A1"))
+        server.quizPending = 1
+        server.probes += Probe(11, "Why?", quiz_step = "A1", source = "quiz")
+        f.poll()
+        assertEquals(null, view.box)
+        assertTrue(view.texts().contains(en.boxStopped("A1", questionAdded = true)))
+        assertTrue(view.texts().any { it.contains("> Why?") })
+    }
+
+    @Test
+    fun `a withdrawn question takes away the answer-or-question prompt and shows the next one`() {
+        val server = FakeServer()
+        val view = FakeView()
+        val f = flow(server, view)
+        f.start("brief")
+        server.probes += Probe(12, "First?")
+        f.poll()
+        assertTrue(view.texts().any { it.contains("> First?") })
+        // The teacher withdraws it and another question is open.
+        server.probes.clear()
+        server.probes += Probe(13, "Second?")
+        server.transcriptEntries += TranscriptEntry(23, "system", "cancelled", null, "🚫 withdrawn: First?", "server")
+        f.poll()
+        assertTrue(view.interrupts.any { Interrupt.PROBE in it && Interrupt.STEP !in it })
+        assertTrue(view.texts().any { it.contains("> Second?") })
+    }
+
+    @Test
+    fun `without a transcript, a held answer the teacher decided on gets a note`() {
+        val server = FakeServer().apply { transcriptEnabled = false }
+        val view = FakeView()
+        val f = flow(server, view)
+        f.start("brief")
+        server.probes += Probe(14, "What?", quiz_step = "A1", source = "quiz")
+        server.quizPending = 1
+        f.poll()
+        server.quizPending = 0
+        server.answerResult = ProbeAnswerResponse(1, "partly", review = true)
+        f.answer(server.probes[0], "something")
+        assertFalse(view.texts().contains(en.answerRead()))
+        server.quizReview = 0
+        f.poll()
+        assertTrue(view.texts().contains(en.answerRead()))
     }
 
     @Test

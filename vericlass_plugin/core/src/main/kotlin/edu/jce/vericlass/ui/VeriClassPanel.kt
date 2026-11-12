@@ -4,7 +4,9 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.ui.Messages
 import com.intellij.ui.JBColor
+import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
 import edu.jce.vericlass.api.ClientConfig
@@ -42,6 +44,8 @@ import javax.swing.Timer
  * start (or resume) a session, load the variant's exercise, ask the backend
  * which behavior to run (chat vs. ide), then build the session UI and start the
  * lab flow (questions, class-paced steps, the transcript; see [LabFlow]).
+ * The header's "Change exercise" (when the student's courses offer more than
+ * one) and "Log out" end the session here; outside exam mode only.
  */
 class VeriClassPanel(
     private val project: Project,
@@ -117,11 +121,23 @@ class VeriClassPanel(
             openExercise(login, auto?.first, auto?.second)
             return
         }
+        showChooser(login)
+    }
+
+    /**
+     * The course/exercise picker. [current]: the session open now ("Change
+     * exercise"); it keeps running until another exercise opens, and the picker
+     * can go back to it.
+     */
+    private fun showChooser(login: LoginResponse, current: SessionResponse? = null) {
+        val sessionView = if (current != null) components.toList() else emptyList()
         val panel = ChoosePanel(
             login.username,
             login.courses,
             onChoose = { courseId, exerciseId -> openExercise(login, courseId, exerciseId) },
-            onBack = ::showLogin,
+            onBack = { logOut() },
+            current = current?.let { (it.course_id ?: "") to it.exercise_id },
+            onCancel = if (current == null) null else ({ restore(sessionView) }),
         )
         chooser = panel
         removeAll()
@@ -130,13 +146,30 @@ class VeriClassPanel(
         repaint()
     }
 
-    private fun showLogin() {
+    /** Back from the picker to the session that is still open: its header (north) and chat. */
+    private fun restore(sessionView: List<java.awt.Component>) {
         chooser = null
         removeAll()
-        loginPanel.setBusy(false)
+        sessionView.forEachIndexed { i, c -> add(c, if (i == 0) BorderLayout.NORTH else BorderLayout.CENTER) }
+        revalidate()
+        repaint()
+    }
+
+    /** End the session open here (its chat, lab flow, terminal, exam guard) and show the login. */
+    private fun logOut() {
+        sessionDisposable?.let { Disposer.dispose(it) }
+        sessionDisposable = null
+        showLogin("You logged out. · התנתקתם.")
+    }
+
+    private fun showLogin(message: String = " ") {
+        chooser = null
+        removeAll()
+        loginPanel.reset(message)
         add(loginPanel, BorderLayout.CENTER)
         revalidate()
         repaint()
+        loginPanel.preferredFocus().requestFocusInWindow()
     }
 
     private fun openExercise(login: LoginResponse, courseId: String?, exerciseId: String?) {
@@ -191,7 +224,7 @@ class VeriClassPanel(
             add(banner, BorderLayout.NORTH)
             add(header(login, session, config, exercise, trace, sessionScope), BorderLayout.CENTER)
         }
-        add(north, BorderLayout.NORTH)
+        add(north, BorderLayout.NORTH) // first: restore() puts it back as NORTH
 
         // Pastes into the chat / terminal go to the exam guard, which exists only in exam mode.
         var guard: ExamGuard? = null
@@ -308,14 +341,40 @@ class VeriClassPanel(
             "<html>👤 <b>${esc(login.username)}</b> &middot; variant <b>${esc(session.variant)}</b>" +
                 " &middot; mode <b>${esc(session.mode)}</b> &middot; client <b>$modeTag</b></html>",
         )
+        val west = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(8), 0)).apply {
+            isOpaque = false
+            add(label)
+            // An exam stays on its exercise until it is handed in: no way out from here.
+            if (!config.isExamMode) {
+                if (ChoosePanel.canChange(login.courses)) {
+                    add(ActionLink("🔄 Change exercise") { showChooser(login, session) }.apply {
+                        toolTipText = "Open another exercise of your course. Your work here is kept: " +
+                            "opening this exercise again carries on from the same place."
+                    })
+                }
+                add(ActionLink("⏏ Log out") { confirmLogOut() }.apply {
+                    toolTipText = "Log out of VeriClass (another student can log in here). Your work is kept."
+                })
+            }
+        }
         return JPanel(BorderLayout()).apply {
             border = BorderFactory.createCompoundBorder(
                 JBUI.Borders.customLine(JBColor.border(), 0, 0, 1, 0),
                 JBUI.Borders.empty(6, 10),
             )
-            add(label, BorderLayout.WEST)
+            add(west, BorderLayout.WEST)
             add(submitControls(login, session, exercise, trace, scope), BorderLayout.EAST)
         }
+    }
+
+    private fun confirmLogOut() {
+        val ok = Messages.showYesNoDialog(
+            project,
+            "Log out of VeriClass? Your work is kept; log in again to carry on.\n" +
+                "להתנתק מ־VeriClass? העבודה שלכם נשמרת; התחברו שוב כדי להמשיך.",
+            "VeriClass — Log Out", "Log Out", "Cancel", null,
+        )
+        if (ok == Messages.YES) logOut()
     }
 
     /** "Send to teacher" and "Export my log" buttons + a small status label, right-aligned in the header. */

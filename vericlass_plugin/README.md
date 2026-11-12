@@ -64,6 +64,25 @@ logic is in `lab/LabFlow.kt`, tested against a fake server in `LabFlowTest`.
 Older servers: whatever a server lacks (the transcript, classify) is skipped,
 and an open question then always asks the student whether a message is its answer.
 
+### 0.6.0: the teacher's changes reach the chat, log out, change exercise
+
+- **The teacher interrupts.** When the teacher moves a student (back, forward,
+  or the same step over) or withdraws a question, the chat takes away what it
+  was waiting for: the *Done* box, "a question, or the step's answer?", "your
+  answer, or a question?". The server's note says why, and the step the student
+  is on is shown again with a new *Done* button (the old ones go). A quiz
+  question added while the *Done* box is open closes it, with a note.
+- **Quiz answers graded below 2/2** wait for the teacher (`quiz_review`); the
+  chat says so, and the next step appears once the teacher lets the student
+  continue (or the question is asked again).
+- **Notes to the whole class** from the review queue arrive like the server's
+  other notes (the transcript).
+- **Log out** and **Change exercise** (when the student's courses offer more
+  than one exercise) are in the tool window's header. Changing keeps the open
+  exercise running until another one opens, with *Back to my exercise* in the
+  picker; the work is kept either way, and opening an exercise again carries on
+  from the same place. Neither appears in exam mode.
+
 ---
 
 ## Build & run

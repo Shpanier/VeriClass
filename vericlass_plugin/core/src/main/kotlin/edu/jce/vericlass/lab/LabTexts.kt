@@ -55,6 +55,12 @@ class LabTexts(val hebrew: Boolean) {
         "📋 הדביקו כאן את הפלט של שלב $label: כל מה שהופיע בטרמינל אחרי הפקודות (אפשר גם עם הפקודות עצמן). ואז שלחו.",
         "📋 Paste the output of step $label here: everything the terminal printed after the commands " +
             "(the commands themselves may stay). Then send it.")
+    /** The "Done" box closed because the step isn't open any more; [questionAdded]: a quiz question came first. */
+    fun boxStopped(label: String, questionAdded: Boolean) =
+        t("⏸️ **המרצה עצר אתכם:** ההדבקה לשלב $label הופסקה. ", "⏸️ **Your teacher stopped you:** sending the output of step $label was stopped. ") +
+            (if (questionAdded) t("נוספה שאלה (היא כאן בצ'אט). ענו עליה, ואז לחצו שוב «סיימתי».",
+                "A question was added (it's here in the chat). Answer it, then click **Done** again.")
+            else t("השלב השתנה.", "The step changed."))
     fun send() = t("שליחה", "Send")
     fun cancel() = t("ביטול", "Cancel")
     fun pasteFirst() = t("הדביקו קודם את הפלט.", "Paste the output first.")
@@ -114,6 +120,7 @@ class LabTexts(val hebrew: Boolean) {
                 "⏳ **Your answer waits for your teacher**, who will read it and then let you continue or ask " +
                     "you to answer again; what comes next will appear here by itself. Meanwhile you can ask questions here.")
             else "")
+    fun answerRead() = t("📬 המרצה קרא את התשובה שלכם לשאלה.", "📬 Your teacher read your answer to the question.")
     fun answerWithTeacher() = t(
         "התשובה שלכם לשאלה ממתינה למרצה. השלב הבא יופיע כשהמרצה יאשר לכם להמשיך.",
         "Your answer to the question waits for your teacher. The next step appears when they let you continue.")

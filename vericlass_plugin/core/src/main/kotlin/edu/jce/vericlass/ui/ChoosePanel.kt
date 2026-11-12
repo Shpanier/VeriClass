@@ -23,13 +23,18 @@ import javax.swing.SwingConstants
  * Second screen, after login, when there is something to choose: one of the
  * student's courses, then one of the exercises that course offers. The course's
  * default exercise is preselected. (With one course and one exercise the panel
- * is skipped: see [autoChoice].)
+ * is skipped: see [autoChoice].) Also shown from an open exercise ("Change
+ * exercise"), with [current] marked and [onCancel] to go back to it.
  */
 class ChoosePanel(
     username: String,
     private val courses: List<CourseDto>,
     private val onChoose: (courseId: String, exerciseId: String) -> Unit,
     private val onBack: () -> Unit,
+    /** The exercise open now, when the student came here to change it. */
+    private val current: Pair<String, String>? = null,
+    /** Back to the exercise open now (shown only with [current]). */
+    private val onCancel: (() -> Unit)? = null,
 ) : JPanel(GridBagLayout()) {
 
     private val courseBox = ComboBox(courses.toTypedArray()).apply {
@@ -38,11 +43,14 @@ class ChoosePanel(
     private val exerciseModel = DefaultListModel<CourseExerciseDto>()
     private val exerciseList = JBList(exerciseModel).apply {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
-        cellRenderer = SimpleListCellRenderer.create("") { label(it) }
+        cellRenderer = SimpleListCellRenderer.create("") {
+            label(it) + (if (isCurrent(it)) "  (open now)" else "")
+        }
         visibleRowCount = 6
     }
     private val startButton = JButton("Start")
     private val backButton = JButton("Log out")
+    private val cancelButton = JButton("Back to my exercise")
     private val status = JBLabel(" ").apply {
         foreground = JBColor.RED
         horizontalAlignment = SwingConstants.CENTER
@@ -75,6 +83,7 @@ class ChoosePanel(
         c.gridy++
         add(JPanel(FlowLayout(FlowLayout.CENTER, JBUI.scale(8), 0)).apply {
             add(startButton)
+            if (onCancel != null) add(cancelButton)
             add(backButton)
         }, c)
         c.gridy++
@@ -83,8 +92,16 @@ class ChoosePanel(
         courseBox.addActionListener { showExercises() }
         startButton.addActionListener { fire() }
         backButton.addActionListener { onBack() }
+        cancelButton.addActionListener { onCancel?.invoke() }
         exerciseList.addListSelectionListener { startButton.isEnabled = exerciseList.selectedValue != null }
         showExercises()
+    }
+
+    init {
+        // Changing the exercise: start from the course open now.
+        current?.let { (courseId, _) ->
+            courses.firstOrNull { it.course_id == courseId }?.let { if (courses.size > 1) courseBox.selectedItem = it }
+        }
     }
 
     /** Lists the selected course's exercises, with its default selected. */
@@ -94,6 +111,11 @@ class ChoosePanel(
         course.exercises.forEach { exerciseModel.addElement(it) }
         val default = course.exercises.indexOfFirst { it.exercise_id == course.default_exercise }
         exerciseList.selectedIndex = if (default >= 0) default else 0
+    }
+
+    private fun isCurrent(e: CourseExerciseDto): Boolean {
+        val (courseId, exerciseId) = current ?: return false
+        return e.exercise_id == exerciseId && selectedCourse()?.course_id == courseId
     }
 
     private fun selectedCourse(): CourseDto? =
@@ -109,6 +131,7 @@ class ChoosePanel(
     fun setBusy(busy: Boolean) {
         startButton.isEnabled = !busy
         backButton.isEnabled = !busy
+        cancelButton.isEnabled = !busy
         courseBox.isEnabled = !busy
         exerciseList.isEnabled = !busy
         startButton.text = if (busy) "Opening…" else "Start"
@@ -121,6 +144,9 @@ class ChoosePanel(
     }
 
     companion object {
+        /** More than one exercise to choose from, in all the student's courses: "Change exercise" makes sense. */
+        fun canChange(courses: List<CourseDto>): Boolean = courses.sumOf { it.exercises.size } > 1
+
         /** Exercise title, with the Hebrew title after it when there is one. */
         fun label(e: CourseExerciseDto): String =
             if (e.title_he.isNullOrBlank() || e.title_he == e.title_en) e.title_en else "${e.title_en} · ${e.title_he}"

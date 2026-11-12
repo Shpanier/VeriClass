@@ -31,11 +31,31 @@ interface LabView {
      */
     fun show(author: String, kind: String, markdown: String, buttons: List<LabButton> = emptyList()): Shown
 
-    /** The "Done" box of a step that checks its output: [prefill] for the student to check and send to [onSend]. */
-    fun outputBox(title: String, prefill: String, onSend: (String) -> Unit)
+    /**
+     * The "Done" box of a step that checks its output: [prefill] for the student
+     * to check and send to [onSend]. [onClose]: the box went away without sending
+     * (the student cancelled it or wrote something else instead).
+     */
+    fun outputBox(title: String, prefill: String, onSend: (String) -> Unit, onClose: () -> Unit = {})
+
+    /**
+     * Take away what the chat waits for above the message box because the
+     * teacher's change made it void: the "Done" box and "is this the step's
+     * answer?" ([Interrupt.STEP]), "your answer, or a question?" ([Interrupt.PROBE]).
+     */
+    fun interrupt(what: Set<Interrupt>)
 
     /** The brief, or the replayed conversation, is on screen. */
     fun introDone(replayed: Boolean)
+}
+
+/** What a teacher's change can stop the chat from waiting for ([LabView.interrupt]). */
+enum class Interrupt {
+    /** The open step's "Done" box, and "a question, or the step's answer?". */
+    STEP,
+
+    /** "Your answer to the question, or a question of yours?". */
+    PROBE,
 }
 
 /** What to do with a message the student sends ([LabFlow.route]). */
@@ -73,8 +93,15 @@ sealed class Route {
  *   on or sends it back; later steps appear when the teacher opens them.
  * - **The transcript** (backend/transcript.py): everything shown is recorded,
  *   a new login replays it and carries on from the same place, and notes the
- *   chat didn't write itself (the teacher's late answer, a reset, an output sent
- *   back, another window's messages) appear while it is open.
+ *   chat didn't write itself (the teacher's late answer, a move to another step,
+ *   a withdrawn question, an output sent back, a note to the whole class,
+ *   another window's messages) appear while it is open.
+ * - **The teacher interrupts**: moving the student (back, forward, the same
+ *   step over) or withdrawing a question takes away what the chat waits for
+ *   (the "Done" box, "your answer, or a question?"), and so does a question
+ *   added while the "Done" box is open; a note says why.
+ * - **Quiz answers graded too low** wait for the teacher (exercise.yaml
+ *   quiz_review), who lets the student continue or asks the question again.
  *
  * Every server call runs on [executor], which must run one task at a time:
  * that keeps the flow's state consistent, as the web chat's lock does. Only
@@ -102,6 +129,10 @@ class LabFlow(
     private var finishedNote = false
     private var resetShown = false
     private var resumeButton = false
+    /** The step whose "Done" box is open, waiting for its output. */
+    private var awaitingOutput: Int? = null
+    /** A quiz answer of the student's waits for the teacher. */
+    private var quizHeld = false
     @Volatile private var probeShown: Int? = null
     // Written by [route] too.
     private val labels = java.util.concurrent.ConcurrentHashMap<Int, String>()
@@ -170,6 +201,7 @@ class LabFlow(
     fun answer(probe: Probe, text: String) = later {
         try {
             val r = backend.answerProbe(probe.id, text)
+            if (r.review) quizHeld = true
             say(texts.answerSaved(r.auto_grade, r.why, r.review), kind = "result")
         } catch (e: ProbeClosedException) {
             say(texts.questionClosed(), record = false)
@@ -279,6 +311,7 @@ class LabFlow(
         if (st.waiting_teacher && since.any { it.kind == "note" && it.step == cur }) waitingFor = cur
         if (st.finished && since.any { it.kind == "note" && it.step == st.total + 1 }) finishedNote = true
         if (st.waiting_review) inReview = cur
+        if (st.quiz_review > 0) quizHeld = true
     }
 
     /** After a new login the step's text is in the replayed conversation; only its button comes back. */
@@ -302,11 +335,35 @@ class LabFlow(
                 inReview = null
                 stepButtons(step, view.show(e.author, e.kind, e.content, listOf(sendAgainButton(step))))
             } else {
+                if (e.author != "student") interruptedBy(e.kind)
                 view.show(e.author, e.kind, e.content)
             }
             if (e.kind == "reset") {
                 forgetShown()
                 resetShown = true
+            }
+        }
+    }
+
+    /**
+     * The server's note of a [kind] the teacher's change writes: stop what the
+     * chat waits for that the change made void (the note itself says why).
+     */
+    private fun interruptedBy(kind: String) {
+        when (kind) {
+            "reset" -> {
+                // Moved to another step (or the same one over): every open box is void,
+                // and so is every "Done" button above, the step is shown again.
+                awaitingOutput = null
+                view.interrupt(setOf(Interrupt.STEP, Interrupt.PROBE))
+                doneButtons.values.forEach { list -> list.forEach { it.removeButtons() } }
+                doneButtons.clear()
+            }
+            "cancelled" -> {
+                // A question was withdrawn: "your answer, or a question?" about it is void,
+                // and the next open question (if any) is shown.
+                view.interrupt(setOf(Interrupt.PROBE))
+                probeShown = null
             }
         }
     }
@@ -324,9 +381,18 @@ class LabFlow(
         val st = state() ?: return
         val last = lastCurrent
         lastCurrent = st.current
+        val awaiting = awaitingOutput
+        if (awaiting != null && !(st.open && st.step?.n == awaiting)) {
+            // The "Done" box waits for a step that isn't open any more (a question was
+            // added, the teacher moved the student): close it, and say why.
+            awaitingOutput = null
+            view.interrupt(setOf(Interrupt.STEP))
+            say(texts.boxStopped(labels[awaiting] ?: "$awaiting", st.quiz_pending > 0), kind = "note", step = awaiting)
+        }
         if (last != null && st.current < last) {
-            // The teacher sent the student back; the server's note normally came through the transcript.
-            if (!resetShown) say(texts.movedBack(st.current_label ?: "${st.current}"), kind = "note")
+            // The teacher sent the student back. The server's note normally came
+            // through the transcript already; without a transcript, say it here.
+            if (!resetShown && !history) say(texts.movedBack(st.current_label ?: "${st.current}"), kind = "note")
             forgetShown()
         }
         resetShown = false
@@ -343,6 +409,12 @@ class LabFlow(
             // The teacher let them past the step whose output didn't match.
             inReview = null
             say(texts.approved(labels[review] ?: "$review"), kind = "result", step = review)
+        }
+        if (quizHeld && st.quiz_review == 0) {
+            // The teacher decided about the quiz answer that waited. The server's note
+            // says what (the transcript); without a transcript, say it here.
+            quizHeld = false
+            if (!history) say(texts.answerRead(), kind = "note")
         }
         val step = st.step
         if (st.open && step != null) {
@@ -387,6 +459,8 @@ class LabFlow(
         waitingFor = null
         inReview = null
         finishedNote = false
+        awaitingOutput = null
+        quizHeld = false
     }
 
     private fun finishNow(n: Int) {
@@ -399,13 +473,18 @@ class LabFlow(
         if (!st.open || step == null || step.n != n) return notThisStep(st, n)
         if (!step.needs_output) return afterFinish(backend.finishStep(n, ""), n)
         val prefill = prefill(n)
-        view.outputBox(texts.outputBoxTitle(step.label, prefill.isNotEmpty()), prefill) { output ->
-            later {
-                record("student", "output", n, output)
-                sentMarks[n] = terminal?.mark ?: 0
-                afterFinish(backend.finishStep(n, output), n)
-            }
-        }
+        awaitingOutput = n
+        view.outputBox(texts.outputBoxTitle(step.label, prefill.isNotEmpty()), prefill,
+            onSend = { output ->
+                later {
+                    if (awaitingOutput == n) awaitingOutput = null
+                    record("student", "output", n, output)
+                    sentMarks[n] = terminal?.mark ?: 0
+                    // The server decides: a step closed meanwhile is answered with where the student is.
+                    afterFinish(backend.finishStep(n, output), n)
+                }
+            },
+            onClose = { later { if (awaitingOutput == n) awaitingOutput = null } })
     }
 
     /**
@@ -433,6 +512,7 @@ class LabFlow(
         }
         if (r.status != "done") {
             r.state?.let { notThisStep(it, n) }
+            showState() // e.g. moved meanwhile: show the step they are on
             return
         }
         doneButtons.remove(n)?.forEach { it.removeButtons() }
