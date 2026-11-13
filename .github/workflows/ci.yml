@@ -1,0 +1,58 @@
+# Tests, and a check that VeriClass installs and starts, on Linux, macOS and Windows.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  server:
+    name: Server (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install (as the start scripts do)
+        run: uv sync --frozen
+      - name: Tests
+        run: uv run --frozen pytest -q
+      - name: Starts and serves the dashboard and the chat
+        env:
+          VERICLASS_ENV_FILE: ${{ runner.temp }}/ci.env
+          DB_PATH: ${{ runner.temp }}/ci.db
+          VERICLASS_DATA_DIR: ${{ runner.temp }}/ci-data
+        run: |
+          uv run --frozen python -m backend.cli --port 8099 --no-browser > server.log 2>&1 &
+          for i in $(seq 1 90); do
+            curl -sf -o /dev/null http://127.0.0.1:8099/healthz && break
+            sleep 2
+          done
+          cat server.log
+          curl -sf http://127.0.0.1:8099/healthz
+          curl -sf -o /dev/null http://127.0.0.1:8099/
+          curl -sf -o /dev/null http://127.0.0.1:8099/chat/
+          curl -sf http://127.0.0.1:8099/api/setup/status | grep -q '"needs_teacher":true'
+
+  dashboard:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - name: Type-check and build
+        run: npm run build

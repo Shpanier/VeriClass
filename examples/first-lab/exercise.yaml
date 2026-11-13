@@ -1,0 +1,62 @@
+# A sample class-paced lab: what students and the tutor see.
+# teacher.yaml next to this file holds what only the lecturer sees.
+# Upload this folder as a zip in the dashboard (Exercises tab), or read
+# examples/README.md to write your own.
+exercise_id: first-lab
+title_en: "Your first lab: Python warm-up"
+title_he: "מעבדה ראשונה: חימום בפייתון"
+language: python
+default_mode: mentor
+
+# The lecturer opens the steps for the whole class, one at a time.
+pacing: class
+# Steps open from the start (each student at their own pace).
+open_steps: 1
+
+brief_md: |
+  **Welcome!** Three short steps to try VeriClass.
+
+  Each step tells you what to run. When you finish a step, click **Done** and
+  paste what your terminal printed. Ask the tutor here whenever you are stuck:
+  it guides you with hints and questions rather than handing over answers.
+
+welcome_suggestions:
+  - "How do I open a terminal?"
+  - "I'm stuck. A hint, please?"
+
+# Instructions for the AI tutor (students never see them).
+tutor_notes: |
+  The students are beginners. Never write the program for them: point to the
+  next small thing to try. On Windows the command is `python`, on macOS and
+  Linux `python3`.
+
+steps:
+  - label: A1
+    title: "Check Python"
+    minutes: 3
+    text: |
+      Open a terminal and check which Python you have:
+
+      ```bash
+      python3 --version
+      ```
+
+      (On Windows: `python --version`.)
+
+  - label: A2
+    title: "Say hello"
+    minutes: 5
+    text: |
+      Create a file `hello.py` with one line that prints `Hello, VeriClass!`,
+      then run it:
+
+      ```bash
+      python3 hello.py
+      ```
+
+  - label: A3
+    title: "A first loop"
+    minutes: 7
+    text: |
+      Create `squares.py` that prints the squares of the numbers 1 to 5, one per
+      line, using `for` and `range`. Run it.

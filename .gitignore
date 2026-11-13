@@ -61,7 +61,7 @@ config/exercise_files/
 *roster*.csv
 rosters/
 
-# Local Claude Code settings and the private exercise-writing skill (lecturers who want it: see README, "Writing exercises").
+# Local Claude Code settings and the private exercise-writing skill (lecturers who want it: email the author).
 .claude/
 
 # The chat ships its own English and Hebrew labels; Chainlit adds its stock files for other

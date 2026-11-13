@@ -1,0 +1,42 @@
+# Teacher-only: never sent to students or to the tutor.
+notes: |
+  A sample lab. Students who finish early can print the squares up to 10.
+
+steps:
+  - expected: Python 3 is installed; the version line looks like "Python 3.12.6".
+    expected_output: |
+      Python 3.12.6
+    # A pasted output that passes every check moves the student on by itself;
+    # one that doesn't waits for you in the dashboard.
+    expect_output:
+      - match: '^Python 3\.\d+'
+        hint: the "Python 3.x" line
+
+  - expected: hello.py prints the greeting.
+    expected_output: |
+      Hello, VeriClass!
+    expect_output:
+      - match: 'Hello, VeriClass!'
+        hint: the greeting
+    quiz:
+      # always: true = asked without your approval in the dashboard.
+      - q: What does the program you just ran do?
+        answer: It calls print with a string, which writes the text to the screen (standard output).
+        always: true
+
+  - expected: The squares 1, 4, 9, 16, 25, one per line.
+    expected_output: |
+      1
+      4
+      9
+      16
+      25
+    expect_output:
+      - match: '^1$'
+        hint: the first square
+      - match: '^25$'
+        hint: the last square
+    quiz:
+      # Without always: asked only after you approve it in the dashboard.
+      - q: Why does range(1, 6) stop at 5?
+        answer: range stops before its end value, so range(1, 6) gives 1, 2, 3, 4, 5.

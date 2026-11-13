@@ -204,21 +204,28 @@ def status() -> dict[str, Any]:
     """Everything the dashboard's "Share with students" panel shows."""
     t = _public()
     external = None
+    path = chat_path()
+    suffix = f"{path}/" if path else "/"
+    # An address the lecturer set up themselves (STUDENT_URL: a college server,
+    # their own Cloudflare tunnel) is the students' link as it is.
+    student_url = os.environ.get("STUDENT_URL", "").strip()
     if t["state"] in ("off", "error"):
         external = _external_ngrok()
         if external:
-            t = {"state": "on", "provider": "ngrok", "url": external, "error": None, "external": True}
-    path = chat_path()
-    suffix = f"{path}/" if path else "/"
+            t = {"state": "on", "provider": "ngrok", "url": external.rstrip("/") + suffix, "error": None,
+                 "external": True}
+        elif student_url:
+            t = {"state": "on", "provider": None, "url": student_url, "error": None, "external": True}
+    elif t["url"]:
+        t = {**t, "url": t["url"].rstrip("/") + suffix}
     p = port()
     host = os.environ.get("VERICLASS_HOST", "127.0.0.1").strip()
     lan = [f"http://{a}:{p}{suffix}" for a in lan_addresses()] if host in ("0.0.0.0", "::") else []
-    student_url = os.environ.get("STUDENT_URL", "").strip()
     return {
         "chat_mounted": bool(path),
-        "local_url": student_url or (f"http://localhost:{p}{suffix}" if path else "http://localhost:8011/"),
+        "local_url": f"http://localhost:{p}{suffix}" if path else "http://localhost:8011/",
         "lan_urls": lan,
-        "public_url": (t["url"].rstrip("/") + suffix) if (t["state"] == "on" and t["url"]) else None,
+        "public_url": t["url"] if (t["state"] == "on" and t["url"]) else None,
         "tunnel": t,
         "available": available(),
         "ngrok_domain": ngrok_domain(),

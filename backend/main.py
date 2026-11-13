@@ -147,8 +147,8 @@ def healthz():
 # The students' chat (student_app, Chainlit) inside this server at
 # STUDENT_CHAT_PATH (e.g. /chat), so the tunnel that serves the plugin serves the
 # chat too. It calls this server's API at BACKEND_URL (its own address, e.g.
-# http://127.0.0.1:8010). Off by default: scripts/dev_up.sh runs the chat as its
-# own process on port 8011.
+# http://127.0.0.1:8010). The start scripts (backend/cli.py) turn it on at /chat;
+# without it, run the chat as its own process: chainlit run student_app/app.py.
 _CHAT_PATH = os.environ.get("STUDENT_CHAT_PATH", "").strip().rstrip("/")
 if _CHAT_PATH:
     from chainlit.utils import mount_chainlit

@@ -56,7 +56,7 @@ FILES_DIR = "files"
 # checks a pasted output must pass (backend/pacing.py).
 TEACHER_STEP_KEYS = ("expected", "expected_output", "os_check", "evidence", "questions",
                      "expect_output", "quiz")
-# The question bank the exercise skill aims for.
+# About this many questions in the question bank cover most of what a class asks.
 BANK_TARGET = 50
 _ZIP_MAX = 50_000_000
 _IMPLICIT_VARIANT = {"id": "default", "params": {}, "test_inputs": []}
@@ -246,7 +246,8 @@ def validate_package(path: Path) -> dict[str, Any]:
         if not ex.get("open_steps"):
             warnings.append("open_steps is 0: students see nothing until the teacher opens step 1")
     if steps and len(faq) < BANK_TARGET:
-        warnings.append(f"the question bank has {len(faq)} question(s); the exercise skill aims for {BANK_TARGET}")
+        warnings.append(f"the question bank has {len(faq)} question(s) (faq.yaml); about {BANK_TARGET} "
+                        "cover most of what students ask")
     minutes = sum(float(s.get("minutes") or 0) for s in steps)
     summary = {
         "folder": str(path),

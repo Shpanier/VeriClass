@@ -3,7 +3,11 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(os.environ.get("DB_PATH", "./vericlass.db"))
+# A relative DB_PATH is relative to the VeriClass folder, not to wherever a
+# script happens to be started from.
+DB_PATH = Path(os.environ.get("DB_PATH") or "vericlass.db").expanduser()
+if not DB_PATH.is_absolute():
+    DB_PATH = Path(__file__).resolve().parent.parent / DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (

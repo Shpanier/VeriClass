@@ -22,13 +22,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend import courses, db, roster
-from backend.roster import generate_code
+# The same settings as the server (DB_PATH in .env), wherever this is run from.
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+from backend import courses, db, roster  # noqa: E402
+from backend.roster import generate_code  # noqa: E402
 
 
 def _seed(c, names: list[str], role: str) -> list[tuple[str, str]]:
     rows = []
     for name in names:
+        if c.execute("SELECT 1 FROM users WHERE username = ?", (name,)).fetchone():
+            print(f"  skipped {name!r}: there is already an account with this name", file=sys.stderr)
+            continue
         for _ in range(5):
             code = generate_code()
             try:

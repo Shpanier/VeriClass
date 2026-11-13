@@ -31,7 +31,8 @@ def _token_from_header(authorization: Optional[str]) -> str:
 
 # Teacher accounts work only on the instructor's own machine (the dashboard on
 # localhost). Set TEACHER_LOCAL_ONLY=false to allow them over the tunnel, e.g.
-# to run vericlass_plugin/publish.sh from another computer.
+# when VeriClass runs on a server and the lecturer opens the dashboard from
+# their own computer.
 TEACHER_LOCAL_ONLY = os.environ.get("TEACHER_LOCAL_ONLY", "true").strip().lower() not in ("0", "false", "no", "off")
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 # Proxies/tunnels (ngrok, Cloudflare) add these; the local Vite proxy does not.

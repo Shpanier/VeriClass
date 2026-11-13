@@ -15,6 +15,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# The same settings as the server (DB_PATH in .env), wherever this is run from.
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 from backend import db, passwords  # noqa: E402
 
 

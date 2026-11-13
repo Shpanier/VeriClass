@@ -2,7 +2,7 @@
 differently on Windows and macOS.
 
 The VeriClass terminal runs BusyBox on Windows and Linux, and /bin/bash with the
-BSD tools on macOS (vericlass_plugin/TERMINAL.md). A command that works on the
+BSD tools on macOS (the IDE plugin's terminal, on the pycharm-plugin branch). A command that works on the
 teacher's Mac can fail, or print something else, on a student's Windows laptop.
 
 Two levels:

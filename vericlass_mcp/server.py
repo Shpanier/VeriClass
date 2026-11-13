@@ -68,7 +68,7 @@ def _call(method: str, path: str, **kwargs) -> Any:
                           timeout=TIMEOUT, **kwargs)
     except httpx.ConnectError:
         raise RuntimeError(
-            f"The VeriClass server isn't running at {URL}. Start it (scripts/dev_up.sh, or "
+            f"The VeriClass server isn't running at {URL}. Start it (start.sh / start.bat, or "
             ".venv/bin/uvicorn backend.main:app --port 8010) and try again.")
     if r.status_code >= 400:
         try:

@@ -174,6 +174,15 @@ def test_share_shows_a_tunnel_started_elsewhere(client, teacher, monkeypatch):
     assert s["tunnel"]["external"] is True
 
 
+def test_share_shows_an_address_the_lecturer_set_up(client, teacher, monkeypatch):
+    monkeypatch.setenv("STUDENT_CHAT_PATH", "/chat")
+    monkeypatch.setenv("STUDENT_URL", "https://lab.example.edu/chat/")
+    monkeypatch.setattr(tunnel, "_external_ngrok", lambda: None)
+    s = client.get("/api/share", headers=teacher).json()
+    assert s["public_url"] == "https://lab.example.edu/chat/"
+    assert s["local_url"].startswith("http://localhost:")
+
+
 def test_starting_a_tunnel_without_the_program_says_so(client, teacher, monkeypatch):
     monkeypatch.setattr(tunnel, "find", lambda name: None)
     r = client.post("/api/share/tunnel", headers=teacher, json={"action": "start"})

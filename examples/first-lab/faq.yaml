@@ -1,0 +1,29 @@
+# The question bank: likely questions with ready answers. In review mode the
+# lecturer sees the matching answer next to a student's question and can send
+# it in one click. Levels: nudge (a hint), normal, more (more detail), direct.
+questions:
+  - id: q01
+    step: 1
+    question: "python3 is not found. What do I do?"
+    paraphrases:
+      - "command not found: python3"
+      - "הפקודה python3 לא נמצאה"
+    answers:
+      nudge:
+        en: "Which operating system are you on? On Windows the command is called `python`."
+        he: "באיזו מערכת הפעלה אתם עובדים? ב־Windows הפקודה נקראת `python`."
+      normal:
+        en: "On Windows try `python --version`. If that fails too, Python isn't installed: get it from python.org and tick \"Add to PATH\"."
+        he: "ב־Windows נסו `python --version`. אם גם זה נכשל, פייתון לא מותקן: התקינו מ־python.org וסמנו \"Add to PATH\"."
+  - id: q02
+    step: 3
+    question: "How do I print several lines with a loop?"
+    paraphrases:
+      - "איך מדפיסים כמה שורות עם לולאה?"
+    answers:
+      nudge:
+        en: "Each time the loop runs, one `print` call writes one line. What should the loop go over?"
+        he: "בכל סיבוב של הלולאה, קריאה אחת ל־`print` כותבת שורה אחת. על מה הלולאה צריכה לעבור?"
+      normal:
+        en: "`for n in range(1, 6):` goes over 1 to 5; inside the loop, print `n * n`."
+        he: "`for n in range(1, 6):` עובר על 1 עד 5; בתוך הלולאה הדפיסו את `n * n`."
