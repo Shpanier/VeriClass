@@ -60,7 +60,7 @@ def _latest_path(product: str | None) -> Path:
 
 def _read_latest(product: str | None = None) -> dict | None:
     try:
-        return json.loads(_latest_path(product).read_text())
+        return json.loads(_latest_path(product).read_text(encoding="utf-8"))
     except Exception:
         return None
 
@@ -100,8 +100,8 @@ async def publish_plugin(
         "published_by": teacher.get("username", "teacher"),
     }
     blob = json.dumps(meta, indent=2)
-    _latest_path(product).write_text(blob)   # per-product pointer
-    _LATEST.write_text(blob)                  # newest-of-any pointer (auto endpoint)
+    _latest_path(product).write_text(blob, encoding="utf-8")   # per-product pointer
+    _LATEST.write_text(blob, encoding="utf-8")                  # newest-of-any pointer (auto endpoint)
     return {"ok": True, **meta}
 
 
@@ -120,7 +120,7 @@ def _serve_installer(request: Request, product: str | None) -> PlainTextResponse
     and — for the product-pinned endpoints — its default product baked in."""
     if not _INSTALLER.exists():
         raise HTTPException(404, "Installer script is missing on the server.")
-    text = _INSTALLER.read_text()
+    text = _INSTALLER.read_text(encoding="utf-8")
     host = request.headers.get("host", "")
     if host:
         proto = request.headers.get(

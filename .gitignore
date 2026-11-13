@@ -4,7 +4,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-node_modules/
+node_modules
 dist/
 .vite/
 
@@ -40,6 +40,12 @@ vericlass_plugin/busybox/
 # Local secrets backups and tunnel logs
 .env.backup*
 deploy/logs/
+deploy/backend.log
+
+# A new install keeps its exercises, uploads and downloaded tools here (backend/packages.py).
+/data/
+# Chainlit's upload cache.
+.files/
 
 # Course labs and their files hold teacher-only answers (expected, os_check,
 # tutor notes): they stay on the teacher's machine. Only the demo exercises are public.

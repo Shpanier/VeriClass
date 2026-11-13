@@ -80,6 +80,8 @@ async def stream_chat(
                         )
                         await asyncio.sleep(delay)
                         continue
+                    if resp.is_error:
+                        await resp.aread()  # so the caller can read the error's body
                     resp.raise_for_status()  # final attempt or non-retryable → raise
                     async for line in resp.aiter_lines():
                         if not line.startswith("data:"):

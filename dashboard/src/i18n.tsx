@@ -8,7 +8,14 @@
  *   <p>{t("studentsConnected", { n: 3 })}</p>   // {n} placeholders
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { Languages } from "lucide-react";
 import type { Lang } from "./types";
+import { shellStrings } from "./i18n/shell";
+import { reviewStrings } from "./i18n/review";
+import { pacingStrings } from "./i18n/pacing";
+import { coursesStrings } from "./i18n/courses";
+import { exercisesStrings } from "./i18n/exercises";
+import { studentsStrings } from "./i18n/students";
 
 const STRINGS = {
   en: {
@@ -1077,8 +1084,25 @@ const STRINGS = {
   },
 } as const;
 
-export type StringKey = keyof typeof STRINGS["en"];
+// Every string: the original table above plus one file per area (src/i18n/).
+// New strings go in the area files; a key there replaces one of the same name above.
+const AREAS = [shellStrings, reviewStrings, pacingStrings, coursesStrings, exercisesStrings, studentsStrings];
+const ALL: Record<Lang, Record<string, string>> = {
+  en: Object.assign({}, STRINGS.en, ...AREAS.map((a) => a.en)),
+  he: Object.assign({}, STRINGS.he, ...AREAS.map((a) => a.he)),
+};
+
+export type StringKey =
+  | keyof typeof STRINGS["en"]
+  | keyof typeof shellStrings.en
+  | keyof typeof reviewStrings.en
+  | keyof typeof pacingStrings.en
+  | keyof typeof coursesStrings.en
+  | keyof typeof exercisesStrings.en
+  | keyof typeof studentsStrings.en;
 type Vars = Record<string, string | number>;
+/** The translate function, for passing to helpers and child components. */
+export type Translate = (key: StringKey, vars?: Vars) => string;
 
 function format(s: string, vars?: Vars): string {
   if (!vars) return s;
@@ -1097,8 +1121,11 @@ const Ctx = createContext<LangCtx | null>(null);
 const STORAGE_KEY = "vericlass.lang";
 
 function initialLang(): Lang {
-  const saved = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
-  return saved === "he" || saved === "en" ? saved : "en";
+  let saved: string | null = null;
+  try { saved = localStorage.getItem(STORAGE_KEY); } catch { /* no storage: fall through */ }
+  if (saved === "he" || saved === "en") return saved;
+  // First visit: the browser's own language.
+  return typeof navigator !== "undefined" && /^he\b/i.test(navigator.language || "") ? "he" : "en";
 }
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
@@ -1116,8 +1143,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem(STORAGE_KEY, l); } catch { /* ignore */ }
   };
 
-  const t = (key: StringKey, vars?: Vars) =>
-    format(STRINGS[lang][key] ?? STRINGS.en[key] ?? key, vars);
+  const t: Translate = (key, vars) => format(ALL[lang][key] ?? ALL.en[key] ?? key, vars);
 
   return <Ctx.Provider value={{ lang, setLang, t, dir }}>{children}</Ctx.Provider>;
 }
@@ -1133,14 +1159,12 @@ export function LanguageToggle() {
   const { lang, setLang, t } = useLang();
   return (
     <button
+      type="button"
+      className="vc-btn vc-btn--quiet vc-btn--sm"
       onClick={() => setLang(lang === "en" ? "he" : "en")}
-      title="Switch language / החלף שפה"
-      style={{
-        padding: "6px 12px", border: "1px solid #d1d5db", borderRadius: 6,
-        background: "white", cursor: "pointer", fontSize: 14, fontWeight: 600,
-      }}
+      title="Switch language / החלפת שפה"
     >
-      🌐 {t("language")}
+      <Languages /> {t("language")}
     </button>
   );
 }

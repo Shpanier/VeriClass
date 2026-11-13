@@ -48,7 +48,7 @@ def load_all(directory: Path) -> dict[str, dict[str, Any]]:
     _PACKAGE_IDS.clear()
     _LOAD_ERRORS.clear()
     for path in sorted(directory.glob("*.yaml")):
-        with path.open() as f:
+        with path.open(encoding="utf-8") as f:
             data = yaml.safe_load(f)
         _validate(data, str(path))
         data["source"] = "yaml"

@@ -22,7 +22,7 @@ DEFAULT_MODEL = os.environ.get("AGENT_MODEL", "gemini-2.5-pro")
 @lru_cache(maxsize=1)
 def _config() -> dict[str, Any]:
     try:
-        with CONFIG_PATH.open() as f:
+        with CONFIG_PATH.open(encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except FileNotFoundError:
         return {}
@@ -30,7 +30,16 @@ def _config() -> dict[str, Any]:
 
 # LLM_PROVIDER=anthropic switches every agent to Claude (CLAUDE_MODEL, default Sonnet).
 PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5-5")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "").strip() or "claude-sonnet-5-5"
+
+
+def configure() -> None:
+    """Read the provider and the models from the environment again (the
+    dashboard saved new settings: backend/settings.py)."""
+    global DEFAULT_MODEL, PROVIDER, CLAUDE_MODEL
+    DEFAULT_MODEL = os.environ.get("AGENT_MODEL", "").strip() or "gemini-2.5-pro"
+    PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+    CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "").strip() or "claude-sonnet-5-5"
 
 
 class _ClaudeLLM(LLM):

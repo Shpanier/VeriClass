@@ -14,15 +14,29 @@ from typing import AsyncIterator
 
 from backend import claude_student, gemini_student
 
-PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
-NAME = "claude" if PROVIDER == "anthropic" else "gemini"
-KEY_ENV = claude_student.API_KEY_ENV if PROVIDER == "anthropic" else gemini_student.API_KEY_ENV
-MODEL = claude_student.MODEL if PROVIDER == "anthropic" else gemini_student.MODEL
+class MissingKey(RuntimeError):
+    """The provider's API key isn't set (the dashboard's setup page stores it)."""
 
-STRONG_MODEL = os.environ.get("CLAUDE_STRONG_MODEL", "claude-sonnet-5-5").strip()
-# The smartest model, for the teacher's "regenerate with Opus" button in the
-# review queue (empty turns that button off).
-BEST_MODEL = os.environ.get("CLAUDE_BEST_MODEL", "claude-opus-5-5").strip()
+
+def configure() -> None:
+    """Read the provider, the models and their defaults from the environment.
+    Called at import and again when the dashboard saves the settings
+    (backend/settings.py), so a new key or provider needs no restart."""
+    global PROVIDER, NAME, KEY_ENV, MODEL, STRONG_MODEL, BEST_MODEL
+    claude_student.MODEL = os.environ.get("CLAUDE_MODEL", "").strip() or "claude-sonnet-5-5"
+    gemini_student.MODEL = os.environ.get("STUDENT_CHAT_MODEL", "").strip() or "gemini-2.5-flash-lite"
+    PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+    NAME = "claude" if PROVIDER == "anthropic" else "gemini"
+    KEY_ENV = claude_student.API_KEY_ENV if PROVIDER == "anthropic" else gemini_student.API_KEY_ENV
+    MODEL = claude_student.MODEL if PROVIDER == "anthropic" else gemini_student.MODEL
+    STRONG_MODEL = os.environ.get("CLAUDE_STRONG_MODEL", "claude-sonnet-5-5").strip()
+    # The smartest model, for the teacher's "regenerate with Opus" button in the
+    # review queue (empty turns that button off).
+    BEST_MODEL = os.environ.get("CLAUDE_BEST_MODEL", "claude-opus-5-5").strip()
+
+
+PROVIDER = NAME = KEY_ENV = MODEL = STRONG_MODEL = BEST_MODEL = ""
+configure()
 
 
 def strong_available() -> bool:
@@ -56,6 +70,8 @@ def model_label(model: str) -> str:
 async def stream_chat(
     system_prompt: str, messages: list[dict], timeout: float = 60.0
 ) -> AsyncIterator[str]:
+    if not os.environ.get(KEY_ENV, "").strip():
+        raise MissingKey(f"{KEY_ENV} is not set")
     client = claude_student if PROVIDER == "anthropic" else gemini_student
     async for tok in client.stream_chat(system_prompt, messages, timeout):
         yield tok
@@ -64,5 +80,7 @@ async def stream_chat(
 async def stream_strong(
     system_prompt: str, messages: list[dict], timeout: float = 120.0
 ) -> AsyncIterator[str]:
+    if not os.environ.get(claude_student.API_KEY_ENV, "").strip():
+        raise MissingKey(f"{claude_student.API_KEY_ENV} is not set")
     async for tok in claude_student.stream_chat(system_prompt, messages, timeout, model=STRONG_MODEL):
         yield tok

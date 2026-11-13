@@ -8,8 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend import (
-    answer_cache, bank, db, deps, environment, exercises, pacing, prompting, steps, student_llm, textutil,
-    transcript,
+    answer_cache, bank, db, deps, environment, exercises, pacing, prompting, settings, steps, student_llm, textutil, transcript,
 )
 from backend.routes import review as review_mod
 
@@ -137,8 +136,10 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
             async for tok in student_llm.stream_chat(sys_prompt, msgs):
                 collected.append(tok)
                 yield tok
-        except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            yield _llm_error(e, student_llm.NAME, student_llm.KEY_ENV)
+        except (httpx.HTTPStatusError, httpx.RequestError, student_llm.MissingKey) as e:
+            yield _llm_error(e, student_llm.NAME, review_mod.hebrew_for(req.message, s["exercise"]))
+        else:
+            settings.note_llm(True)
         finally:
             # Only persist a real reply. Storing an empty assistant turn
             # (transient Gemini error / safety block) poisons the session:
@@ -165,19 +166,32 @@ def _history(session_id: str, before_id: int | None = None) -> list[dict]:
     return [{"role": r["role"], "content": r["body"]} for r in reversed(rows)]
 
 
-def _llm_error(e: Exception, name: str, key_env: str) -> str:
-    """The line shown to the student when the LLM call fails."""
-    if isinstance(e, httpx.HTTPStatusError):
-        detail = ""
+def _llm_error(e: Exception, name: str, he: bool = False) -> str:
+    """The line shown to the student when the LLM call fails. The student is
+    told to turn to the lecturer; what went wrong is kept for the lecturer's
+    dashboard (settings.note_llm), not shown to the student."""
+    if isinstance(e, student_llm.MissingKey):
+        why = "No API key is set. Add one in Settings."
+    elif isinstance(e, httpx.HTTPStatusError):
+        status = e.response.status_code if e.response is not None else 0
         try:
             detail = e.response.json().get("error", "")
+            if isinstance(detail, dict):
+                detail = detail.get("message", "")
         except Exception:
-            detail = e.response.text[:200] if e.response is not None else ""
-        log.warning("Student LLM (%s) HTTP %s: %s", name,
-                    e.response.status_code if e.response else "?", detail)
-        return f"\n\n_⚠️ Student LLM ({name}) error: {detail or e}_\n"
-    log.warning("Student LLM (%s) unreachable: %s", name, e)
-    return f"\n\n_⚠️ Student LLM ({name}) unreachable. Check network / {key_env}._\n"
+            detail = ""
+        if status in (401, 403):
+            why = "The provider refused the API key. Check it in Settings."
+        elif status == 429:
+            why = "The provider's rate or spending limit was reached."
+        else:
+            why = f"The provider answered with an error ({status}). {str(detail)[:200]}".strip()
+    else:
+        why = "The provider couldn't be reached. Check this computer's internet connection."
+    log.warning("Student LLM (%s): %s (%s)", name, why, type(e).__name__)
+    settings.note_llm(False, why)
+    return ("\n\n_⚠️ העוזר לא זמין כרגע. ספרו למרצה, ונסו שוב בעוד רגע._\n" if he else
+            "\n\n_⚠️ The tutor can't answer right now. Tell your lecturer, then try again in a moment._\n")
 
 
 def _reask(req: AskRequest, s, ex, sys_prompt: str) -> StreamingResponse:
@@ -221,8 +235,8 @@ def _reask(req: AskRequest, s, ex, sys_prompt: str) -> StreamingResponse:
                 collected.append(tok)
                 yield tok
             complete = True
-        except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            yield _llm_error(e, model, "ANTHROPIC_API_KEY")
+        except (httpx.HTTPStatusError, httpx.RequestError, student_llm.MissingKey) as e:
+            yield _llm_error(e, model, review_mod.hebrew_for(req.message, s["exercise"]))
         finally:
             reply = "".join(collected)
             _save_reply(req.session_id, s["mode"], reply, model=model)

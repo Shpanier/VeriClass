@@ -11,3 +11,6 @@ _FIXTURE = Path(__file__).parent / "fixtures" / "data"
 _DATA = Path(tempfile.mkdtemp(prefix="vericlass-data-")) / "data"
 shutil.copytree(_FIXTURE, _DATA)
 os.environ["VERICLASS_DATA_DIR"] = str(_DATA)
+
+# The settings page writes the API key to .env: tests get a throwaway file.
+os.environ["VERICLASS_ENV_FILE"] = str(_DATA.parent / "test.env")

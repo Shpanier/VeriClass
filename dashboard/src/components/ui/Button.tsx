@@ -1,38 +1,58 @@
-import type { ButtonHTMLAttributes } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 
-// The recurring button palette used across the dashboard, collected in one place.
-type Variant = "primary" | "neutral" | "danger" | "ghost";
+/** How a button looks:
+ *  primary     the one main action of a screen or dialog (filled, brand colour)
+ *  secondary   every other action (white, bordered): the default
+ *  quiet       low-key actions inside dense rows (no border until hovered)
+ *  link        reads as a link inside a sentence
+ *  success / warn / danger   filled: approve, careful, destructive
+ *  danger-soft outlined red: destructive but not the main action
+ *  brand-soft  tinted brand: a secondary action that should still stand out
+ *  neutral, ghost: the old names of primary and secondary. */
+export type ButtonVariant =
+  | "primary" | "secondary" | "quiet" | "link" | "success" | "warn" | "danger" | "danger-soft" | "brand-soft"
+  | "neutral" | "ghost";
 
-const PALETTE: Record<Variant, { bg: string; fg: string; border: string }> = {
-  primary: { bg: "#111827", fg: "white", border: "#111827" },
-  neutral: { bg: "#3b82f6", fg: "white", border: "#3b82f6" },
-  danger: { bg: "#b91c1c", fg: "white", border: "#b91c1c" },
-  ghost: { bg: "white", fg: "#374151", border: "#d1d5db" },
+const VARIANT: Record<ButtonVariant, string> = {
+  primary: "vc-btn--primary",
+  secondary: "",
+  quiet: "vc-btn--quiet",
+  link: "vc-btn--link",
+  success: "vc-btn--success",
+  warn: "vc-btn--warn",
+  danger: "vc-btn--danger",
+  "danger-soft": "vc-btn--danger-soft",
+  "brand-soft": "vc-btn--brand-soft",
+  neutral: "vc-btn--primary",
+  ghost: "",
 };
 
-export function Button({
-  variant = "ghost",
-  style,
-  disabled,
-  ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
-  const c = PALETTE[variant];
-  return (
-    <button
-      disabled={disabled}
-      style={{
-        padding: "8px 16px",
-        borderRadius: 6,
-        border: `1px solid ${c.border}`,
-        background: c.bg,
-        color: c.fg,
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.5 : 1,
-        fontSize: 13,
-        fontWeight: 600,
-        ...style,
-      }}
-      {...rest}
-    />
-  );
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: ButtonVariant;
+  size?: "sm" | "md" | "lg";
+  /** An icon before the text (a lucide-react icon element). */
+  icon?: ReactNode;
+  /** Shows a spinner and disables the button while an action runs. */
+  busy?: boolean;
+  /** Full width. */
+  block?: boolean;
+  /** A square button holding only an icon; give it an aria-label. */
+  iconOnly?: boolean;
 }
+
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = "secondary", size = "md", icon, busy, block, iconOnly, className, children, disabled, type = "button", ...rest },
+  ref,
+) {
+  const cls = [
+    "vc-btn", VARIANT[variant],
+    size === "sm" ? "vc-btn--sm" : size === "lg" ? "vc-btn--lg" : "",
+    block ? "vc-btn--block" : "", iconOnly ? "vc-btn--icon" : "", className ?? "",
+  ].filter(Boolean).join(" ");
+  return (
+    <button ref={ref} type={type} className={cls} disabled={disabled || busy} aria-busy={busy || undefined} {...rest}>
+      {busy ? <span className="vc-spinner" aria-hidden="true" /> : icon}
+      {children}
+    </button>
+  );
+});

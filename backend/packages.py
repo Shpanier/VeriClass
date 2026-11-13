@@ -36,7 +36,15 @@ from backend import bank, portability, terminal, textutil
 logger = logging.getLogger(__name__)
 
 _REPO = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.environ.get("VERICLASS_DATA_DIR") or (_REPO.parent / "VeriClassPrivateData")).expanduser()
+def _default_data_dir() -> Path:
+    """A lecturer who already keeps the private folder next to the code
+    (../VeriClassPrivateData) stays with it. A new install keeps its data in
+    data/, inside the folder and never in git."""
+    sibling = _REPO.parent / "VeriClassPrivateData"
+    return sibling if sibling.is_dir() else _REPO / "data"
+
+
+DATA_DIR = Path(os.environ.get("VERICLASS_DATA_DIR") or _default_data_dir()).expanduser()
 
 EXERCISE_FILE = "exercise.yaml"
 TEACHER_FILE = "teacher.yaml"

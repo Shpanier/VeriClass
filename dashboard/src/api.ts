@@ -32,6 +32,8 @@ import type {
   TraceVerifyResult,
   UserAccount,
 } from "./types";
+import { ApiError } from "./lib/errors";
+import { connection } from "./lib/connection";
 
 const TOKEN_KEY = "vericlass.teacher.token";
 
@@ -50,24 +52,38 @@ export function setUnauthorizedHandler(fn: () => void) {
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const token = auth.get();
-  const r = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers || {}),
-    },
-  });
-  if (r.status === 401 || r.status === 403) {
+  let r: Response;
+  try {
+    r = await fetch(path, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers || {}),
+      },
+    });
+  } catch {
+    // The server didn't answer at all (stopped, restarting, no network).
+    connection.fail();
+    throw new ApiError("The server can't be reached.", 0, true);
+  }
+  connection.ok();
+  if (r.status === 401) {
+    // The sign-in is no longer valid: back to the sign-in screen.
     auth.clear();
     onUnauthorized?.();
-    throw new Error(`${r.status} unauthorized`);
+    throw new ApiError("Signed out.", 401);
   }
   if (!r.ok) {
-    // Surface FastAPI's `detail` (or a 422 validation summary) so callers like
-    // the exercise-authoring form can show why a request was rejected.
+    // FastAPI's `detail` (or a 422 validation summary) says why a request was
+    // refused. A 403 is an answer like any other ("not allowed"), not a sign-out,
+    // except the one that says this browser may not act as a lecturer at all.
     const detail = await readErrorDetail(r);
-    throw new Error(detail || `${r.status} ${r.statusText}`);
+    if (r.status === 403 && /instructor/i.test(detail ?? "")) {
+      auth.clear();
+      onUnauthorized?.();
+    }
+    throw new ApiError(detail || `${r.status} ${r.statusText}`, r.status);
   }
   return r.json() as Promise<T>;
 }
@@ -101,13 +117,101 @@ export interface LoginResult {
 // Standalone (not via j): a wrong code or password legitimately returns 401 and
 // must not be treated as a session-expiry bounce.
 export async function login(code: string, password: string): Promise<LoginResult> {
-  const r = await fetch("/api/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code, password }),
-  });
+  let r: Response;
+  try {
+    r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, password }),
+    });
+  } catch {
+    throw new ApiError("The server can't be reached.", 0, true);
+  }
   if (r.status === 401) throw new Error("bad-code");
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  if (!r.ok) throw new ApiError((await readErrorDetail(r)) || `${r.status} ${r.statusText}`, r.status);
+  return r.json() as Promise<LoginResult>;
+}
+
+// --- first run, settings, the students' link (backend/routes/setup.py) -------------
+
+export interface SetupStatus { needs_teacher: boolean; local: boolean; version: string }
+
+export interface LlmProvider { id: string; label: string; key_url: string; key_set: boolean; key_hint: string }
+export interface LlmStatus {
+  provider: string;
+  provider_label: string;
+  ready: boolean;
+  key_hint: string;
+  chat_model: string;
+  agent_model: string;
+  providers: LlmProvider[];
+  /** The last tutor call: ok true/false, or null when none was made yet. */
+  health: { ok: boolean | null; error: string; at: number | null };
+}
+export interface KeyCheck { ok: boolean; message: string; model_ok?: boolean; network?: boolean }
+export type ChatLanguage = "auto" | "he" | "en";
+export interface Settings {
+  version: string;
+  user: { name: string; via: string };
+  llm: LlmStatus;
+  chat_language: ChatLanguage;
+  /** Show the IDE plugin's screens (exam monitoring, terminal log, submissions). */
+  plugin_ui: boolean;
+  paths: { env_file: string; data_dir: string; database: string };
+}
+export interface TunnelState {
+  state: "off" | "starting" | "on" | "stopping" | "error";
+  provider: "cloudflared" | "ngrok" | null;
+  url: string | null;
+  error: string | null;
+  external?: boolean;
+  slow?: boolean;
+}
+export interface ShareInfo {
+  chat_mounted: boolean;
+  local_url: string;
+  lan_urls: string[];
+  public_url: string | null;
+  tunnel: TunnelState;
+  available: { cloudflared: boolean; ngrok: boolean };
+  ngrok_domain: string;
+  install_hint: string;
+}
+export interface Overview {
+  llm_ready: boolean;
+  students: number;
+  courses: number;
+  courses_with_exercise: boolean;
+  courses_with_students: boolean;
+  exercises: number;
+  own_exercises: number;
+  sessions: number;
+}
+
+/** Public: is this a brand-new server? Never throws for "not signed in". */
+export async function setupStatus(): Promise<SetupStatus> {
+  let r: Response;
+  try {
+    r = await fetch("/api/setup/status");
+  } catch {
+    throw new ApiError("The server can't be reached.", 0, true);
+  }
+  if (!r.ok) throw new ApiError(`${r.status} ${r.statusText}`, r.status);
+  return r.json() as Promise<SetupStatus>;
+}
+
+export async function createFirstTeacher(name: string, username: string, password: string): Promise<LoginResult> {
+  let r: Response;
+  try {
+    r = await fetch("/api/setup/teacher", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, username, password }),
+    });
+  } catch {
+    throw new ApiError("The server can't be reached.", 0, true);
+  }
+  if (!r.ok) throw new ApiError((await readErrorDetail(r)) || `${r.status} ${r.statusText}`, r.status);
   return r.json() as Promise<LoginResult>;
 }
 
@@ -344,4 +448,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ chosen, lang, ...(text === undefined ? {} : { text }), ...(options ?? {}) }),
     }),
+  // first run, settings, the students' link
+  settings: () => j<Settings>("/api/settings"),
+  testLlm: (provider: string, api_key?: string) =>
+    j<KeyCheck>("/api/settings/llm/test", { method: "POST", body: JSON.stringify({ provider, api_key }) }),
+  saveLlm: (provider: string, api_key?: string) =>
+    j<{ llm: LlmStatus; check: KeyCheck }>("/api/settings/llm", {
+      method: "POST", body: JSON.stringify({ provider, api_key }),
+    }),
+  saveChatLanguage: (language: ChatLanguage) =>
+    j<{ chat_language: ChatLanguage }>("/api/settings/chat-language", {
+      method: "POST", body: JSON.stringify({ language }),
+    }),
+  share: () => j<ShareInfo>("/api/share"),
+  tunnel: (action: "start" | "stop" | "download", provider?: "cloudflared" | "ngrok") =>
+    j<ShareInfo>("/api/share/tunnel", { method: "POST", body: JSON.stringify({ action, provider }) }),
+  overview: () => j<Overview>("/api/overview"),
 };

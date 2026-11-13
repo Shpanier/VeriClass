@@ -1,0 +1,117 @@
+/* The frame around every page: top bar, navigation, page width; and the
+   screens outside it (sign-in, first run). */
+.vc-app { min-height: 100vh; display: flex; flex-direction: column; }
+
+.vc-topbar {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--c-surface); border-bottom: 1px solid var(--c-border);
+}
+.vc-topbar__inner {
+  display: flex; align-items: center; gap: 8px 20px; flex-wrap: wrap;
+  max-width: var(--page-max); margin: 0 auto; padding: 0 24px; min-height: 56px;
+}
+.vc-brand { display: inline-flex; align-items: center; gap: 9px; font-size: var(--fs-lg); font-weight: 750; letter-spacing: -0.01em; color: var(--c-text); }
+.vc-brand__mark {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px;
+  background: linear-gradient(135deg, #4f46e5, #3730a3); color: #fff;
+}
+.vc-brand__mark > svg { width: 18px; height: 18px; }
+
+.vc-nav { display: flex; align-items: stretch; gap: 2px; align-self: stretch; }
+.vc-nav__item {
+  display: inline-flex; align-items: center; gap: 7px; padding: 0 12px;
+  border: 0; border-bottom: 2px solid transparent; border-top: 2px solid transparent; background: none;
+  color: var(--c-text-3); font-size: var(--fs-md); font-weight: 600;
+}
+.vc-nav__item > svg { width: 16px; height: 16px; }
+.vc-nav__item:hover { color: var(--c-text); }
+.vc-nav__item[aria-current="page"] { color: var(--c-brand); border-bottom-color: var(--c-brand); }
+.vc-topbar__actions { display: flex; align-items: center; gap: 8px; margin-inline-start: auto; flex-wrap: wrap; }
+
+/* The "is everything working?" pill in the top bar. */
+.vc-status {
+  display: inline-flex; align-items: center; gap: 7px; min-height: var(--control-h-sm); padding: 0 10px;
+  border: 1px solid var(--c-border); border-radius: var(--radius-pill); background: var(--c-surface);
+  color: var(--c-text-2); font-size: var(--fs-xs); font-weight: 600;
+}
+.vc-status:hover { background: var(--c-surface-2); }
+.vc-status--warning { border-color: var(--c-warning-border); background: var(--c-warning-soft); color: var(--c-warning); }
+.vc-status--danger { border-color: var(--c-danger-border); background: var(--c-danger-soft); color: var(--c-danger); }
+
+.vc-main { flex: 1; width: 100%; max-width: var(--page-max); margin: 0 auto; padding: 22px 24px 48px; }
+
+.vc-banner {
+  display: flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 16px;
+  background: #7a1a12; color: #fff; font-size: var(--fs-sm); font-weight: 600;
+}
+.vc-banner > svg { width: 16px; height: 16px; flex: none; }
+
+/* A drop-down menu (the account menu). */
+.vc-menu { position: relative; }
+.vc-menu__list {
+  position: absolute; z-index: 60; inset-block-start: calc(100% + 6px); inset-inline-end: 0; min-width: 220px;
+  padding: 6px; border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface); box-shadow: var(--shadow-lg);
+}
+.vc-menu__label { padding: 6px 10px 8px; color: var(--c-text-3); font-size: var(--fs-xs); border-bottom: 1px solid var(--c-border); margin-bottom: 4px; }
+.vc-menu__label strong { display: block; color: var(--c-text); font-size: var(--fs-sm); }
+.vc-menu__item {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px; border: 0; border-radius: var(--radius-sm);
+  background: none; color: var(--c-text); font-size: var(--fs-sm); text-align: start;
+}
+.vc-menu__item > svg { width: 16px; height: 16px; color: var(--c-text-3); }
+.vc-menu__item:hover { background: var(--c-surface-3); }
+
+/* Sign-in and first-run screens: one centred card on the page background. */
+.vc-auth { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.vc-auth__card {
+  width: 100%; max-width: 420px; padding: 28px; border: 1px solid var(--c-border); border-radius: 16px;
+  background: var(--c-surface); box-shadow: var(--shadow);
+}
+.vc-auth__card--wide { max-width: 560px; }
+.vc-auth__top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.vc-auth__title { font-size: var(--fs-xl); font-weight: 700; margin-bottom: 4px; }
+.vc-auth__lead { color: var(--c-text-3); font-size: var(--fs-md); margin-bottom: 20px; }
+.vc-auth__foot { margin-top: 16px; color: var(--c-text-3); font-size: var(--fs-xs); text-align: center; }
+
+.vc-steps { display: flex; align-items: center; gap: 8px; margin-bottom: 22px; color: var(--c-text-3); font-size: var(--fs-xs); font-weight: 600; }
+.vc-steps__dot { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--c-surface-3); color: var(--c-text-3); font-size: var(--fs-xs); font-weight: 700; flex: none; }
+.vc-steps__dot[data-state="now"] { background: var(--c-brand); color: #fff; }
+.vc-steps__dot[data-state="done"] { background: var(--c-success); color: #fff; }
+.vc-steps__dot > svg { width: 14px; height: 14px; }
+.vc-steps__line { flex: 1; height: 2px; background: var(--c-border); border-radius: 1px; }
+
+/* The provider cards on the "connect the tutor" step. */
+.vc-choice { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 14px; }
+.vc-choice__item {
+  display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch;
+  padding: 12px 14px; border: 1.5px solid var(--c-border); border-radius: var(--radius-lg);
+  background: var(--c-surface); text-align: start; cursor: pointer;
+}
+.vc-choice__item:hover { border-color: var(--c-border-strong); }
+.vc-choice__item[aria-pressed="true"] { border-color: var(--c-brand); background: var(--c-brand-soft); }
+.vc-choice__name { display: block; font-weight: 700; font-size: var(--fs-md); }
+.vc-choice__note { display: block; margin-top: 2px; color: var(--c-text-3); font-size: var(--fs-xs); }
+
+/* The first-steps checklist on the class page. */
+.vc-checklist { display: grid; gap: 8px; margin-top: 12px; }
+.vc-checklist__item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface); }
+.vc-checklist__mark { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--c-border-strong); color: var(--c-text-3); font-size: var(--fs-xs); font-weight: 700; flex: none; }
+.vc-checklist__item[data-done="true"] .vc-checklist__mark { background: var(--c-success); border-color: var(--c-success); color: #fff; }
+.vc-checklist__mark > svg { width: 14px; height: 14px; }
+.vc-checklist__text { flex: 1; min-width: 0; }
+.vc-checklist__title { font-weight: 650; }
+.vc-checklist__item[data-done="true"] .vc-checklist__title { color: var(--c-text-3); }
+.vc-checklist__hint { color: var(--c-text-3); font-size: var(--fs-sm); }
+
+/* The students' link: the address itself, large enough to read from a projector. */
+.vc-link-box { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--c-border-strong); border-radius: var(--radius); background: var(--c-surface-2); }
+.vc-link-box__url { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-md); font-weight: 600; overflow-wrap: anywhere; direction: ltr; text-align: start; }
+.vc-qr { display: grid; place-items: center; padding: 12px; border: 1px solid var(--c-border); border-radius: var(--radius-lg); background: #fff; }
+.vc-qr svg { display: block; width: 200px; height: 200px; }
+
+@media (max-width: 720px) {
+  .vc-topbar__inner { padding: 8px 14px; }
+  .vc-main { padding: 16px 14px 40px; }
+  .vc-nav { order: 3; width: 100%; overflow-x: auto; min-height: 40px; }
+  .vc-modal-backdrop { padding: 8px; }
+}

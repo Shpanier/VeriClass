@@ -7,12 +7,14 @@ from pathlib import Path
 # import time (e.g. gemini_student.MODEL, agents.llm.DEFAULT_MODEL), so .env has
 # to be in os.environ first or those constants freeze to their defaults.
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(os.environ.get("VERICLASS_ENV_FILE") or Path(__file__).resolve().parent.parent / ".env")
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
-from backend import db, deps, exercises
+from backend import db, deps, exercises, settings, tunnel
 from backend.routes import (
     ask,
     broadcast as broadcast_routes,
@@ -29,6 +31,7 @@ from backend.routes import (
     proctor,
     review,
     sessions,
+    setup as setup_routes,
     steps as step_routes,
     students,
     submissions,
@@ -46,6 +49,9 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 EXERCISES_DIR = Path(__file__).parent.parent / "config" / "exercises"
+# The lecturer's dashboard, built (dashboard/: npm run build). When it is here
+# this server serves it at "/", so nobody needs Node to run a class.
+WEB_DIR = Path(__file__).parent / "web"
 
 
 @asynccontextmanager
@@ -62,10 +68,44 @@ async def lifespan(app: FastAPI):
     # Merge in teacher-authored exercises created from the instructor console.
     exercises.load_from_db()
     print(f"[startup] loaded {len(loaded)} exercise(s): {list(loaded)}")
+    _banner()
     yield
+    tunnel.stop()
 
 
-app = FastAPI(title="VeriClass Backend", lifespan=lifespan)
+def _banner() -> None:
+    """What to open, and what is still missing, in plain ASCII (a Windows
+    console may not print anything else)."""
+    port = tunnel.port()
+    chat = tunnel.chat_path()
+    lines = ["", "  VeriClass is running. Keep this window open during the class.", ""]
+    if (WEB_DIR / "index.html").is_file():
+        lines.append(f"    Lecturer's dashboard:  http://localhost:{port}/")
+    else:
+        lines.append("    Lecturer's dashboard:  not built here; run it with: cd dashboard && npm run dev")
+    if chat:
+        lines.append(f"    Students' chat:        http://localhost:{port}{chat}/")
+        lines.append("                           (for a class: \"Share with students\" in the dashboard)")
+    with db.conn() as c:
+        teachers = c.execute("SELECT COUNT(*) AS n FROM users WHERE role = 'teacher'").fetchone()["n"]
+    notes = []
+    if teachers == 0:
+        notes.append("No lecturer account yet: the dashboard will ask you to create one.")
+    if not settings.llm_status()["ready"]:
+        notes.append("No API key yet: the dashboard will ask for it (Settings).")
+    if notes:
+        lines.append("")
+        lines.extend(f"    * {n}" for n in notes)
+    lines.append("")
+    print("\n".join(lines), flush=True)
+
+
+# The interactive API pages (/docs) would be public through the tunnel; they are
+# for development (API_DOCS=true).
+_DOCS = os.environ.get("API_DOCS", "").strip().lower() in ("1", "true", "yes", "on")
+app = FastAPI(title="VeriClass Backend", lifespan=lifespan, version=settings.VERSION,
+              docs_url="/docs" if _DOCS else None, redoc_url=None,
+              openapi_url="/openapi.json" if _DOCS else None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -96,6 +136,7 @@ app.include_router(trace_routes.router, prefix="/api")
 app.include_router(course_routes.router, prefix="/api")
 app.include_router(report_routes.router, prefix="/api")
 app.include_router(broadcast_routes.router, prefix="/api")
+app.include_router(setup_routes.router, prefix="/api")
 
 
 @app.get("/healthz")
@@ -114,3 +155,26 @@ if _CHAT_PATH:
 
     mount_chainlit(app=app, target=str(Path(__file__).resolve().parent.parent / "student_app" / "app.py"),
                    path=_CHAT_PATH)
+
+
+# The lecturer's dashboard at "/". Registered last, so every address above
+# (the API, /healthz, the chat) wins over the one-segment file route below.
+if (WEB_DIR / "index.html").is_file():
+    if (WEB_DIR / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=WEB_DIR / "assets"), name="dashboard-assets")
+
+    @app.get("/", include_in_schema=False)
+    def dashboard(request: Request):
+        # A student who opens the bare address gets the chat: the dashboard is
+        # for the lecturer's own computer (TEACHER_LOCAL_ONLY).
+        if _CHAT_PATH and deps.TEACHER_LOCAL_ONLY and not deps.is_local_request(request):
+            return RedirectResponse(f"{_CHAT_PATH}/")
+        return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/{name}", include_in_schema=False)
+    def dashboard_file(name: str):
+        """A file next to index.html (the icon). Nothing below that folder's top level."""
+        path = WEB_DIR / name
+        if name in ("", "index.html") or path.parent != WEB_DIR or not path.is_file():
+            raise HTTPException(404, "Not Found")
+        return FileResponse(path)
