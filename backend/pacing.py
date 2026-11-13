@@ -111,8 +111,11 @@ def released_for(ex: dict[str, Any], session_id: str, course_id: Optional[str]) 
 
 def set_released(ex: dict[str, Any], course_id: Optional[str], n: int) -> int:
     """Open steps 1..n to the course, closing any later ones; 0 = none open.
-    Students past n keep their progress and wait. Returns the value stored."""
+    Students past n keep their progress and wait. Closing steps closes them
+    for the students they were opened for alone (moved forward, move_to) as
+    well. Returns the value stored."""
     n = max(0, min(int(n), total(ex)))
+    closing = n < released(ex, course_id)
     with db.conn() as c:
         c.execute(
             "INSERT INTO step_release (course_id, exercise_id, released) VALUES (?, ?, ?) "
@@ -120,7 +123,30 @@ def set_released(ex: dict[str, Any], course_id: Optional[str], n: int) -> int:
             "updated_at = CURRENT_TIMESTAMP",
             (_course(course_id), ex["exercise_id"], n),
         )
+        if closing:
+            c.execute("UPDATE sessions SET released_to = NULL WHERE exercise = ? AND COALESCE(course_id, '') = ? "
+                      "AND released_to > ?", (ex["exercise_id"], _course(course_id), n))
     return n
+
+
+def limit_own(session_id: str, n: int) -> None:
+    """The student is sent back (or reset) to step n: the steps opened for them
+    alone (sessions.released_to, move_to) no longer reach past it. Step n
+    itself stays open to them when their course hasn't opened it (they were
+    put there); otherwise nothing is left open for them alone."""
+    from backend import exercises  # exercises -> packages -> bank -> steps; avoids a cycle at import
+
+    with db.conn() as c:
+        row = c.execute("SELECT exercise, course_id, released_to FROM sessions WHERE id = ?",
+                        (session_id,)).fetchone()
+    if row is None or not row["released_to"] or row["released_to"] <= n:
+        return
+    try:
+        course = released(exercises.get(row["exercise"]), row["course_id"])
+    except KeyError:
+        course = 0
+    with db.conn() as c:
+        c.execute("UPDATE sessions SET released_to = ? WHERE id = ?", (n if n > course else None, session_id))
 
 
 # --- checking a pasted output ----------------------------------------------------------
@@ -316,6 +342,8 @@ def ask_finished(ex: dict[str, Any], key: str, course_id: Optional[str]) -> int:
         for r in _latest_sessions(c, ex["exercise_id"], _course(course_id)):
             if _current(c, r["id"]) <= item["step"]:
                 continue  # not there yet: asked when they finish the step
+            if item["step"] in _skipped(c, r["id"]):
+                continue  # moved past the step without doing it: nothing to ask about
             if c.execute("SELECT 1 FROM probes WHERE session_id = ? AND quiz_key = ? "
                          "AND status NOT IN ('cancelled', 'withdrawn', 'reset')", (r["id"], key)).fetchone():
                 continue
@@ -602,7 +630,8 @@ def move_note(ex: dict[str, Any], n: int, how: str) -> str:
 def move_to(ex: dict[str, Any], session_id: str, course_id: Optional[str], n: int) -> dict[str, Any]:
     """Move a student to step n (1..total) and interrupt their chat (a note in
     the transcript). Back: steps.reset_to; their work from n on no longer
-    counts. Forward: steps.skip_to, and the steps up to n are opened for this
+    counts, and steps opened for them alone no longer reach past n
+    (limit_own). Forward: steps.skip_to, and the steps up to n are opened for this
     student (sessions.released_to) when the course hasn't opened them. The step
     they are on: it starts over (a pending output is dropped). Returns from, to
     and how ('back' | 'forward' | 'again')."""
@@ -627,8 +656,22 @@ def move_to(ex: dict[str, Any], session_id: str, course_id: Optional[str], n: in
 def _current(c, session_id: str) -> int:
     """steps.current_step inside an open transaction."""
     row = c.execute("SELECT MAX(step) AS s FROM step_checks WHERE session_id = ? "
-                    "AND status IN ('approved', 'skipped')", (session_id,)).fetchone()
+                    f"AND status IN {steps.PASSED_SQL}", (session_id,)).fetchone()
     return (row["s"] or 0) + 1
+
+
+def _skipped_steps(checks) -> set[int]:
+    """The steps of these step_checks rows the student skipped (moved past by
+    the teacher, steps.skip_to) and didn't do."""
+    return ({k["step"] for k in checks if k["status"] == "skipped"}
+            - {k["step"] for k in checks if k["status"] == "approved"})
+
+
+def _skipped(c, session_id: str) -> set[int]:
+    """_skipped_steps of a session, inside an open transaction."""
+    return _skipped_steps(c.execute(
+        f"SELECT step, status FROM step_checks WHERE session_id = ? AND status IN {steps.PASSED_SQL}",
+        (session_id,)).fetchall())
 
 
 # --- the teacher's view ---------------------------------------------------------------------
@@ -678,18 +721,20 @@ def overview(ex: dict[str, Any]) -> dict[str, Any]:
             members = (c.execute("SELECT COUNT(*) AS n FROM course_members WHERE course_id = ?",
                                  (cid,)).fetchone()["n"] if cid else None)
             students = []
+            skipped: dict[str, set[int]] = {}  # session id -> the steps it skipped
             for r in sorted(latest.values(), key=lambda r: r["username"].lower()):
                 checks = c.execute(
                     "SELECT step, status, auto_ok, forced, missing, answer, created_at FROM step_checks "
                     "WHERE session_id = ? AND status IN ('approved', 'skipped', 'waiting') ORDER BY step, id",
                     (r["id"],)).fetchall()
+                skipped[r["id"]] = _skipped_steps(checks)
                 own = c.execute("SELECT released_to FROM sessions WHERE id = ?", (r["id"],)).fetchone()
                 quiz_rows = c.execute(
                     "SELECT id, quiz_key, quiz_step, body, answer, status, auto_grade, override_grade, "
                     "review_status, auto_why, answered_at "
                     "FROM probes WHERE session_id = ? AND quiz_key IS NOT NULL ORDER BY id",
                     (r["id"],)).fetchall()
-                cur = (max((k["step"] for k in checks if k["status"] in ("approved", "skipped")), default=0)) + 1
+                cur = (max((k["step"] for k in checks if k["status"] in steps.PASSED), default=0)) + 1
                 waiting = [k for k in checks if k["status"] == "waiting" and k["step"] == cur]
                 students.append({
                     "session_id": r["id"],
@@ -738,9 +783,11 @@ def overview(ex: dict[str, Any]) -> dict[str, Any]:
                 "done": {n: sum(1 for s in students if s["current"] > n) for n in range(1, n_total + 1)},
                 "here": {n: sum(1 for s in students if s["current"] == n) for n in range(1, n_total + 1)},
                 # Per question: students past its step who were never asked it
-                # (it wasn't approved yet when they finished the step).
+                # (it wasn't approved yet when they finished the step). Not the
+                # ones moved past the step without doing it.
                 "quiz_missed": {q["key"]: sum(
                     1 for s in students if s["current"] > q["step"]
+                    and q["step"] not in skipped[s["session_id"]]
                     and not any(a["key"] == q["key"] and a["status"] not in GONE for a in s["quiz"])
                 ) for q in quiz},
             })

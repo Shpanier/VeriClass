@@ -1271,3 +1271,163 @@ def test_the_teachers_text_goes_with_either_decision(client, teacher, monkeypatc
 def test_looks_like_question(text, asks):
     from backend import textutil
     assert textutil.looks_like_question(text) is asks
+
+
+# --- regressions: moving students, skipped steps, and what counts ---------------------------
+
+def test_sending_back_or_closing_takes_back_the_steps_opened_for_one_student(client, teacher):
+    """A student moved forward has the steps up to there opened for them alone
+    (released_to). Moving them back, sending them back with the class, or
+    closing steps for the course takes that back; opening more doesn't."""
+    _approve_only()
+    _release(client, teacher, 1)
+    try:
+        h, sid = _student(client, "PCE-OWN1")
+        _finish(client, h, sid, 1, GOOD)
+        _move(client, teacher, sid, 4)
+        assert _state(client, h, sid)["released"] == 4
+        # Back to a step the course has open: nothing is left open for them alone.
+        _move(client, teacher, sid, 1)
+        st = _state(client, h, sid)
+        assert (st["current"], st["released"]) == (1, 1)
+        assert _pacing_student(client, teacher, "PCE-OWN1")["released_to"] is None
+        _finish(client, h, sid, 1, GOOD)
+        assert _state(client, h, sid)["waiting_teacher"]          # A2 isn't open to the class
+        # Back to a step the course hasn't opened: that step stays open to them, no later one.
+        _move(client, teacher, sid, 4)
+        _move(client, teacher, sid, 3)
+        st = _state(client, h, sid)
+        assert st["open"] and (st["current"], st["released"]) == (3, 3)
+        assert _finish(client, h, sid, 3, "6.8.0-linuxkit")["status"] == "done"
+        assert _state(client, h, sid)["waiting_teacher"]          # B2 was opened for them, not any more
+
+        # Sent back with the class (the course reset).
+        h2, sid2 = _student(client, "PCE-OWN2")
+        _finish(client, h2, sid2, 1, GOOD)
+        _move(client, teacher, sid2, 4)
+        r = client.post(f"/api/exercises/{LAB}/reset", headers=teacher, json={"step": 1, "session_ids": [sid2]})
+        assert r.status_code == 200 and r.json()["moved"] == 1
+        st = _state(client, h2, sid2)
+        assert (st["current"], st["released"]) == (1, 1)
+
+        # The teacher closes steps for the course: closed for the student too; opening more isn't.
+        h3, sid3 = _student(client, "PCE-OWN3")
+        _finish(client, h3, sid3, 1, GOOD)
+        _move(client, teacher, sid3, 4)
+        _release(client, teacher, 2)
+        assert _state(client, h3, sid3)["released"] == 4
+        _release(client, teacher, 1)
+        assert _state(client, h3, sid3)["released"] == 1
+        assert _pacing_student(client, teacher, "PCE-OWN3")["released_to"] is None
+    finally:
+        _release(client, teacher, 2)
+
+
+def test_moving_forward_keeps_the_records_of_the_steps_done_and_skips_each_step_once(client, teacher):
+    _approve_only()
+    _release(client, teacher, 4)
+    try:
+        h, sid = _student(client, "PCE-SK1")
+        assert _finish(client, h, sid, 1, "something else")["status"] == "missing"
+        assert client.post(f"/api/pacing/{LAB}/decline", headers=teacher,
+                           json={"session_id": sid, "step": 1}).status_code == 200
+        _finish(client, h, sid, 1, GOOD)
+        _finish(client, h, sid, 2)
+        assert _finish(client, h, sid, 3, "no kernel here")["status"] == "missing"  # waits for the teacher
+        r = _move(client, teacher, sid, 4)
+        assert (r["from"], r["to"], r["how"]) == (3, 4, "forward")
+        # A1's sent-back output stays what it was; B1's waiting output no longer
+        # counts (kept, like a reset); B1 is skipped once.
+        assert _checks(sid) == [(1, "returned"), (1, "approved"), (2, "approved"), (3, "reset"), (3, "skipped")]
+        s = _pacing_student(client, teacher, "PCE-SK1")
+        assert (s["current"], s["skipped"], s["waiting"]) == (4, ["B1"], [])
+        assert _state(client, h, sid)["open"]
+    finally:
+        _release(client, teacher, 2)
+
+
+def test_a_question_approved_late_is_not_asked_about_a_step_the_student_skipped(client, teacher):
+    _approve_only()
+    _release(client, teacher, 4, "course-skq")
+    try:
+        hd, sd = _course_student(client, "PCE-SKQ1", "course-skq")   # does A1
+        hs, ss = _course_student(client, "PCE-SKQ2", "course-skq")   # moved past A1 without doing it
+        _finish(client, hd, sd, 1, GOOD)
+        _move(client, teacher, ss, 3)
+        key = pacing.quiz_key(Q1)
+        view = client.get(f"/api/pacing/{LAB}", headers=teacher).json()
+        assert next(c for c in view["courses"] if c["course_id"] == "course-skq")["quiz_missed"][key] == 1
+        r = client.post(f"/api/pacing/{LAB}/quiz/{key}", headers=teacher,
+                        json={"approved": True, "ask_finished": True, "course_id": "course-skq"})
+        assert r.json()["asked_now"] == 1
+        assert len(client.get(f"/api/probes/pending/{sd}", headers=hd).json()) == 1
+        assert client.get(f"/api/probes/pending/{ss}", headers=hs).json() == []
+        assert _state(client, hs, ss)["open"]
+    finally:
+        _approve_only()
+
+
+def test_the_review_card_names_the_step_a_question_is_about(client, teacher, monkeypatch):
+    from backend import whereabouts
+    ex = exercises.get(LAB)
+    _approve_only(Q2)
+    _release(client, teacher, 4, "course-wh")
+    try:
+        h, sid = _course_student(client, "PCE-WH1", "course-wh")
+        session = {"id": sid, "course_id": "course-wh"}
+        _finish(client, h, sid, 1, GOOD)                      # A1's question is open; A2 is next
+        where = whereabouts.step_of(session, ex)
+        assert (where["status"], where["n"], where["label"]) == ("quiz", 1, "A1")
+        _grade_with(monkeypatch, 2)
+        probe = client.get(f"/api/probes/pending/{sid}", headers=h).json()[0]
+        client.post("/api/probes/answer", headers=h, json={"probe_id": probe["id"], "answer": "6.8"})
+        _finish(client, h, sid, 2)
+        # A question about A1 approved late, asked of a student on B1.
+        key = pacing.quiz_key(Q1)
+        client.post(f"/api/pacing/{LAB}/quiz/{key}", headers=teacher,
+                    json={"approved": True, "ask_finished": True, "course_id": "course-wh"})
+        where = whereabouts.step_of(session, ex)
+        assert (where["status"], where["n"], where["label"]) == ("quiz", 1, "A1")
+        # Its answer, graded too low, waits for the teacher: still about A1.
+        _grade_with(monkeypatch, 0)
+        probe = client.get(f"/api/probes/pending/{sid}", headers=h).json()[0]
+        client.post("/api/probes/answer", headers=h, json={"probe_id": probe["id"], "answer": "no idea"})
+        where = whereabouts.step_of(session, ex)
+        assert (where["status"], where["n"], where["label"]) == ("quiz_review", 1, "A1")
+    finally:
+        _approve_only()
+
+
+def test_an_answer_sent_back_no_longer_counts_in_the_grade_signals(client, teacher, monkeypatch):
+    from backend.grading import features
+    h, sid, q1, probe, _ = _held_answer(client, teacher, monkeypatch, "PCE-FT1", grade=0)
+    try:
+        assert _review(client, teacher, probe["id"], "return").status_code == 200
+        _grade_with(monkeypatch, 2)
+        again = client.get(f"/api/probes/pending/{sid}", headers=h).json()[0]
+        client.post("/api/probes/answer", headers=h, json={"probe_id": again["id"], "answer": "it shares the host kernel"})
+        p = features.extract(sid)["probes"]
+        assert (p["count"], p["avg_grade"]) == (1, 2)
+        assert [qa["a"] for qa in p["qa"]] == ["it shares the host kernel"]
+    finally:
+        _approve_only()
+
+
+def test_skipped_steps_are_no_submissions_in_the_report_or_the_attendance(client, teacher):
+    import datetime
+
+    from backend import courses, reports
+    _approve_only()
+    _release(client, teacher, 4, "course-rep")
+    h, sid = _course_student(client, "PCE-REP1", "course-rep")
+    _finish(client, h, sid, 1, GOOD)
+    _move(client, teacher, sid, 4)                             # A2 and B1 skipped
+    rep = reports.session_report(exercise_id=LAB, course_id="course-rep")
+    assert rep["students"] == 1 and rep["per_student"][0]["step_submissions"] == 1
+    assert rep["steps"]["submissions"] == 1 and rep["steps"]["decision_seconds"]["n"] == 1
+    meeting = courses.add_meeting("course-rep", datetime.date.today().isoformat(), LAB)
+    try:
+        row = next(r for r in courses.attendance(meeting["id"])["rows"] if r["username"] == "PCE-REP1")
+        assert (row["step_submissions"], row["steps_approved"]) == (1, 1)
+    finally:
+        courses.delete_meeting(meeting["id"])

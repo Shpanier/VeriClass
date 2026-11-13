@@ -26,11 +26,12 @@ from the bank.
 import math
 import os
 import re
+import threading
 from collections import Counter
 from functools import lru_cache
 from typing import Any, Optional
 
-from backend import db, exercises, steps
+from backend import db, exercises, steps, textutil
 
 LEVELS = ("nudge", "normal", "more", "direct")
 
@@ -167,6 +168,11 @@ def _same_question(a: str, b: str) -> bool:
     return _norm(a) == _norm(b)
 
 
+# save_answer reads the whole bank, changes it and writes it back; the routes
+# that call it run in FastAPI's thread pool, so two saves at once would lose one.
+_SAVE_LOCK = threading.Lock()
+
+
 def save_answer(exercise_id: str, question: str, level: str, lang: str, text: str,
                 step: Optional[int] = None, model: Optional[str] = None,
                 source: str = "teacher", merge_into: Optional[str] = None) -> dict[str, Any]:
@@ -175,14 +181,25 @@ def save_answer(exercise_id: str, question: str, level: str, lang: str, text: st
     replaces the earlier answer; at another level it adds that level. With
     `merge_into` (the id of the bank entry the question matched, whose answer
     the teacher sent), the answer goes into that entry and the question joins
-    its paraphrases. Only the sent language's text is known, so the other
-    language gets the same text (shown as a fallback). Returns the entry."""
+    its paraphrases. Only the sent language's text is known: the other
+    language keeps the text the entry has for it at that level, or, when it
+    has none (or only the copy an earlier save in the sent language left),
+    gets the same text (shown as a fallback). The bank's own answer sent again
+    (model 'bank') leaves who wrote the entry (source, model) as it was.
+    Returns the entry."""
     if level not in LEVELS:
         level = "normal"
     text = (text or "").strip()
     question = " ".join((question or "").split())
     if not text or not question:
         raise ValueError("Nothing to save")
+    with _SAVE_LOCK:
+        return _save_answer(exercise_id, question, level, lang, text, step, model, source, merge_into)
+
+
+def _save_answer(exercise_id: str, question: str, level: str, lang: str, text: str,
+                 step: Optional[int], model: Optional[str], source: str,
+                 merge_into: Optional[str]) -> dict[str, Any]:
     ex = exercises.get(exercise_id)
     entries = [dict(e) for e in (ex.get("faq") or [])]
     entry = next((e for e in entries if merge_into and e["id"] == merge_into), None)
@@ -202,10 +219,17 @@ def save_answer(exercise_id: str, question: str, level: str, lang: str, text: st
     elif step is not None and entry.get("step") is None:
         entry["step"] = step
     other = "he" if lang == "en" else "en"
+    old = (entry.get("answers") or {}).get(level) or {}
+    # The other language's own text is kept. When both languages hold the same
+    # text, one is the copy an earlier one-language save left: the other
+    # language's is the copy unless the text is written in that language.
+    mine = old.get(other)
+    kept = mine if mine and (mine != old.get(lang) or textutil.detect_lang(mine) == other) else None
     entry["answers"] = {**entry.get("answers", {}),
-                        level: {lang: text, other: text}}
-    entry["source"] = source
-    if model:
-        entry["model"] = model
+                        level: {lang: text, other: kept or text}}
+    if model != "bank":
+        entry["source"] = source
+        if model:
+            entry["model"] = model
     exercises.set_faq(exercise_id, entries)
     return entry

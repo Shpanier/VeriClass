@@ -59,8 +59,15 @@ def step_of(session: dict[str, Any], ex: Optional[dict[str, Any]]) -> Optional[d
             status = "not_started" if cur == 1 else "waiting_teacher"
         else:
             status = "open"
-        # Not open to them yet: the step they finished last is the one that matters.
-        shown = cur if status in ("open", "waiting_review", "quiz") or cur == 1 else cur - 1
+        if status in ("quiz", "quiz_review"):
+            # The question (open, or its answer waiting for the teacher) is
+            # about a step they finished: usually the last one, but a question
+            # approved late (pacing.ask_finished) can be about an earlier one.
+            held = pacing.pending_quiz(sid) if status == "quiz" else pacing.held_quiz(sid)
+            shown = (held[0]["quiz_step"] if held else None) or max(1, cur - 1)
+        else:
+            # Not open to them yet: the step they finished last is the one that matters.
+            shown = cur if status in ("open", "waiting_review") or cur == 1 else cur - 1
         label = pacing.label(ex, shown)
     else:
         cur = steps.current_step(sid)

@@ -70,6 +70,10 @@ def test_preview_then_import_then_reimport(client):
     out = r.json()
     assert out["counts"] == {"new": 2, "existing": 0, "errors": 3}
     assert "Avi One" in out["codes_csv"] and out["rows"][0]["code"]
+    header, first = out["codes_csv"].splitlines()[:2]
+    assert header == "name,username,password,email,course,group"
+    code = out["rows"][0]["code"]
+    assert first.split(",")[1:3] == [code, code]  # the password is the username until it is set
     with db.conn() as c:
         m = {r["course_id"] for r in c.execute(
             "SELECT course_id FROM course_members WHERE user_id = ?", (out["rows"][0]["user_id"],))}

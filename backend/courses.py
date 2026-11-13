@@ -294,8 +294,10 @@ def attendance(meeting_id: int) -> dict[str, Any]:
                 approved = c.execute(
                     f"SELECT COUNT(DISTINCT step) AS n FROM step_checks WHERE status = 'approved' "
                     f"AND session_id IN ({marks})", ids).fetchone()["n"]
+                # Not the 'skipped' rows the server writes when the teacher moves a student past steps.
                 submissions = c.execute(
-                    f"SELECT COUNT(*) AS n FROM step_checks WHERE session_id IN ({marks})", ids).fetchone()["n"]
+                    f"SELECT COUNT(*) AS n FROM step_checks WHERE session_id IN ({marks}) "
+                    "AND status != 'skipped'", ids).fetchone()["n"]
             rows.append({
                 "user_id": u["id"], "username": u["username"], "email": u["email"], "group": u["group_name"],
                 "attended": bool(ses),

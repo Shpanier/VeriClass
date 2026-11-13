@@ -25,6 +25,7 @@ import re
 import shutil
 import tempfile
 import time
+import uuid
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
@@ -504,7 +505,11 @@ _FAQ_KEYS = ("id", "step", "question", "paraphrases", "answers", "approved", "so
 
 def write_faq(current: dict[str, Any], entries: list[dict[str, Any]]) -> Path:
     """Write the question bank into the package's faq.yaml (the previous file is
-    kept in exercises/.previous/). Returns the file's path."""
+    kept in exercises/.previous/). Returns the file's path. The file is
+    written whole from `entries` (comments in it are not kept), into a
+    temporary file next to it that then replaces it: a write that fails half
+    way leaves the old faq.yaml as it was, never an empty or partial one
+    (which would keep the whole package from loading)."""
     folder = Path(current["package_dir"])
     path = folder / FAQ_FILE
     questions = []
@@ -527,8 +532,17 @@ def write_faq(current: dict[str, Any], entries: list[dict[str, Any]]) -> Path:
         keep.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, keep / path.name)
     rt = _rt_yaml()
-    with path.open("w", encoding="utf-8") as f:
-        rt.dump({"questions": questions}, f)
+    tmp = folder / f".{FAQ_FILE}.{uuid.uuid4().hex}.tmp"
+    try:
+        with tmp.open("x", encoding="utf-8") as f:
+            rt.dump({"questions": questions}, f)
+            f.flush()
+            os.fsync(f.fileno())
+        if path.is_file():
+            shutil.copymode(path, tmp)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
     return path
 
 

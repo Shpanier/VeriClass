@@ -353,11 +353,15 @@ def test_a_sent_answer_can_be_saved_into_the_question_bank(client, drafts, monke
     h, sid = _student(client, "pkg-demo")
     th = _teacher(client)
     original = [dict(e) for e in exercises.get("pkg-demo")["faq"]]
+    original_ex3 = exercises.get("ex3-mcalc").get("faq")
     before = len(original)
     try:
         _saving_into_the_bank(client, h, sid, th, before)
     finally:
         exercises.set_faq("pkg-demo", original)  # leave the shared package as it was
+        exercises.get("ex3-mcalc")["faq"] = original_ex3  # and the bundled exercise
+        with db.conn() as c:
+            c.execute("DELETE FROM exercise_faq WHERE exercise_id = 'ex3-mcalc'")
 
 
 def _saving_into_the_bank(client, h, sid, th, before):
@@ -395,7 +399,9 @@ def _saving_into_the_bank(client, h, sid, th, before):
     t2.join(10)
     faq = exercises.get("pkg-demo")["faq"]
     assert len(faq) == before + 1 and faq[-1]["id"] == entry["id"]
-    assert faq[-1]["answers"] == {"direct": {"he": "len(df).", "en": "len(df)."}} and faq[-1]["model"] == "bank"
+    assert faq[-1]["answers"] == {"direct": {"he": "len(df).", "en": "len(df)."}}
+    # The bank's own answer sent again: the entry still says who wrote it.
+    assert (faq[-1]["source"], faq[-1]["model"]) == ("teacher", "fake-haiku")
     assert faq[-1]["paraphrases"] == ["how many rows in the csv after cleaning"]
     # The same question again, at another level: that level is added.
     assert bank.save_answer("pkg-demo", "how many rows in the CSV after cleaning?", "nudge", "en", "Think len().",
@@ -404,7 +410,9 @@ def _saving_into_the_bank(client, h, sid, th, before):
     e = bank.save_answer("pkg-demo", "How many rows are there in the CSV after cleaning?", "nudge", "en", "len?")
     assert e["id"] == entry["id"] and set(e["answers"]) == {"direct", "nudge"}
 
-    # A bundled exercise without a package folder: the entry goes into its database row.
+    # A bundled exercise without a package folder: the bank alone is kept in
+    # the database; the exercise itself still comes from its YAML file.
+    edited = exercises.get("ex3-mcalc")["edited"]
     h3, sid3 = _student(client)
     t3, box3 = _ask_in_background(client, h3, sid3, "What is argv[0]?")
     item3 = _wait_answers(client, th, _wait_pending(client, th, sid3)["id"], 4)
@@ -412,9 +420,12 @@ def _saving_into_the_bank(client, h, sid, th, before):
     assert r.json()["saved_to_bank"] is True
     t3.join(10)
     assert exercises.get("ex3-mcalc")["faq"][-1]["answers"]["nudge"]["en"] == "nudge en"
-    with db.conn() as c:
-        data = c.execute("SELECT data FROM exercises WHERE exercise_id = 'ex3-mcalc'").fetchone()["data"]
-    assert "What is argv[0]?" in data
+    if not edited:
+        assert exercises.get("ex3-mcalc")["edited"] is False
+        with db.conn() as c:
+            assert c.execute("SELECT 1 FROM exercises WHERE exercise_id = 'ex3-mcalc'").fetchone() is None
+            data = c.execute("SELECT faq FROM exercise_faq WHERE exercise_id = 'ex3-mcalc'").fetchone()["faq"]
+        assert "What is argv[0]?" in data
 
 
 def test_the_bank_write_back_keeps_every_text_exactly(client):
@@ -932,3 +943,153 @@ def test_without_a_transcript_the_card_shows_the_model_turns(client, drafts):
         t.join(10)
     finally:
         exercises._LOADED.pop("no-history-review-test", None)
+
+
+# --- regressions: the question bank and class notes -----------------------------------
+
+def test_saving_an_answer_in_one_language_keeps_the_other(client):
+    original = [dict(e) for e in exercises.get("pkg-demo")["faq"]]
+    q01 = next(e for e in original if e["id"] == "q01")
+    try:
+        # The bank's own Hebrew answer sent again (edited): its English text and
+        # the entry's other levels stay; who wrote it is unchanged.
+        e = bank.save_answer("pkg-demo", "כמה שורות יש בקובץ?", "normal", "he", "טענו ובדקו len(df).",
+                             model="bank", merge_into="q01")
+        assert e["answers"]["normal"] == {"he": "טענו ובדקו len(df).", "en": q01["answers"]["normal"]["en"]}
+        assert e["answers"]["nudge"] == q01["answers"]["nudge"]
+        assert "source" not in e and "model" not in e
+        back = next(x for x in packages.load_package(packages.exercises_dir() / "pkg-demo")["faq"] if x["id"] == "q01")
+        assert back["answers"]["normal"]["en"] == q01["answers"]["normal"]["en"]
+        # A level saved in one language: the other gets the same text, as a
+        # copy that a later save in the same language replaces.
+        q = "What is a tidy table?"
+        assert bank.save_answer("pkg-demo", q, "direct", "en", "One row each.", model="m1")["answers"]["direct"] == \
+            {"en": "One row each.", "he": "One row each."}
+        assert bank.save_answer("pkg-demo", q, "direct", "en", "One row per observation.")["answers"]["direct"] == \
+            {"en": "One row per observation.", "he": "One row per observation."}
+        assert bank.save_answer("pkg-demo", q, "direct", "he", "שורה לכל תצפית.")["answers"]["direct"] == \
+            {"en": "One row per observation.", "he": "שורה לכל תצפית."}
+        e = bank.save_answer("pkg-demo", q, "direct", "en", "One row per observation, one column per variable.",
+                             model="m2")
+        assert e["answers"]["direct"] == {"en": "One row per observation, one column per variable.",
+                                          "he": "שורה לכל תצפית."}
+        assert (e["source"], e["model"]) == ("teacher", "m2")
+    finally:
+        exercises.set_faq("pkg-demo", original)
+
+
+def test_a_bank_write_that_fails_half_way_leaves_faq_yaml_as_it_was(client, monkeypatch):
+    ex = exercises.get("pkg-demo")
+    folder = packages.exercises_dir() / "pkg-demo"
+    before = (folder / "faq.yaml").read_bytes()
+    entries = list(ex["faq"])
+
+    class HalfWay:
+        def dump(self, data, f):
+            f.write("questions:\n  - id: q01\n")
+            raise RuntimeError("disk full")
+
+    monkeypatch.setattr(packages, "_rt_yaml", lambda: HalfWay())
+    with pytest.raises(RuntimeError):
+        bank.save_answer("pkg-demo", "Will this be saved?", "normal", "en", "No.")
+    assert (folder / "faq.yaml").read_bytes() == before
+    assert not [p.name for p in folder.iterdir() if p.name.endswith(".tmp")]
+    assert packages.load_package(folder)["faq"] == entries          # the package still loads
+    assert exercises.get("pkg-demo")["faq"] == entries
+
+
+def test_two_answers_saved_at_once_are_both_kept(client, monkeypatch):
+    original = [dict(e) for e in exercises.get("pkg-demo")["faq"]]
+    real_set_faq = exercises.set_faq
+
+    def slow_set_faq(exercise_id, entries):
+        time.sleep(0.2)  # between reading the bank and writing it back
+        real_set_faq(exercise_id, entries)
+
+    monkeypatch.setattr(exercises, "set_faq", slow_set_faq)
+    try:
+        threads = [threading.Thread(target=bank.save_answer,
+                                    args=("pkg-demo", f"race question {i}?", "normal", "en", f"answer {i}"))
+                   for i in (1, 2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(10)
+        for faq in (exercises.get("pkg-demo")["faq"],
+                    packages.load_package(packages.exercises_dir() / "pkg-demo")["faq"]):
+            assert {"race question 1?", "race question 2?"} <= {e["question"] for e in faq}
+    finally:
+        real_set_faq("pkg-demo", original)
+
+
+def test_a_class_note_is_no_hint_in_the_grade_signals(client):
+    from backend.grading import features
+    h, sid = _student(client)
+    with db.conn() as c:
+        c.execute("UPDATE sessions SET course_id = 'c-feat' WHERE id = ?", (sid,))
+        c.execute("INSERT INTO messages (session_id, role, body, mode_at_time, created_at) "
+                  "VALUES (?, 'user', 'How do I parse argv?', 'mentor', datetime('now', '-60 seconds'))", (sid,))
+        c.execute("INSERT INTO messages (session_id, role, body, mode_at_time, answer_level, created_at) "
+                  "VALUES (?, 'assistant', 'Look at strtol.', 'mentor', 'nudge', datetime('now', '-50 seconds'))",
+                  (sid,))
+    assert broadcast.send("ex3-mcalc", "Break until 11:15.", course_id="c-feat")["sent"] == 1
+    with db.conn() as c:
+        c.execute("INSERT INTO submissions (session_id, source_code) VALUES (?, 'int main(){}')", (sid,))
+    f = features.extract(sid)
+    assert f["hints"]["total"] == 1 and f["hints"]["nudge"] == 1 and "class" not in f["hints"]
+    assert f["timing"]["hint_to_submit_sec"] >= 45     # from the tutor's hint, not the class note
+    assert f["timing"]["median_gap_sec"] == 10          # the student's own turns only
+
+
+def test_a_class_note_reaches_only_the_students_of_the_askers_group(client):
+    asker_h, asker = _student(client)                       # outside every course
+    mate_h, mate = _student(client)                         # outside every course too
+    other_h, other = _student(client)
+    with db.conn() as c:
+        c.execute("UPDATE sessions SET course_id = 'c-bc' WHERE id = ?", (other,))
+        uid = c.execute("SELECT user_id FROM sessions WHERE id = ?", (asker,)).fetchone()["user_id"]
+        tid = c.execute("SELECT id FROM users WHERE login_code = 'REV-T'").fetchone()["id"]
+        # The asker's other session on the exercise (another login), and a teacher's test session.
+        c.execute("INSERT INTO sessions (id, user_id, exercise, mode, variant) "
+                  "VALUES ('bc-asker-2', ?, 'ex3-mcalc', 'mentor', 'v1')", (uid,))
+        c.execute("INSERT INTO sessions (id, user_id, exercise, mode, variant) "
+                  "VALUES ('bc-teacher', ?, 'ex3-mcalc', 'mentor', 'v1')", (tid,))
+    try:
+        ids = {r["id"] for r in broadcast.recipients("ex3-mcalc", None, exclude_session=asker)}
+        assert mate in ids
+        assert not ids & {asker, "bc-asker-2", "bc-teacher", other}
+        assert {r["id"] for r in broadcast.recipients("ex3-mcalc", "c-bc")} == {other}
+    finally:
+        with db.conn() as c:
+            c.execute("DELETE FROM sessions WHERE id IN ('bc-asker-2', 'bc-teacher')")
+
+
+def test_saving_the_bank_of_a_bundled_exercise_leaves_the_rest_to_its_file(client, tmp_path):
+    import shutil
+
+    from backend.main import EXERCISES_DIR
+    eid = "ex5-pycalc"
+    folder = tmp_path / "exercises"
+    shutil.copytree(EXERCISES_DIR, folder)
+    exercises.load_all(folder)
+    exercises.load_from_db()
+    try:
+        assert exercises.get(eid)["edited"] is False
+        bank.save_answer(eid, "What does float('3.5') give?", "normal", "en", "The number 3.5.")
+        assert exercises.get(eid)["edited"] is False
+        with db.conn() as c:
+            assert c.execute("SELECT 1 FROM exercises WHERE exercise_id = ?", (eid,)).fetchone() is None
+        # The lecturer changes the file later: after a restart the change counts, and the bank is kept.
+        path = folder / f"{eid}.yaml"
+        text = path.read_text(encoding="utf-8")
+        title = next(line for line in text.splitlines() if line.startswith("title_en:"))
+        path.write_text(text.replace(title, 'title_en: "Changed in the file"'), encoding="utf-8")
+        exercises.reload_all()
+        ex = exercises.get(eid)
+        assert ex["title_en"] == "Changed in the file" and ex["edited"] is False and ex["source"] == "yaml"
+        assert ex["faq"][-1]["question"] == "What does float('3.5') give?"
+    finally:
+        with db.conn() as c:
+            c.execute("DELETE FROM exercise_faq WHERE exercise_id = ?", (eid,))
+        exercises.load_all(EXERCISES_DIR)
+        exercises.load_from_db()

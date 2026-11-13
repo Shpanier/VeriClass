@@ -123,6 +123,7 @@ def load_from_db() -> None:
             "SELECT exercise_id, title_en, title_he, default_mode, brief_md, data "
             "FROM exercises"
         ).fetchall()
+        banks = c.execute("SELECT exercise_id, faq FROM exercise_faq").fetchall()
     for row in rows:
         if row["exercise_id"] in _PACKAGE_IDS:
             logger.warning("ignoring the database copy of %s: its package folder is the source",
@@ -131,6 +132,12 @@ def load_from_db() -> None:
         ex = _row_to_exercise(row)
         _check_os(ex)
         _LOADED[row["exercise_id"]] = ex
+    # The question bank saved for a bundled exercise nobody edited (set_faq):
+    # everything else still comes from its YAML file.
+    for row in banks:
+        ex = _LOADED.get(row["exercise_id"])
+        if ex is not None and row["exercise_id"] in _YAML_IDS and not ex.get("edited"):
+            ex["faq"] = json.loads(row["faq"])
 
 
 def _row_to_exercise(row: Any) -> dict[str, Any]:
@@ -318,11 +325,22 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
 
 def set_faq(exercise_id: str, entries: list[dict[str, Any]]) -> None:
     """Replace an exercise's question bank (backend/bank.py entries) and persist
-    it: a package's faq.yaml (its folder is the source of truth), else the
-    exercise's database row. Raises KeyError for an unknown exercise."""
+    it: a package's faq.yaml (its folder is the source of truth); for a
+    bundled exercise the lecturer never edited, the bank alone (table
+    exercise_faq), so its YAML file stays the source of the rest and a later
+    change to the file still counts; else the exercise's database row. Raises
+    KeyError for an unknown exercise."""
     ex = _LOADED[exercise_id]
     if exercise_id in _PACKAGE_IDS:
         packages.write_faq(ex, entries)
+        ex["faq"] = entries
+        return
+    if exercise_id in _YAML_IDS and not ex.get("edited"):
+        with db.conn() as c:
+            c.execute(
+                "INSERT INTO exercise_faq (exercise_id, faq) VALUES (?, ?) "
+                "ON CONFLICT(exercise_id) DO UPDATE SET faq = excluded.faq, updated_at = CURRENT_TIMESTAMP",
+                (exercise_id, json.dumps(entries, ensure_ascii=False)))
         ex["faq"] = entries
         return
     _upsert({**ex, "faq": entries})

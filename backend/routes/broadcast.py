@@ -13,7 +13,7 @@ router = APIRouter()
 class BroadcastRequest(BaseModel):
     exercise_id: str
     text: str = Field(max_length=20_000)
-    course_id: Optional[str] = None   # only that course's students (None: everyone on the exercise)
+    course_id: Optional[str] = None   # only that course's students (None / "": students outside every course)
     minutes: Optional[int] = Field(default=None, ge=1, le=24 * 60)  # active within (default BROADCAST_ACTIVE_MINUTES)
 
 

@@ -192,12 +192,20 @@ def apply(text: str, default_course: Optional[str] = None) -> dict[str, Any]:
 
 
 def codes_csv(rows: list[dict[str, Any]]) -> str:
-    """name,login code,course for the imported rows (to print or hand out)."""
+    """The imported students' sign-in details, to print or hand out: name,
+    username and password (the username, until the lecturer sets one; a
+    student already here keeps any password set earlier), email, course, group."""
+    codes = [r["code"] for r in rows if r.get("code") and not r.get("error")]
+    with db.conn() as c:
+        changed = {row["login_code"] for row in c.execute(
+            f"SELECT login_code FROM users WHERE password_hash IS NOT NULL AND login_code IN "
+            f"({','.join('?' * len(codes))})", codes)} if codes else set()
     out = io.StringIO()
     w = csv.writer(out)
-    w.writerow(["name", "login code", "email", "course", "group"])
+    w.writerow(["name", "username", "password", "email", "course", "group"])
     for r in rows:
         if r.get("code") and not r.get("error"):
-            w.writerow([r.get("username") or r["name"], r["code"], r.get("email") or "", r.get("course") or "",
-                        r.get("group") or ""])
+            password = "(set earlier, unchanged)" if r["code"] in changed else r["code"]
+            w.writerow([r.get("username") or r["name"], r["code"], password, r.get("email") or "",
+                        r.get("course") or "", r.get("group") or ""])
     return out.getvalue()

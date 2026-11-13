@@ -114,3 +114,45 @@ def test_pending_check_shows_progress_evidence_and_attachment(client):
     client.post(f"/api/step-checks/{item['id']}/decide", json={"action": "return", "note": "fix the log"}, headers=th)
     t.join(10)
     assert "look again at step 1" in box["r"].text
+
+
+def _teacher(tc):
+    tok = tc.post("/api/login", json={"code": "STP-T", "password": "STP-T"}).json()["token"]
+    return {"Authorization": f"Bearer {tok}"}
+
+
+def _wait_check(sid, timeout=10):
+    end = time.time() + timeout
+    while time.time() < end:
+        with db.conn() as c:
+            row = c.execute("SELECT id FROM step_checks WHERE session_id = ? AND status = 'pending'", (sid,)).fetchone()
+        if row:
+            return row["id"]
+        time.sleep(0.05)
+    raise AssertionError("no step check appeared")
+
+
+@pytest.mark.parametrize("how", ["move", "reset"])
+def test_moving_a_student_wakes_their_waiting_sign_off(client, how):
+    """The teacher moves a student past the step (or sends them back to its
+    start) while their "Done with step 1" waits: the waiting request ends at
+    once, and the next "done" isn't told the step was approved."""
+    h, sid = _student(client, f"STP-MV{how[0].upper()}")
+    th = _teacher(client)
+    t, box = _done_in_background(client, h, sid, "Done with step 1. Our answers:\n1. 2000")
+    check_id = _wait_check(sid)
+    if how == "move":
+        r = client.post(f"/api/sessions/{sid}/move", headers=th, json={"step": 2})
+        assert r.json()["to"] == 2
+    else:
+        r = client.post(f"/api/sessions/{sid}/reset", headers=th, json={"step": 1})
+        assert r.json()["to"] == 1
+    t.join(10)
+    assert not t.is_alive(), "the request kept waiting for the teacher"
+    assert "approved" not in box["r"].text
+    assert steps.get(check_id)["delivered"] == 1
+    assert steps.undelivered_decision(sid) is None
+    with db.conn() as c:
+        rows = [(r["step"], r["status"]) for r in c.execute(
+            "SELECT step, status FROM step_checks WHERE session_id = ? ORDER BY id", (sid,))]
+    assert rows == ([(1, "reset"), (1, "skipped")] if how == "move" else [(1, "reset")])

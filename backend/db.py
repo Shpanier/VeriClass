@@ -108,6 +108,16 @@ CREATE TABLE IF NOT EXISTS exercises (
     created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- The question bank (backend/bank.py) of a bundled exercise
+-- (config/exercises/*.yaml) the lecturer never edited, saved from the review
+-- queue: kept apart from the exercise so its YAML file stays the source of
+-- everything else (a row in `exercises` would shadow the whole file).
+CREATE TABLE IF NOT EXISTS exercise_faq (
+    exercise_id  TEXT PRIMARY KEY,
+    faq          TEXT NOT NULL,          -- JSON list of bank entries
+    updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Step-by-step labs: a pair writes "Done with step N", the answer waits here
 -- until the teacher approves (next step is released) or sends it back.
 CREATE TABLE IF NOT EXISTS step_checks (

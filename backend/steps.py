@@ -31,6 +31,13 @@ def drop_event(check_id: int) -> None:
     _EVENTS.pop(check_id, None)
 
 
+def _wake(check_ids: list[int]) -> None:
+    """Wake the /ask requests waiting for these checks (as the teacher's
+    decision does): each reads its row again, finds it delivered, and ends."""
+    for check_id in check_ids:
+        event_for(check_id).set()
+
+
 def steps_of(ex: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
     return list((ex or {}).get("steps") or [])
 
@@ -43,11 +50,18 @@ def parse_done(message: str) -> Optional[int]:
     return int(m.group(1)) if m.group(1) else 0
 
 
+# A step_checks status that counts as past the step: done, or skipped (the
+# teacher moved the student past it, skip_to). The session works on the step
+# after the highest such row.
+PASSED = ("approved", "skipped")
+PASSED_SQL = "(" + ", ".join(f"'{s}'" for s in PASSED) + ")"
+
+
 def current_step(session_id: str) -> int:
     """1-based step the session is working on = highest approved (or skipped) step + 1."""
     with db.conn() as c:
         row = c.execute(
-            "SELECT MAX(step) AS s FROM step_checks WHERE session_id = ? AND status IN ('approved', 'skipped')",
+            f"SELECT MAX(step) AS s FROM step_checks WHERE session_id = ? AND status IN {PASSED_SQL}",
             (session_id,),
         ).fetchone()
     return (row["s"] or 0) + 1
@@ -336,12 +350,17 @@ def reset_to(session_id: str, n: int, note: Optional[str] = None, again: bool = 
     also when n is the step the student is on (start that step over); without
     it a student already at or before n is left alone. Returns the step the
     session was on (`from`) and the step it is on now (`to`)."""
-    from backend import transcript  # transcript doesn't import steps; avoids a cycle at import
+    from backend import pacing, transcript  # both import steps; avoids a cycle at import
 
     before = current_step(session_id)
-    n = max(1, min(int(n), before))
-    if n < before or again or _has_open_rows(session_id, n):
+    asked = max(1, int(n))
+    n = min(asked, before)
+    moved = n < before or again or _has_open_rows(session_id, n)
+    waiting: list[int] = []
+    if moved:
         with db.conn() as c:
+            # A sign-off request still waiting for the teacher is woken below.
+            waiting = _pending_ids(c, session_id, n)
             c.execute(
                 "UPDATE step_checks SET status = 'reset', delivered = 1, decided_at = CURRENT_TIMESTAMP "
                 "WHERE session_id = ? AND step >= ? "
@@ -361,6 +380,11 @@ def reset_to(session_id: str, n: int, note: Optional[str] = None, again: bool = 
                 (session_id, n),
             )
             c.execute("UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
+    # Steps the teacher opened for this student alone (a move forward) no
+    # longer reach past the step they are sent back to.
+    pacing.limit_own(session_id, asked)
+    if moved:
+        _wake(waiting)
         if note:
             transcript.record(session_id, "system", note, kind="reset", step=n, origin="server")
     return {"session_id": session_id, "from": before, "to": current_step(session_id)}
@@ -372,7 +396,14 @@ def skip_to(session_id: str, n: int, note: Optional[str] = None) -> dict[str, An
     questions are not asked), and the questions it still had to answer, or
     answers of its that waited for the teacher, no longer hold it back. `note`
     goes into the transcript (the chat stops what the student was doing and
-    shows step n). n at or before the current step changes nothing."""
+    shows step n). n at or before the current step changes nothing.
+
+    Only the records of the steps it skips (the one it is on and later) are
+    touched, and each skipped step gets one 'skipped' row: an output or a
+    sign-off request of its still open there no longer counts (status
+    'reset', kept for the record, as reset_to does; a request waiting for it
+    is woken), and a decision about it not shown yet is not shown any more.
+    The records of the steps it did stay as they are."""
     from backend import transcript  # transcript doesn't import steps; avoids a cycle at import
 
     before = current_step(session_id)
@@ -380,10 +411,15 @@ def skip_to(session_id: str, n: int, note: Optional[str] = None) -> dict[str, An
     if n <= before:
         return {"session_id": session_id, "from": before, "to": before}
     with db.conn() as c:
+        waiting = _pending_ids(c, session_id, before, n)
         c.execute(
-            "UPDATE step_checks SET status = 'skipped', decided_at = CURRENT_TIMESTAMP "
-            "WHERE session_id = ? AND step < ? AND status IN ('waiting', 'pending', 'returned')",
-            (session_id, n))
+            "UPDATE step_checks SET status = 'reset', delivered = 1, decided_at = CURRENT_TIMESTAMP "
+            "WHERE session_id = ? AND step >= ? AND step < ? AND status IN ('waiting', 'pending')",
+            (session_id, before, n))
+        c.execute(
+            "UPDATE step_checks SET delivered = 1 "
+            "WHERE session_id = ? AND step >= ? AND step < ? AND status = 'returned'",
+            (session_id, before, n))
         for k in range(before, n):
             c.execute(
                 "INSERT INTO step_checks (session_id, step, answer, status, delivered, decided_at, forced) "
@@ -393,9 +429,20 @@ def skip_to(session_id: str, n: int, note: Optional[str] = None) -> dict[str, An
         c.execute("UPDATE probes SET review_status = 'skipped' WHERE session_id = ? AND review_status = 'waiting'",
                   (session_id,))
         c.execute("UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
+    _wake(waiting)
     if note:
         transcript.record(session_id, "system", note, kind="reset", step=n, origin="server")
     return {"session_id": session_id, "from": before, "to": current_step(session_id)}
+
+
+def _pending_ids(c, session_id: str, start: int, end: Optional[int] = None) -> list[int]:
+    """Ids of the session's sign-off requests waiting for the teacher at steps start..end - 1."""
+    sql = "SELECT id FROM step_checks WHERE session_id = ? AND step >= ? AND status = 'pending'"
+    args: list[Any] = [session_id, start]
+    if end is not None:
+        sql += " AND step < ?"
+        args.append(end)
+    return [r["id"] for r in c.execute(sql, args)]
 
 
 def _has_open_rows(session_id: str, n: int) -> bool:

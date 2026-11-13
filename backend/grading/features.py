@@ -126,7 +126,10 @@ def extract(session_id: str) -> dict[str, Any]:
             raise KeyError(f"unknown session {session_id}")
         messages = c.execute(
             "SELECT role, body, answer_level, created_at FROM messages "
-            "WHERE session_id = ? ORDER BY created_at ASC, id ASC",
+            # A note the teacher sent the whole class (backend/broadcast.py) is
+            # no hint this student asked for, and no turn of theirs.
+            "WHERE session_id = ? AND COALESCE(answer_level, '') != 'class' "
+            "ORDER BY created_at ASC, id ASC",
             (session_id,),
         ).fetchall()
         reviews = c.execute(
@@ -136,8 +139,10 @@ def extract(session_id: str) -> dict[str, Any]:
         ).fetchall()
         probes = c.execute(
             "SELECT body, answer, auto_grade, override_grade, status FROM probes "
-            # Withdrawn by the teacher, or done again after a reset: no longer counts.
-            "WHERE session_id = ? AND status NOT IN ('withdrawn', 'reset') ORDER BY sent_at ASC",
+            # Withdrawn by the teacher, done again after a reset, or sent back by
+            # the teacher to be answered again (the new answer counts): no longer counts.
+            "WHERE session_id = ? AND status NOT IN ('withdrawn', 'reset') "
+            "AND COALESCE(review_status, '') != 'returned' ORDER BY sent_at ASC",
             (session_id,),
         ).fetchall()
         proctor = c.execute(

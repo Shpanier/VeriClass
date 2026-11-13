@@ -55,7 +55,10 @@ def session_report(exercise_id: Optional[str] = None, course_id: Optional[str] =
         messages = rows("SELECT session_id, role, body, answer_level, model, created_at FROM messages "
                         "WHERE session_id IN ({marks}) ORDER BY created_at, id")
         reviews = rows("SELECT * FROM pending_reviews WHERE session_id IN ({marks}) ORDER BY created_at")
-        checks = rows("SELECT * FROM step_checks WHERE session_id IN ({marks}) ORDER BY created_at")
+        # A 'skipped' row is no submission: the server writes it for a step the
+        # teacher moved the student past (steps.skip_to), at once.
+        checks = rows("SELECT * FROM step_checks WHERE session_id IN ({marks}) AND status != 'skipped' "
+                      "ORDER BY created_at")
         terminal = rows("SELECT session_id, line, allowed, reason, commands, exit_code, client_os "
                         "FROM terminal_commands WHERE session_id IN ({marks}) ORDER BY id")
 
