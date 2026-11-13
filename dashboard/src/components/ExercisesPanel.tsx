@@ -1,13 +1,31 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
+import { CloudUpload, CopyPlus, Download, PackageOpen, Pencil, Plus, RefreshCw, Search, UserCheck, UserX, X } from "lucide-react";
 import { api } from "../api";
 import type { ExerciseSummary, FullExercise, PackageResult } from "../types";
-import { useLang } from "../i18n";
-import { Button } from "./ui/Button";
-import { ExerciseFormModal } from "./ExerciseFormModal";
+import { useLang, type Translate } from "../i18n";
+import { useFeatures } from "../app/features";
+import { describeError } from "../lib/errors";
+import { Button, CopyButton, EmptyState, Input, Loading, Notice, useConfirm, useToast } from "./ui";
+import { ExerciseFormModal, errorLines } from "./ExerciseFormModal";
+import "../styles/exercises.css";
 
 type FormState =
   | { mode: "create"; initial?: undefined }
   | { mode: "edit" | "duplicate"; initial: FullExercise };
+
+/** What the last upload ended in: installed, or refused (here or by the server). */
+type Upload =
+  | { ok: true; name: string; result: PackageResult; replaced: boolean }
+  | { ok: false; name: string; errors: string[]; warnings: string[] };
+
+type CardAction = "edit" | "duplicate" | "export" | "active";
+type Titled = { title_en?: string | null; title_he?: string | null; exercise_id?: string };
+
+// The server refuses bigger zips (backend/packages.py, _ZIP_MAX).
+const MAX_ZIP_BYTES = 50_000_000;
+
+const cardId = (id: string) => `vc-exercise-${id}`;
+const looksLikeZip = (f: File) => /\.zip$/i.test(f.name) || /zip/i.test(f.type);
 
 /** The file's bytes as base64. */
 async function fileBase64(file: File): Promise<string> {
@@ -17,61 +35,149 @@ async function fileBase64(file: File): Promise<string> {
   return btoa(bin);
 }
 
-// The "Exercises" tab: lists every exercise (built-in YAML, dashboard-made, and
-// packages from the private data folder), lets the teacher pick which one is
-// active, create / edit / duplicate, upload a package zip, export, and reload
-// the packages from disk. New labs are written in Claude Code (the exercise
-// skill) and installed with the MCP tool push_exercise, or uploaded here.
+function stepsText(n: number, t: Translate) {
+  return n === 1 ? t("exOneStep") : t("exSteps", { n });
+}
+
+// The "Exercises" tab: lists every exercise (built-in samples, ones written in
+// the form, and packages from the private data folder), lets the lecturer pick
+// the one students without a course get, create / edit / duplicate, upload a
+// package zip, export, and reload the packages from disk. New labs are written
+// in Claude Code (the exercise skill) and installed with the MCP tool
+// push_exercise, or uploaded here.
 export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => void }) {
   const { t, lang } = useLang();
+  const { plugin } = useFeatures();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [exercises, setExercises] = useState<ExerciseSummary[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<{ id: string; what: CardAction } | null>(null);
   const [loadErrors, setLoadErrors] = useState<{ folder: string; error: string }[]>([]);
-  const [upload, setUpload] = useState<PackageResult | { error: string } | null>(null);
-  const [working, setWorking] = useState(false);
+  const [folder, setFolder] = useState<string | null>(null);
+  const [upload, setUpload] = useState<Upload | null>(null);
+  const [uploading, setUploading] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const [query, setQuery] = useState("");
+  const [flashId, setFlashId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const refresh = () => {
-    api.exercises().then(setExercises).catch(console.error);
-    api.exercisesStatus().then((s) => setLoadErrors(s.load_errors)).catch(console.error);
+  const titleOf = (ex: Titled) =>
+    (lang === "he" ? ex.title_he || ex.title_en : ex.title_en) || ex.exercise_id || "";
+
+  const refresh = async () => {
+    api.exercisesStatus()
+      .then((s) => { setLoadErrors(s.load_errors); setFolder(s.exercises_dir); })
+      .catch(() => { /* the list below reports a server that doesn't answer */ });
+    try {
+      setExercises(await api.exercises());
+      setListError(null);
+    } catch (e) {
+      setListError(describeError(e, t));
+    }
   };
 
   useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A card that was just installed or saved: bring it into view and light it up briefly.
+  useEffect(() => {
+    if (!flashId || !exercises?.some((ex) => ex.exercise_id === flashId)) return;
+    document.getElementById(cardId(flashId))?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    const timer = window.setTimeout(() => setFlashId(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [flashId, exercises]);
+
   const uploadZip = async (file: File) => {
-    setWorking(true);
+    if (uploading) return;
     setUpload(null);
+    if (!looksLikeZip(file)) {
+      setUpload({ ok: false, name: file.name, errors: [t("exUpNotZip", { name: file.name })], warnings: [] });
+      if (fileInput.current) fileInput.current.value = "";
+      return;
+    }
+    if (file.size > MAX_ZIP_BYTES) {
+      const size = (file.size / 1_000_000).toFixed(1);
+      setUpload({ ok: false, name: file.name, errors: [t("exUpTooBig", { name: file.name, size })], warnings: [] });
+      if (fileInput.current) fileInput.current.value = "";
+      return;
+    }
+    setUploading(file.name);
     try {
-      setUpload(await api.importExercise(await fileBase64(file)));
+      const zip = await fileBase64(file);
+      // First without replacing: an installed exercise with the same id is replaced only when the lecturer says so.
+      let result = await api.importExercise(zip, false);
+      let replaced = false;
+      if (!result.ok && result.errors.some((e) => e.includes("already installed"))) {
+        const id = result.summary.exercise_id ?? file.name;
+        const yes = await confirm({
+          title: t("exUpReplaceTitle"),
+          body: t("exUpReplaceBody", { id }),
+          confirmLabel: t("exUpReplace"),
+        });
+        if (!yes) {
+          toast.info(t("exUpKept", { id }));
+          return;
+        }
+        result = await api.importExercise(zip, true);
+        replaced = true;
+      }
+      if (result.ok) {
+        setUpload({ ok: true, name: file.name, result, replaced });
+        setQuery("");
+        setFlashId(result.summary.exercise_id ?? null);
+      } else {
+        setUpload({ ok: false, name: file.name, errors: result.errors, warnings: result.warnings });
+      }
       refresh();
       onActiveChanged();
     } catch (e) {
-      setUpload({ error: e instanceof Error ? e.message : String(e) });
+      setUpload({ ok: false, name: file.name, errors: errorLines(e, t), warnings: [] });
     } finally {
-      setWorking(false);
+      setUploading(null);
       if (fileInput.current) fileInput.current.value = "";
     }
   };
 
+  const onDragOver = (e: DragEvent<HTMLLabelElement>) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = uploading ? "none" : "copy";
+    setDragOver(true);
+  };
+  const onDragLeave = (e: DragEvent<HTMLLabelElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+  };
+  const onDrop = (e: DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && !uploading) uploadZip(file);
+  };
+
   const reload = async () => {
-    setWorking(true);
+    setReloading(true);
     try {
       const r = await api.reloadExercises();
       setExercises(r.exercises);
       setLoadErrors(r.load_errors);
+      setListError(null);
       onActiveChanged();
+      if (r.load_errors.length) toast.info(t("exReloadedErrors", { n: r.load_errors.length }));
+      else toast.success(t("exReloaded"));
     } catch (e) {
-      console.error(e);
+      toast.error(t("exReloadFailed"), e);
     } finally {
-      setWorking(false);
+      setReloading(false);
     }
   };
 
   const exportZip = async (id: string) => {
-    setBusyId(id);
+    setBusy({ id, what: "export" });
     try {
       const url = URL.createObjectURL(await api.exportExercise(id));
       const a = document.createElement("a");
@@ -79,158 +185,226 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
       a.download = `${id}.zip`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success(t("exExported", { file: `${id}.zip` }));
     } catch (e) {
-      console.error(e);
+      toast.error(t("exExportFailed"), e);
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   };
 
-  // makeActive=false switches the active exercise off (no exercise is active).
-  const setActive = async (id: string, makeActive = true) => {
-    setBusyId(id);
+  // makeActive=false switches it off: no exercise for students without a course.
+  const setActive = async (ex: ExerciseSummary, makeActive: boolean) => {
+    setBusy({ id: ex.exercise_id, what: "active" });
     try {
-      await (makeActive ? api.setActiveExercise(id) : api.disableActiveExercise());
+      await (makeActive ? api.setActiveExercise(ex.exercise_id) : api.disableActiveExercise());
+      toast.success(makeActive ? t("exActiveOn", { title: titleOf(ex) }) : t("exActiveOff"));
       await refresh();
       onActiveChanged(); // keep the monitor tab's header in sync
     } catch (e) {
-      console.error(e);
+      toast.error(t("exActiveFailed"), e);
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   };
 
   // Edit and Duplicate both need the FULL exercise (variants, params, tests),
-  // which the list endpoint doesn't carry — fetch it, then open the form.
+  // which the list endpoint doesn't carry: fetch it, then open the form.
   const openWith = async (id: string, mode: "edit" | "duplicate") => {
-    setBusyId(id);
+    setBusy({ id, what: mode });
     try {
       const full = await api.exercise(id);
       setForm({ mode, initial: full });
     } catch (e) {
-      console.error(e);
+      toast.error(t("exOpenFailed"), e);
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   };
 
-  const afterSave = () => {
+  const afterSave = (savedId?: string) => {
     setForm(null);
+    toast.success(t("exSaved"));
+    if (savedId) {
+      setQuery("");
+      setFlashId(savedId);
+    }
     refresh();
     onActiveChanged(); // an edit may have touched the active exercise
   };
 
+  const q = query.trim().toLowerCase();
+  const shown = !exercises ? [] : !q ? exercises : exercises.filter((ex) =>
+    [ex.exercise_id, ex.title_en, ex.title_he ?? ""].some((s) => s.toLowerCase().includes(q)));
+  const anyActive = !!exercises?.some((ex) => ex.is_active);
+
+  const dropCls = ["vc-exercises-drop", dragOver && !uploading ? "vc-exercises-drop--over" : "",
+    uploading ? "vc-exercises-drop--busy" : ""].filter(Boolean).join(" ");
+
   return (
     <section>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 8, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0 }}>{t("exercisesTitle")}</h2>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".zip,application/zip"
-            style={{ display: "none" }}
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadZip(f); }}
-          />
-          <Button disabled={working} title={t("uploadHint")} onClick={() => fileInput.current?.click()}>
-            {t("uploadExercise")}
-          </Button>
-          <Button disabled={working} onClick={reload}>{t("reloadExercises")}</Button>
-          <Button variant="primary" onClick={() => setForm({ mode: "create" })}>
+      <div className="vc-section__head">
+        <div className="u-grow">
+          <h2>{t("exercisesTitle")}</h2>
+          <p className="vc-exercises-lead">{t("exLead")}</p>
+        </div>
+        <div className="vc-section__actions">
+          <Button variant="primary" icon={<Plus />} onClick={() => setForm({ mode: "create" })}>
             {t("newExercise")}
           </Button>
         </div>
       </div>
 
-      {upload && (
-        <div style={{
-          border: `1px solid ${"error" in upload || !upload.ok ? "#fecaca" : "#bbf7d0"}`,
-          background: "error" in upload || !upload.ok ? "#fef2f2" : "#f0fdf4",
-          borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 13,
-        }} dir="auto">
-          {"error" in upload ? (
-            <span style={{ color: "#b91c1c" }}>{upload.error}</span>
-          ) : (
-            <>
-              <strong>{upload.ok ? t("uploadOk", { id: upload.summary.exercise_id ?? "" }) : t("uploadFailed")}</strong>
-              {upload.errors.map((e, i) => <div key={i} style={{ color: "#b91c1c" }}>✗ {e}</div>)}
-              {upload.warnings.length > 0 && (
-                <details style={{ marginTop: 4 }}>
-                  <summary style={{ cursor: "pointer" }}>{t("warningsLabel")} ({upload.warnings.length})</summary>
-                  {upload.warnings.map((w, i) => <div key={i} style={{ color: "#92400e" }}>• {w}</div>)}
-                </details>
+      {/* Uploading a package: the label is the drop zone and opens the file picker. */}
+      <div className="vc-card u-mb-16">
+        <label className={dropCls} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
+               aria-busy={uploading ? true : undefined}>
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".zip,application/zip"
+            className="u-sr"
+            disabled={!!uploading}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadZip(f); }}
+          />
+          <span className="vc-exercises-drop__icon" aria-hidden="true">
+            {uploading ? <span className="vc-spinner" /> : <CloudUpload />}
+          </span>
+          <span className="u-grow">
+            <span className="vc-exercises-drop__title" dir="auto">
+              {uploading ? t("exUpBusy", { name: uploading }) : (
+                <>{t("exUpDrop")} <span className="vc-exercises-drop__choose">{t("exUpChoose")}</span></>
               )}
-            </>
-          )}
-        </div>
-      )}
-      {loadErrors.length > 0 && (
-        <div style={{ border: "1px solid #fecaca", background: "#fef2f2", borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 13 }}>
-          <strong>{t("loadErrors")}</strong>
-          {loadErrors.map((e) => <div key={e.folder} style={{ color: "#b91c1c" }} dir="auto">✗ {e.error}</div>)}
-        </div>
-      )}
-
-      {exercises === null && <p style={{ color: "#6b7280" }}>{t("loading")}</p>}
-      {exercises?.length === 0 && <p style={{ color: "#6b7280" }}>{t("noExercises")}</p>}
-      {!!exercises?.length && !exercises.some((ex) => ex.is_active) && (
-        <p style={{ color: "#b45309", marginTop: 0 }}>{t("noActiveExercise")}</p>
-      )}
-
-      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
-        {exercises?.map((ex) => {
-          const title = lang === "he" ? ex.title_he ?? ex.title_en : ex.title_en;
-          const busy = busyId === ex.exercise_id;
-          return (
-            <div
-              key={ex.exercise_id}
-              style={{
-                border: `1px solid ${ex.is_active ? "#10b981" : "#e5e7eb"}`,
-                borderRadius: 10,
-                padding: 16,
-                background: "white",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-                <code style={{ fontSize: 13 }}>{ex.exercise_id}</code>
-                {ex.is_active && <Pill bg="#10b981">{t("activeBadge")}</Pill>}
-                {!!ex.os_errors && <Pill bg="#b45309">{t("osErrorsBadge", { n: ex.os_errors })}</Pill>}
-                <Pill bg={ex.source === "console" ? "#3b82f6" : ex.source === "package" ? "#0f766e" : "#6b7280"}>
-                  {ex.source === "console" ? t("sourceConsole") : ex.source === "package" ? t("sourcePackage")
-                    : ex.edited ? t("sourceYamlEdited") : t("sourceYaml")}
-                </Pill>
-              </div>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>{title}</div>
-              <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 12 }} title={ex.folder ?? undefined}>
-                {ex.steps ? t("stepsCount", { n: ex.steps }) : t("variantsCount", { n: ex.variant_count })}
-                {ex.bank_questions ? ` · ${t("bankCount", { n: ex.bank_questions })}` : ""}
-                {" · "}{modeLabel(ex.default_mode, t)}
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {ex.is_active ? (
-                  <Button variant="neutral" disabled={busy} onClick={() => setActive(ex.exercise_id, false)}>
-                    {busy ? t("saving") : t("disableActive")}
-                  </Button>
-                ) : (
-                  <Button variant="neutral" disabled={busy} onClick={() => setActive(ex.exercise_id)}>
-                    {busy ? t("saving") : t("setActive")}
-                  </Button>
-                )}
-                <Button disabled={busy} onClick={() => openWith(ex.exercise_id, "edit")}>
-                  {t("edit")}
-                </Button>
-                <Button disabled={busy} onClick={() => openWith(ex.exercise_id, "duplicate")}>
-                  {t("duplicate")}
-                </Button>
-                <Button disabled={busy} onClick={() => exportZip(ex.exercise_id)}>
-                  {t("exportExercise")}
-                </Button>
-              </div>
-            </div>
-          );
-        })}
+            </span>
+            <span className="vc-exercises-drop__text">{t("exUpWhat")}</span>
+          </span>
+        </label>
+        <details className="vc-exercises-details">
+          <summary>{t("exUpDetails")}</summary>
+          <dl className="vc-exercises-files">
+            <dt dir="ltr">exercise.yaml</dt><dd>{t("exUpPkgExercise")}</dd>
+            <dt dir="ltr">teacher.yaml</dt><dd>{t("exUpPkgTeacher")}</dd>
+            <dt dir="ltr">faq.yaml</dt><dd>{t("exUpPkgFaq")}</dd>
+            <dt dir="ltr">files/</dt><dd>{t("exUpPkgFiles")}</dd>
+          </dl>
+          <p className="u-muted">{t("exUpPkgZip")}</p>
+        </details>
       </div>
+
+      {upload && <UploadResult upload={upload} titleOf={titleOf} onDismiss={() => setUpload(null)} />}
+
+      {loadErrors.length > 0 && (
+        <Notice tone="danger" className="u-mb-16" title={t("exLoadErrorsTitle")}>
+          <p>{t("exLoadErrorsHint")}</p>
+          <ul className="vc-exercises-list u-mt-8">
+            {loadErrors.map((e) => (
+              <li key={e.folder}>
+                <code dir="ltr">{e.folder}</code>
+                <div dir="auto">{e.error}</div>
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      )}
+
+      {listError && (
+        <Notice tone="danger" className="u-mb-16" title={t("exLoadFailed")}
+                action={<Button size="sm" icon={<RefreshCw />} onClick={() => refresh()}>{t("exRetry")}</Button>}>
+          {listError}
+        </Notice>
+      )}
+      {exercises === null && !listError && <Loading />}
+      {exercises?.length === 0 && (
+        <EmptyState icon={<PackageOpen />} title={t("exEmptyTitle")}
+                    actions={<Button icon={<Plus />} onClick={() => setForm({ mode: "create" })}>{t("newExercise")}</Button>}>
+          {t("noExercises")}
+        </EmptyState>
+      )}
+
+      {!!exercises?.length && (
+        <>
+          <div className="u-row u-row--top u-wrap u-gap-12 u-mb-12">
+            <p className="u-grow u-sm u-muted">{t("exActiveHint")}</p>
+            {exercises.length > 6 && (
+              <div className="vc-exercises-search u-grow">
+                <Search aria-hidden="true" />
+                <Input type="search" small value={query} onChange={(e) => setQuery(e.target.value)}
+                       placeholder={t("exSearchPlaceholder")} aria-label={t("exSearch")} />
+              </div>
+            )}
+          </div>
+          {!anyActive && <Notice tone="warning" className="u-mb-12">{t("noActiveExercise")}</Notice>}
+          {shown.length === 0 && <p className="u-muted" dir="auto">{t("exNoMatch", { q: query.trim() })}</p>}
+
+          <div className="vc-grid vc-grid--wide">
+            {shown.map((ex) => {
+              const mine = busy?.id === ex.exercise_id ? busy.what : null;
+              const cls = ["vc-card", "vc-exercises-card", ex.is_active ? "vc-exercises-card--active" : "",
+                flashId === ex.exercise_id ? "vc-exercises-card--flash" : ""].filter(Boolean).join(" ");
+              const meta = [
+                ex.steps ? stepsText(ex.steps, t) : ex.variant_count > 1 ? t("exVersions", { n: ex.variant_count }) : "",
+                ex.bank_questions ? t("exBank", { n: ex.bank_questions }) : "",
+                t("exTutor", { mode: ex.default_mode === "coding_partner" ? t("codingPartner") : t("mentor") }),
+              ].filter(Boolean);
+              return (
+                <article key={ex.exercise_id} id={cardId(ex.exercise_id)} className={cls}
+                         aria-labelledby={`${cardId(ex.exercise_id)}-title`}>
+                  <div>
+                    <h3 className="vc-exercises-card__title" id={`${cardId(ex.exercise_id)}-title`} dir="auto">
+                      {titleOf(ex)}
+                    </h3>
+                    <div className="vc-exercises-card__id" dir="ltr">{ex.exercise_id}</div>
+                  </div>
+                  <div className="u-row u-wrap u-gap-6">
+                    {ex.is_active && (
+                      <span className="vc-badge vc-badge--success"><UserCheck aria-hidden="true" />{t("activeBadge")}</span>
+                    )}
+                    <span className="vc-badge" title={ex.folder ?? undefined}>
+                      {ex.source === "console" ? t("sourceConsole") : ex.source === "package" ? t("sourcePackage")
+                        : ex.edited ? t("sourceYamlEdited") : t("sourceYaml")}
+                    </span>
+                    {plugin && !!ex.os_errors && (
+                      <span className="vc-badge vc-badge--warning">{t("osErrorsBadge", { n: ex.os_errors })}</span>
+                    )}
+                  </div>
+                  <div className="vc-exercises-card__meta" dir="auto">{meta.join(" · ")}</div>
+                  <div className="vc-exercises-card__actions">
+                    <Button variant="brand-soft" size="sm" icon={<Pencil />} busy={mine === "edit"} disabled={!!mine}
+                            onClick={() => openWith(ex.exercise_id, "edit")}>
+                      {t("edit")}
+                    </Button>
+                    <Button variant="quiet" size="sm" icon={<CopyPlus />} busy={mine === "duplicate"} disabled={!!mine}
+                            onClick={() => openWith(ex.exercise_id, "duplicate")}>
+                      {t("duplicate")}
+                    </Button>
+                    <Button variant="quiet" size="sm" icon={<Download />} busy={mine === "export"} disabled={!!mine}
+                            onClick={() => exportZip(ex.exercise_id)}>
+                      {t("exportExercise")}
+                    </Button>
+                  </div>
+                  <div className="vc-exercises-card__foot">
+                    <Button variant="quiet" size="sm" icon={ex.is_active ? <UserX /> : <UserCheck />}
+                            busy={mine === "active"} disabled={!!mine}
+                            onClick={() => setActive(ex, !ex.is_active)}>
+                      {ex.is_active ? t("disableActive") : t("setActive")}
+                    </Button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      <section className="vc-card vc-card--flat vc-card--muted u-mt-24" aria-labelledby="vc-exercises-folder-title">
+        <h3 className="u-md u-mb-4" id="vc-exercises-folder-title">{t("exFolderTitle")}</h3>
+        <p className="u-sm u-soft u-mb-8">{t("exFolderHint")}</p>
+        <div className="vc-exercises-folder">
+          {folder && <code className="vc-exercises-path" dir="ltr">{folder}</code>}
+          {folder && <CopyButton text={folder} size="sm" />}
+          <Button size="sm" icon={<RefreshCw />} busy={reloading} onClick={reload}>{t("reloadExercises")}</Button>
+        </div>
+      </section>
 
       {form && (
         <ExerciseFormModal
@@ -244,23 +418,50 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
   );
 }
 
-function modeLabel(mode: string, t: ReturnType<typeof useLang>["t"]) {
-  return mode === "coding_partner" ? t("codingPartner") : t("mentor");
-}
+/** What the last upload ended in: what was installed and what to do next, or why it wasn't. */
+function UploadResult({ upload, titleOf, onDismiss }: {
+  upload: Upload;
+  titleOf: (s: Titled) => string;
+  onDismiss: () => void;
+}) {
+  const { t } = useLang();
+  const dismiss = (
+    <Button variant="quiet" size="sm" iconOnly icon={<X />} aria-label={t("exUpDismiss")} onClick={onDismiss} />
+  );
+  const warnings = upload.ok ? upload.result.warnings : upload.warnings;
+  const notes = warnings.length > 0 && (
+    <details className="u-mt-8">
+      <summary className="u-bold">{t("exUpNotes", { n: warnings.length })}</summary>
+      <ul className="vc-exercises-list u-mt-4">
+        {warnings.map((w, i) => <li key={i} dir="auto">{w}</li>)}
+      </ul>
+    </details>
+  );
 
-function Pill({ bg, children }: { bg: string; children: React.ReactNode }) {
+  if (!upload.ok) {
+    return (
+      <Notice tone="danger" className="u-mb-16" action={dismiss}
+              title={<span dir="auto">{t("exUpFailed", { name: upload.name })}</span>}>
+        <ul className="vc-exercises-list">
+          {upload.errors.map((e, i) => <li key={i} dir="auto">{e}</li>)}
+        </ul>
+        {notes}
+      </Notice>
+    );
+  }
+
+  // The server's summary also carries the Hebrew title (not in the shared type).
+  const s = upload.result.summary as PackageResult["summary"] & { title_he?: string | null };
+  const counts = [stepsText(s.steps ?? 0, t), t("exBank", { n: s.bank_questions ?? 0 })].join(" · ");
   return (
-    <span
-      style={{
-        background: bg,
-        color: "white",
-        fontSize: 11,
-        fontWeight: 600,
-        padding: "2px 8px",
-        borderRadius: 999,
-      }}
-    >
-      {children}
-    </span>
+    <Notice tone="success" className="u-mb-16" action={dismiss}
+            title={<span dir="auto">{t(upload.replaced ? "exUpReplaced" : "exUpInstalled", { title: titleOf(s) })}</span>}>
+      <div className="u-row u-wrap u-gap-8">
+        {s.exercise_id && <code dir="ltr">{s.exercise_id}</code>}
+        <span>{counts}</span>
+      </div>
+      <p className="u-mt-4 u-bold">{t("exUpNext")}</p>
+      {notes}
+    </Notice>
   );
 }

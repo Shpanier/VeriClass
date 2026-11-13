@@ -1,0 +1,118 @@
+/* The Exercises tab and the exercise form. Built from tokens.css; logical
+   properties throughout so Hebrew flips by itself. */
+
+/* ---------- the tab ---------- */
+.vc-exercises-lead { max-width: 720px; margin-top: 2px; color: var(--c-text-3); font-size: var(--fs-sm); }
+
+/* The upload area: a drop zone that is also the file picker's label. */
+.vc-exercises-drop {
+  position: relative; display: flex; align-items: center; gap: 14px; padding: 18px 20px;
+  border: 2px dashed var(--c-border-strong); border-radius: var(--radius-lg);
+  background: var(--c-surface-2); cursor: pointer;
+  transition: border-color 0.12s, background-color 0.12s, box-shadow 0.12s;
+}
+.vc-exercises-drop:hover, .vc-exercises-drop--over { border-color: var(--c-brand); background: var(--c-brand-soft); }
+.vc-exercises-drop:focus-within { box-shadow: var(--ring); }
+.vc-exercises-drop--busy { cursor: progress; border-style: solid; border-color: var(--c-brand-border); background: var(--c-brand-soft); }
+.vc-exercises-drop__icon {
+  display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 50%;
+  background: var(--c-surface); color: var(--c-brand); border: 1px solid var(--c-brand-border);
+}
+.vc-exercises-drop__icon > svg { width: 22px; height: 22px; }
+.vc-exercises-drop__title { display: block; font-size: var(--fs-md); font-weight: 650; color: var(--c-text); }
+.vc-exercises-drop__choose { color: var(--c-brand); text-decoration: underline; text-underline-offset: 2px; }
+.vc-exercises-drop__text { display: block; margin-top: 2px; color: var(--c-text-3); font-size: var(--fs-sm); }
+
+.vc-exercises-details { margin-top: 10px; font-size: var(--fs-sm); color: var(--c-text-2); }
+.vc-exercises-details > summary { font-weight: 600; color: var(--c-brand); width: max-content; max-width: 100%; }
+.vc-exercises-files { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 10px 0 6px; }
+.vc-exercises-files > dt { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--c-text); padding-top: 1px; }
+.vc-exercises-files > dd { margin: 0; min-width: 0; }
+
+.vc-exercises-list { margin: 0; padding-inline-start: 18px; }
+.vc-exercises-list > li + li { margin-top: 3px; }
+
+.vc-exercises-search { position: relative; max-width: 360px; }
+.vc-exercises-search > svg {
+  position: absolute; inset-inline-start: 10px; top: 50%; width: 16px; height: 16px;
+  transform: translateY(-50%); color: var(--c-text-3); pointer-events: none;
+}
+.vc-exercises-search > .vc-input { padding-inline-start: 34px; }
+
+/* One exercise in the list. */
+.vc-exercises-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; scroll-margin: 90px; }
+.vc-exercises-card--active { border-color: var(--c-success-border); border-inline-start: 3px solid var(--c-success); }
+@keyframes vc-exercises-flash {
+  0%, 60% { box-shadow: 0 0 0 3px var(--c-brand-border); border-color: var(--c-brand); }
+  100% { box-shadow: var(--shadow-sm); }
+}
+.vc-exercises-card--flash { animation: vc-exercises-flash 2.4s ease-out; }
+.vc-exercises-card__title { font-size: var(--fs-lg); font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.vc-exercises-card__id { color: var(--c-text-3); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.vc-exercises-card__meta { color: var(--c-text-3); font-size: var(--fs-sm); }
+.vc-exercises-card__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 4px; }
+.vc-exercises-card__foot { padding-top: 8px; border-top: 1px solid var(--c-border); }
+.vc-exercises-card__foot > .vc-btn { white-space: normal; text-align: start; }
+
+/* Where the exercise files live, and reloading them. */
+.vc-exercises-folder { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.vc-exercises-path {
+  flex: 1 1 260px; min-width: 0; padding: 6px 10px; border-radius: var(--radius-sm);
+  background: var(--c-surface-3); color: var(--c-text); font-family: var(--font-mono); font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- the form ---------- */
+.vc-exercises-sec { border: 1px solid var(--c-border); border-radius: var(--radius); margin-bottom: 12px; background: var(--c-surface); }
+.vc-exercises-sec__toggle {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px;
+  border: 0; border-radius: var(--radius); background: none; text-align: start; color: var(--c-text);
+}
+.vc-exercises-sec__toggle:hover { background: var(--c-surface-2); }
+.vc-exercises-sec__toggle > svg { flex: none; width: 18px; height: 18px; color: var(--c-text-3); transition: transform 0.15s; }
+[dir="rtl"] .vc-exercises-sec__toggle[aria-expanded="false"] > svg { transform: scaleX(-1); }
+.vc-exercises-sec__title { font-size: var(--fs-md); font-weight: 700; }
+.vc-exercises-sec__hint { display: block; color: var(--c-text-3); font-size: var(--fs-xs); font-weight: 400; }
+.vc-exercises-sec__body { padding: 14px; border-top: 1px solid var(--c-border); }
+
+.vc-exercises-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 12px; }
+.vc-exercises-row { display: grid; grid-template-columns: minmax(0, 1fr) 160px; gap: 0 12px; align-items: start; }
+
+.vc-exercises-check-row { display: flex; align-items: flex-start; gap: 8px; }
+.vc-exercises-check-row > .vc-field { flex: 1; min-width: 0; margin-bottom: 8px; }
+.vc-exercises-check-row > .vc-btn { margin-top: 23px; }
+
+.vc-exercises-step { padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface-2); }
+.vc-exercises-step__head { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; }
+.vc-exercises-step__n { font-weight: 700; color: var(--c-text-2); margin-inline-end: auto; }
+.vc-exercises-sub { margin: 4px 0 8px; font-size: var(--fs-sm); font-weight: 650; color: var(--c-text-2); }
+
+.vc-exercises-stepnav { display: flex; flex-wrap: wrap; }
+.vc-exercises-preview {
+  padding: 12px 14px; margin-bottom: 12px; border: 1px solid var(--c-border); border-radius: var(--radius);
+  background: var(--c-surface-2);
+}
+.vc-exercises-preview__label { margin-bottom: 6px; color: var(--c-text-3); font-size: var(--fs-xs); font-weight: 600; }
+.vc-exercises-preview__text {
+  padding: 10px 12px; border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface);
+  font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto;
+}
+
+.vc-exercises-refs { display: grid; gap: 4px; margin: 0 0 10px; padding: 0; list-style: none; font-size: var(--fs-sm); }
+.vc-exercises-refs > li { display: flex; align-items: center; gap: 6px; }
+.vc-exercises-refs > li > svg { flex: none; width: 16px; height: 16px; }
+
+.vc-exercises-tests { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); margin-bottom: 8px; }
+.vc-exercises-tests th { padding-block: 0 4px; padding-inline: 0 8px; text-align: start; font-size: var(--fs-xs); font-weight: 650; color: var(--c-text-3); }
+.vc-exercises-tests td { padding-block: 0 6px; padding-inline: 0 8px; vertical-align: middle; }
+.vc-exercises-tests td:last-child { width: 1px; white-space: nowrap; }
+
+.vc-exercises-names { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 6px 8px; align-items: center; margin-bottom: 8px; }
+.vc-exercises-names__head { font-size: var(--fs-xs); font-weight: 650; color: var(--c-text-3); }
+
+.vc-exercises-attention {
+  display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none;
+  color: var(--c-danger); font-size: var(--fs-sm); font-weight: 600;
+}
+button.vc-exercises-attention:hover { text-decoration: underline; }
+.vc-exercises-attention > svg { width: 16px; height: 16px; flex: none; }

@@ -54,8 +54,12 @@ export function Modal({
     const before = document.activeElement as HTMLElement | null;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    // Focus the first field, else the dialog itself.
-    const first = panel.current?.querySelector<HTMLElement>("[autofocus], input, textarea, select");
+    // Focus the first text field of the content (not a tick box, not the
+    // footer's controls), else the dialog itself.
+    const body = panel.current?.querySelector<HTMLElement>(".vc-modal__body") ?? panel.current;
+    const first = panel.current?.querySelector<HTMLElement>("[autofocus]")
+      ?? body?.querySelector<HTMLElement>(
+        'input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]), textarea, select');
     (first ?? panel.current)?.focus({ preventScroll: true });
 
     const onKey = (e: KeyboardEvent) => {

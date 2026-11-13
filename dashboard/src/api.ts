@@ -236,10 +236,12 @@ export const api = {
     }),
   disableActiveExercise: () =>
     j<{ exercise_id: null }>("/api/exercises/active", { method: "DELETE" }),
-  importExercise: (zipBase64: string) =>
+  /** `replace: false` refuses an exercise whose id is already installed (ok: false, with
+   *  the reason in errors), so the dashboard can ask before overwriting. */
+  importExercise: (zipBase64: string, replace = true) =>
     j<PackageResult>("/api/exercises/import", {
       method: "POST",
-      body: JSON.stringify({ zip_base64: zipBase64, replace: true }),
+      body: JSON.stringify({ zip_base64: zipBase64, replace }),
     }),
   reloadExercises: () =>
     j<{ exercises: ExerciseSummary[]; load_errors: { folder: string; error: string }[] }>(

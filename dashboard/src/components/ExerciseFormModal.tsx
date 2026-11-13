@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { AlertCircle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, ChevronRight, Eye, EyeOff, Plus, Trash2, XCircle } from "lucide-react";
 import { api } from "../api";
-import type { AnswerInChat, FullExercise, NewExercise, ParamLabel, QuizReview, StepDraft } from "../types";
+import type { AnswerInChat, FullExercise, NewExercise, ParamLabel, QuizReview, StepDraft, Variant } from "../types";
 import { scanBriefRefs, substituteBrief, type BriefRef } from "../params";
-import { useLang } from "../i18n";
-import { Modal } from "./ui/Modal";
-import { Button } from "./ui/Button";
-import { Field, labelStyle } from "./ui/Field";
+import { useLang, type StringKey, type Translate } from "../i18n";
+import { useFeatures } from "../app/features";
+import { ApiError, describeError } from "../lib/errors";
+import { Button, Field, FormField, Input, Modal, Notice, Select, Switch, Textarea, useConfirm } from "./ui";
+import "../styles/exercises.css";
 
-// Local editing shape. `paramsText` is the raw JSON the teacher types; it's
-// parsed (and validated) only on submit so intermediate keystrokes are allowed.
+// Local editing shape. `paramsText` is the raw JSON the lecturer types; it's
+// parsed (and validated) only on save so intermediate keystrokes are allowed.
 interface TestRow {
   input: string;
   expected_output: string;
@@ -25,6 +27,7 @@ interface ParamLabelDraft {
 }
 
 type Mode = "create" | "edit" | "duplicate";
+type OutputInChat = "confirm" | "accept" | "ask" | "off";
 
 // A step as typed: numbers stay text until saved.
 interface StepRow {
@@ -48,6 +51,16 @@ const blankStep = (): StepRow => ({
 
 const blankVariant = (): VariantDraft => ({ id: "", paramsText: "{}", tests: [{ input: "", expected_output: "" }] });
 
+// The one variant of an exercise in which every student gets the same thing
+// (the server needs at least one, and stores this one as a variant named "default").
+const SAME_FOR_ALL: Variant = { id: "default", params: {}, test_inputs: [] };
+
+/** Exactly one variant named "default", without values or tests: every student gets the same exercise. */
+function isSameForAll(vs: Variant[]): boolean {
+  return vs.length === 1 && vs[0].id === "default" && Object.keys(vs[0].params ?? {}).length === 0
+    && (vs[0].test_inputs ?? []).length === 0;
+}
+
 // Build initial form state from a source exercise (edit/duplicate), or empty.
 function initVariants(src?: FullExercise): VariantDraft[] {
   if (!src || src.variants.length === 0) return [blankVariant()];
@@ -56,6 +69,75 @@ function initVariants(src?: FullExercise): VariantDraft[] {
     paramsText: JSON.stringify(v.params ?? {}, null, 2),
     tests: v.test_inputs.length ? v.test_inputs.map((t) => ({ ...t })) : [{ input: "", expected_output: "" }],
   }));
+}
+
+const variantHasContent = (v: VariantDraft) =>
+  !!v.id.trim() || !["", "{}"].includes(v.paramsText.replace(/\s/g, ""))
+  || v.tests.some((r) => r.input.trim() || r.expected_output.trim());
+const stepHasContent = (s: StepRow) =>
+  [s.title, s.text, s.minutes, s.expected, s.questions, s.expected_output].some((x) => x.trim()) || s.checks.length > 0;
+
+/** A server error as lines: a 422 lists one problem per field ("field: msg; field: msg"). */
+export function errorLines(err: unknown, t: Translate): string[] {
+  const text = describeError(err, t);
+  return err instanceof ApiError && err.status === 422 ? text.split("; ").filter(Boolean) : [text];
+}
+
+type SectionKey = "basics" | "tutor" | "steps" | "chat" | "advanced";
+/** Problems found on save, by field: "id", "titleEn", "brief", "variants", "v0.id", "s2.text", "s2.c0", … */
+type Errors = Record<string, string>;
+
+function sectionOf(field: string): SectionKey {
+  if (/^s\d/.test(field)) return "steps";
+  if (field === "variants" || /^v\d/.test(field)) return "advanced";
+  return "basics";
+}
+
+const OUTPUT_HINT: Record<OutputInChat, StringKey> = {
+  confirm: "exfOutConfirmHint", accept: "exfOutAcceptHint", ask: "exfOutAskHint", off: "exfOutOffHint",
+};
+const ANSWER_HINT: Record<AnswerInChat, StringKey> = {
+  detect: "exfAnsDetectHint", confirm: "exfAnsConfirmHint", answer: "exfAnsAnswerHint",
+};
+const QUIZ_HINT: Record<QuizReview, StringKey> = {
+  partial: "exfQuizPartialHint", zero: "exfQuizZeroHint", off: "exfQuizOffHint",
+};
+
+/** One titled part of the form that folds away. */
+function Section({ title, hint, open, onToggle, problems, extra, children }: {
+  title: ReactNode;
+  hint?: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  /** Fields in this part that need attention. */
+  problems: number;
+  /** A badge next to the title (how many steps, versions). */
+  extra?: ReactNode;
+  children: ReactNode;
+}) {
+  const { t } = useLang();
+  const bodyId = useId();
+  return (
+    <section className="vc-exercises-sec">
+      <h3>
+        <button type="button" className="vc-exercises-sec__toggle" aria-expanded={open} aria-controls={bodyId}
+                onClick={onToggle}>
+          {open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+          <span className="u-grow">
+            <span className="vc-exercises-sec__title">{title}</span>
+            {hint && <span className="vc-exercises-sec__hint">{hint}</span>}
+          </span>
+          {extra}
+          {problems > 0 && (
+            <span className="vc-badge vc-badge--danger">
+              {problems === 1 ? t("exfAttentionOne") : t("exfAttention", { n: problems })}
+            </span>
+          )}
+        </button>
+      </h3>
+      <div id={bodyId} className="vc-exercises-sec__body" hidden={!open}>{children}</div>
+    </section>
+  );
 }
 
 export function ExerciseFormModal({
@@ -67,9 +149,12 @@ export function ExerciseFormModal({
   mode: Mode;
   initial?: FullExercise;
   onClose: () => void;
-  onSaved: () => void;
+  /** After a save, with the saved exercise's id. */
+  onSaved: (exerciseId?: string) => void;
 }) {
   const { t } = useLang();
+  const { plugin } = useFeatures();
+  const confirm = useConfirm();
   const idLocked = mode === "edit";
   const [exerciseId, setExerciseId] = useState(
     mode === "duplicate" && initial ? `${initial.exercise_id}-copy` : initial?.exercise_id ?? ""
@@ -83,29 +168,46 @@ export function ExerciseFormModal({
   const [paramLabels, setParamLabels] = useState<ParamLabelDraft[]>(
     () => (initial?.param_labels ?? []).map((p) => ({ key: p.key, label: p.label ?? "", note: p.note ?? "" }))
   );
-  const [variants, setVariants] = useState<VariantDraft[]>(() => initVariants(initial));
-  // No variants (everyone gets the same exercise): the section stays folded until asked for.
-  const [showVariants, setShowVariants] = useState(!initial?.implicit_variant);
+  // A new exercise, one the server keeps without variants, or one whose only
+  // variant is the plain "default": every student gets the same exercise.
+  const [sameForAll, setSameForAll] = useState(
+    () => !initial || !!initial.implicit_variant || isSameForAll(initial.variants));
+  const [variants, setVariants] = useState<VariantDraft[]>(
+    () => (!initial || initial.implicit_variant || isSameForAll(initial.variants) ? [blankVariant()] : initVariants(initial)));
   const [steps, setSteps] = useState<StepRow[]>(() => (initial?.steps ?? []).map(toRow));
   const [tutorNotes, setTutorNotes] = useState(initial?.tutor_notes ?? "");
   const [language, setLanguage] = useState(initial?.language ?? "");
   const [courseName, setCourseName] = useState(initial?.course_name ?? "");
+  // The IDE plugin's fields: shown only with the plugin, sent unchanged either way.
   const [checkCommand, setCheckCommand] = useState(initial?.check_command ?? "");
+  const [blockedHint, setBlockedHint] = useState(
+    typeof initial?.terminal?.blocked_hint === "string" ? (initial.terminal.blocked_hint as string) : "");
   const [chatHistory, setChatHistory] = useState(initial?.chat_history ?? true);
-  const [outputInChat, setOutputInChat] = useState<"confirm" | "accept" | "ask" | "off">(initial?.output_in_chat ?? "confirm");
+  const [outputInChat, setOutputInChat] = useState<OutputInChat>(initial?.output_in_chat ?? "confirm");
   const [answerInChat, setAnswerInChat] = useState<AnswerInChat>(initial?.answer_in_chat ?? "detect");
   const [quizReview, setQuizReview] = useState<QuizReview>(initial?.quiz_review ?? "partial");
   const [resumeMinutes, setResumeMinutes] = useState(
     initial?.resume_minutes_set && initial.resume_minutes != null ? String(initial.resume_minutes) : "");
-  const [blockedHint, setBlockedHint] = useState(
-    typeof initial?.terminal?.blocked_hint === "string" ? (initial.terminal.blocked_hint as string) : "");
   const [preview, setPreview] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const [open, setOpen] = useState<Record<SectionKey, boolean>>(
+    { basics: true, tutor: true, steps: true, chat: false, advanced: false });
+  const toggle = (k: SectionKey) => setOpen((o) => ({ ...o, [k]: !o[k] }));
+  // Anything typed or changed: closing asks first, so a stray click can't lose the exercise.
+  const [dirty, setDirty] = useState(false);
+  const touch = () => setDirty(true);
+  // After the first Save, problems are shown (and updated) next to their fields.
+  const [attempted, setAttempted] = useState(false);
+  const [serverError, setServerError] = useState<string[] | null>(null);
+  const [jump, setJump] = useState<{ field: string } | null>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const serverNotice = useRef<HTMLDivElement>(null);
 
   const patchStep = (i: number, patch: Partial<StepRow>) =>
     setSteps((xs) => xs.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
-  const moveStep = (i: number, d: -1 | 1) =>
+  const moveStep = (i: number, d: -1 | 1) => {
+    touch();
     setSteps((xs) => {
       const j = i + d;
       if (j < 0 || j >= xs.length) return xs;
@@ -113,12 +215,37 @@ export function ExerciseFormModal({
       [next[i], next[j]] = [next[j], next[i]];
       return next;
     });
+  };
+  const removeStep = async (i: number) => {
+    if (stepHasContent(steps[i]) && !(await confirm({
+      title: t("exfRemoveStepTitle", { n: i + 1 }), body: t("exfRemoveBody"),
+      confirmLabel: t("exfRemoveStepConfirm"), danger: true,
+    }))) return;
+    touch();
+    setSteps((xs) => xs.filter((_, idx) => idx !== i));
+  };
 
   const patchVariant = (i: number, patch: Partial<VariantDraft>) =>
     setVariants((vs) => vs.map((v, idx) => (idx === i ? { ...v, ...patch } : v)));
+  const removeVariant = async (i: number) => {
+    const v = variants[i];
+    if (variantHasContent(v) && !(await confirm({
+      title: t("exfRemoveVersionTitle", { id: v.id.trim() || String(i + 1) }), body: t("exfRemoveBody"),
+      confirmLabel: t("exfRemoveVersion"), danger: true,
+    }))) return;
+    touch();
+    setVariants((vs) => vs.filter((_, idx) => idx !== i));
+  };
+  const changeSameForAll = async (on: boolean) => {
+    if (on && variants.some(variantHasContent) && !(await confirm({
+      title: t("exfSameAskTitle"), body: t("exfSameAskBody"), confirmLabel: t("exfSameAsk"),
+    }))) return;
+    touch();
+    setSameForAll(on);
+  };
 
-  // "Apply": validate the brief's @-refs against the authored param labels and
-  // preview the brief with the first variant's real values filled in.
+  // "Check and preview": validate the brief's @-refs against the authored param
+  // labels and preview the brief with the first variant's real values filled in.
   const [briefCheck, setBriefCheck] = useState<
     { refs: BriefRef[]; preview: string; sampleId: string | null } | null
   >(null);
@@ -129,6 +256,7 @@ export function ExerciseFormModal({
       .map((p) => ({ key: p.key.trim(), label: p.label.trim() || null, note: p.note.trim() || null }));
 
   const sampleVariant = (): { id: string; params: Record<string, unknown> } | null => {
+    if (sameForAll) return null;
     for (const v of variants) {
       try {
         const params = v.paramsText.trim() ? JSON.parse(v.paramsText) : {};
@@ -151,461 +279,530 @@ export function ExerciseFormModal({
     });
   };
 
-  const build = (): NewExercise | { error: string } => {
+  // Every problem at once (by field), and the payload when there are none.
+  const build = (): { errors: Errors; payload: NewExercise | null } => {
+    const errors: Errors = {};
     const id = exerciseId.trim();
-    if (!id) return { error: t("errIdRequired") };
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) return { error: t("errIdSlug") };
-    if (!titleEn.trim()) return { error: t("errTitleRequired") };
-    if (!briefMd.trim()) return { error: t("errBriefRequired") };
-    if (variants.length === 0) return { error: t("errNoVariants") };
+    if (!id) errors.id = t("errIdRequired");
+    else if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) errors.id = t("errIdSlug");
+    if (!titleEn.trim()) errors.titleEn = t("errTitleRequired");
+    if (!briefMd.trim()) errors.brief = t("errBriefRequired");
 
-    const seen = new Set<string>();
-    const built: NewExercise["variants"] = [];
-    // An exercise without variants keeps its implicit one unless variants were opened.
-    const variantDrafts = !showVariants && initial?.implicit_variant ? [] : variants;
-    if (variantDrafts.length === 0 && initial?.implicit_variant) built.push(...initial.variants);
-    for (const v of variantDrafts) {
-      const vid = v.id.trim();
-      if (!vid) return { error: t("errVariantId") };
-      if (seen.has(vid)) return { error: t("errDupVariant") };
-      seen.add(vid);
-      let params: Record<string, unknown>;
-      try {
-        params = v.paramsText.trim() ? JSON.parse(v.paramsText) : {};
-      } catch {
-        return { error: t("errParamsJson", { id: vid }) };
-      }
-      built.push({
-        id: vid,
-        params,
-        test_inputs: v.tests
-          .filter((r) => r.input.trim() !== "" || r.expected_output.trim() !== "")
-          .map((r) => ({ input: r.input, expected_output: r.expected_output })),
-      });
-    }
-
-    const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
     const builtSteps: StepDraft[] = [];
     for (const [i, st] of steps.entries()) {
       if (!st.title.trim() && !st.text.trim()) continue;
-      if (!st.title.trim() || !st.text.trim()) return { error: `${t("previewStep", { n: i + 1 })}: ${t("fldStepTitle")} / ${t("fldStepText")}` };
+      if (!st.title.trim()) errors[`s${i}.title`] = t("exfErrStepTitle");
       const minutes = st.minutes.trim() ? Number(st.minutes) : null;
+      if (minutes !== null && Number.isNaN(minutes)) errors[`s${i}.minutes`] = t("exfErrNumber");
+      if (!st.text.trim()) errors[`s${i}.text`] = t("exfErrStepText");
       const questions = st.questions.trim() ? Math.round(Number(st.questions)) : null;
-      if ((minutes !== null && Number.isNaN(minutes)) || (questions !== null && Number.isNaN(questions))) {
-        return { error: `${t("previewStep", { n: i + 1 })}: ${t("fldStepMinutes")} / ${t("fldStepQuestions")}` };
-      }
-      const checks = st.checks.filter((c) => c.match.trim());
-      for (const c of checks) {
+      if (questions !== null && Number.isNaN(questions)) errors[`s${i}.questions`] = t("exfErrNumber");
+      for (const [ci, c] of st.checks.entries()) {
+        if (!c.match.trim()) continue;
         try {
           new RegExp(c.match);
         } catch {
-          return { error: `${t("previewStep", { n: i + 1 })}: ${t("fldStepCheckBroken", { p: c.match })}` };
+          errors[`s${i}.c${ci}`] = t("exfErrRegex");
         }
       }
+      const checks = st.checks.filter((c) => c.match.trim());
       builtSteps.push({
         title: st.title.trim(), text: st.text, minutes, expected: st.expected, questions,
         expected_output: st.expected_output,
         expect_output: checks.map((c) => ({ match: c.match, hint: c.hint.trim() || null })),
       });
     }
+
+    const built: Variant[] = [];
+    if (sameForAll) {
+      // A lab the server already keeps without variants sends its own back, as before;
+      // anything else gets the single "default" variant.
+      built.push(...(initial?.implicit_variant ? initial.variants : [{ ...SAME_FOR_ALL }]));
+    } else {
+      if (variants.length === 0) errors.variants = t("errNoVariants");
+      const seen = new Set<string>();
+      for (const [i, v] of variants.entries()) {
+        const vid = v.id.trim();
+        if (!vid) errors[`v${i}.id`] = t("errVariantId");
+        else if (seen.has(vid)) errors[`v${i}.id`] = t("errDupVariant");
+        seen.add(vid);
+        let params: Record<string, unknown> = {};
+        try {
+          params = v.paramsText.trim() ? JSON.parse(v.paramsText) : {};
+        } catch {
+          errors[`v${i}.params`] = t("errParamsJson", { id: vid });
+        }
+        built.push({
+          id: vid,
+          params,
+          test_inputs: v.tests
+            .filter((r) => r.input.trim() !== "" || r.expected_output.trim() !== "")
+            .map((r) => ({ input: r.input, expected_output: r.expected_output })),
+        });
+      }
+    }
+    if (Object.keys(errors).length) return { errors, payload: null };
+
+    const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
     const terminal = initial?.terminal || blockedHint.trim()
       ? { ...(initial?.terminal ?? {}), blocked_hint: blockedHint.trim() || undefined }
       : null;
     return {
-      exercise_id: id,
-      title_en: titleEn.trim(),
-      title_he: titleHe.trim() || undefined,
-      default_mode: defaultMode,
-      brief_md: briefMd,
-      variants: built,
-      welcome_suggestions: lines(welcome),
-      required_error_strings: lines(errorStrings),
-      param_labels: paramLabels
-        .filter((p) => p.key.trim() !== "")
-        .map((p) => ({ key: p.key.trim(), label: p.label.trim() || undefined, note: p.note.trim() || undefined })),
-      terminal,
-      tutor_notes: tutorNotes,
-      language: language.trim() || undefined,
-      course_name: courseName.trim() || undefined,
-      check_command: checkCommand.trim() || undefined,
-      chat_history: chatHistory,
-      output_in_chat: outputInChat,
-      answer_in_chat: answerInChat,
-      quiz_review: quizReview,
-      resume_minutes: resumeMinutes.trim() !== "" ? Math.max(0, Math.round(Number(resumeMinutes))) : undefined,
-      steps: builtSteps.length || initial?.steps?.length ? builtSteps : undefined,
+      errors,
+      payload: {
+        exercise_id: id,
+        title_en: titleEn.trim(),
+        title_he: titleHe.trim() || undefined,
+        default_mode: defaultMode,
+        brief_md: briefMd,
+        variants: built,
+        welcome_suggestions: lines(welcome),
+        required_error_strings: lines(errorStrings),
+        param_labels: paramLabels
+          .filter((p) => p.key.trim() !== "")
+          .map((p) => ({ key: p.key.trim(), label: p.label.trim() || undefined, note: p.note.trim() || undefined })),
+        terminal,
+        tutor_notes: tutorNotes,
+        language: language.trim() || undefined,
+        course_name: courseName.trim() || undefined,
+        check_command: checkCommand.trim() || undefined,
+        chat_history: chatHistory,
+        output_in_chat: outputInChat,
+        answer_in_chat: answerInChat,
+        quiz_review: quizReview,
+        resume_minutes: resumeMinutes.trim() !== "" ? Math.max(0, Math.round(Number(resumeMinutes))) : undefined,
+        steps: builtSteps.length || initial?.steps?.length ? builtSteps : undefined,
+      },
     };
   };
 
+  const errors: Errors = attempted ? build().errors : {};
+  const problemFields = Object.keys(errors);
+  const problemsIn = (s: SectionKey) => problemFields.filter((f) => sectionOf(f) === s).length;
+  const invalid = (f: string) => (errors[f] ? true : undefined);
+
+  // Open the part of the form that holds a field, then bring the field into view.
+  const goTo = (field: string) => {
+    setOpen((o) => ({ ...o, [sectionOf(field)]: true }));
+    setJump({ field });
+  };
+  useEffect(() => {
+    if (!jump) return;
+    const spot = body.current?.querySelector<HTMLElement>(`[data-field="${jump.field}"]`);
+    if (!spot) return;
+    spot.scrollIntoView({ behavior: "smooth", block: "center" });
+    spot.querySelector<HTMLElement>("input:not([disabled]), textarea, select")?.focus({ preventScroll: true });
+  }, [jump]);
+  useEffect(() => {
+    if (serverError) serverNotice.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [serverError]);
+
   const save = async () => {
-    const result = build();
-    if ("error" in result) {
-      setError(result.error);
+    setAttempted(true);
+    const { errors: found, payload } = build();
+    const first = Object.keys(found)[0];
+    if (first || !payload) {
+      if (first) goTo(first);
       return;
     }
-    setError(null);
+    setServerError(null);
     setSaving(true);
     try {
-      if (mode === "edit" && initial) {
-        await api.updateExercise(initial.exercise_id, result);
-      } else {
-        await api.createExercise(result);
-      }
-      onSaved();
+      const saved = mode === "edit" && initial
+        ? await api.updateExercise(initial.exercise_id, payload)
+        : await api.createExercise(payload);
+      onSaved(saved?.exercise_id ?? payload.exercise_id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setServerError(errorLines(e, t));
     } finally {
       setSaving(false);
     }
   };
 
-  const title =
-    mode === "edit" ? t("editExerciseTitle") : mode === "duplicate" ? t("duplicateExerciseTitle") : t("newExerciseTitle");
-
-  const field: React.CSSProperties = {
-    width: "100%", padding: "5px 7px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 13,
-    boxSizing: "border-box", fontFamily: "inherit",
+  const cancel = async () => {
+    if (dirty && !(await confirm({
+      title: t("discardAsk"), confirmLabel: t("discard"), cancelLabel: t("keepEditing"), danger: true,
+    }))) return;
+    onClose();
   };
 
+  const title =
+    mode === "edit" ? t("editExerciseTitle") : mode === "duplicate" ? t("duplicateExerciseTitle") : t("newExerciseTitle");
+  const stepCount = steps.length === 1 ? t("exOneStep") : t("exSteps", { n: steps.length });
+  const shownStep = preview !== null && steps[preview] ? preview : null;
+
+  const footer = (
+    <>
+      {problemFields.length > 0 ? (
+        <button type="button" className="vc-exercises-attention" onClick={() => goTo(problemFields[0])}>
+          <AlertCircle aria-hidden="true" />
+          {problemFields.length === 1 ? t("exfAttentionOne") : t("exfAttention", { n: problemFields.length })}
+        </button>
+      ) : serverError ? (
+        <span className="vc-exercises-attention"><AlertCircle aria-hidden="true" />{t("exfNotSaved")}</span>
+      ) : null}
+      <span className="u-push" />
+      <Button onClick={cancel}>{t("cancel")}</Button>
+      <Button variant="primary" busy={saving} onClick={save}>{saving ? t("saving") : t("saveExercise")}</Button>
+    </>
+  );
+
   return (
-    <Modal onClose={onClose} width={860}>
-      <h3 style={{ marginTop: 0 }}>{title}</h3>
-      {mode === "edit" && initial?.source === "package" && initial.folder && (
-        <div style={{ fontSize: 12, color: "#115e59", background: "#f0fdfa", border: "1px solid #99f6e4",
-                      borderRadius: 6, padding: "6px 10px", marginBottom: 12 }} dir="auto">
-          {t("savedToFolder", { f: initial.folder })}
-        </div>
-      )}
-
-      {idLocked ? (
-        <label style={{ display: "block", marginBottom: 12 }}>
-          <span style={labelStyle}>{t("fldExerciseId")}</span>
-          <input
-            value={exerciseId}
-            disabled
-            style={{ width: "100%", padding: "6px 8px", border: "1px solid #e5e7eb", borderRadius: 6, fontSize: 13, fontFamily: "ui-monospace, monospace", background: "#f9fafb", color: "#6b7280", boxSizing: "border-box" }}
-          />
-        </label>
-      ) : (
-        <Field label={t("fldExerciseId")} value={exerciseId} onChange={setExerciseId} placeholder="my-task-1" monospace />
-      )}
-
-      <Field label={t("fldTitleEn")} value={titleEn} onChange={setTitleEn} />
-      <Field label={t("fldTitleHe")} value={titleHe} onChange={setTitleHe} />
-
-      <label style={{ display: "block", marginBottom: 12 }}>
-        <span style={labelStyle}>{t("fldDefaultMode")}</span>
-        <select
-          value={defaultMode}
-          onChange={(e) => setDefaultMode(e.target.value as "mentor" | "coding_partner")}
-          style={{ padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}
-        >
-          <option value="mentor">{t("mentor")}</option>
-          <option value="coding_partner">{t("codingPartner")}</option>
-        </select>
-      </label>
-
-      <Field label={t("fldBrief")} value={briefMd} onChange={setBriefMd} textarea minHeight={120} />
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: -6, marginBottom: 12 }}>
-        <Button onClick={runBriefCheck}>{t("applyBrief")}</Button>
-        <span style={{ fontSize: 12, color: "#6b7280" }} dir="auto">{t("applyBriefHint")}</span>
-      </div>
-      {briefCheck && (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, marginBottom: 12, background: "#f9fafb" }}>
-          {briefCheck.refs.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#6b7280" }} dir="auto">{t("applyNoRefs")}</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 10 }}>
-              {briefCheck.refs.map((r) => (
-                <div key={r.ref} style={{ fontSize: 13, color: r.ok ? "#065f46" : "#b91c1c" }} dir="auto">
-                  {r.ok ? "✓" : "✗"} <code>@{r.ref}</code>
-                  {r.ok ? ` → ${r.label}` : ` — ${t("applyUnknownRef")}`}
-                </div>
-              ))}
-            </div>
-          )}
-          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }} dir="auto">
-            {briefCheck.sampleId
-              ? t("applyPreviewFor", { id: briefCheck.sampleId })
-              : t("applyPreviewNoVariant")}
-          </div>
-          <div style={{ fontSize: 13, whiteSpace: "pre-wrap", background: "white", border: "1px solid #e5e7eb", borderRadius: 6, padding: 10 }} dir="auto">
-            {briefCheck.preview}
-          </div>
-        </div>
-      )}
-      <Field label={t("fldWelcome")} value={welcome} onChange={setWelcome} textarea minHeight={60} />
-      <Field label={t("fldTutorNotes")} value={tutorNotes} onChange={setTutorNotes} textarea minHeight={80} />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
-        <Field label={t("fldLanguage")} value={language} onChange={setLanguage} monospace />
-        <Field label={t("fldCourseName")} value={courseName} onChange={setCourseName} />
-        <Field label={t("fldCheckCommand")} value={checkCommand} onChange={setCheckCommand} monospace />
-      </div>
-      <Field label={t("fldBlockedHint")} value={blockedHint} onChange={setBlockedHint} />
-      <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", margin: "4px 0 10px", fontSize: 13 }}>
-        <label style={{ display: "flex", gap: 6, alignItems: "center" }} title={t("fldChatHistoryHint")}>
-          <input type="checkbox" checked={chatHistory} onChange={(e) => setChatHistory(e.target.checked)} />
-          {t("fldChatHistory")}
-        </label>
-        <label style={{ display: "flex", gap: 6, alignItems: "center" }} title={t("fldResumeHint")}>
-          {t("fldResumeMinutes")}
-          <input value={resumeMinutes} onChange={(e) => setResumeMinutes(e.target.value.replace(/[^0-9]/g, ""))}
-                 placeholder={initial?.resume_minutes != null ? String(initial.resume_minutes) : "30"}
-                 style={{ width: 70, padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4 }} />
-        </label>
-        <span style={{ color: "#6b7280", fontSize: 12 }} dir="auto">{t("fldResumeHint")}</span>
-      </div>
-      <label style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px", fontSize: 13 }}>
-        {t("fldOutputInChat")}
-        <select value={outputInChat} onChange={(e) => setOutputInChat(e.target.value as "confirm" | "accept" | "ask" | "off")}
-                style={{ padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4 }}>
-          <option value="confirm">{t("fldOutputConfirm")}</option>
-          <option value="accept">{t("fldOutputAccept")}</option>
-          <option value="ask">{t("fldOutputAsk")}</option>
-          <option value="off">{t("fldOutputOff")}</option>
-        </select>
-      </label>
-      <label style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px", fontSize: 13 }}>
-        {t("fldAnswerInChat")}
-        <select value={answerInChat} onChange={(e) => setAnswerInChat(e.target.value as AnswerInChat)}
-                style={{ padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4 }}>
-          <option value="detect">{t("fldAnswerDetect")}</option>
-          <option value="confirm">{t("fldAnswerConfirm")}</option>
-          <option value="answer">{t("fldAnswerAnswer")}</option>
-        </select>
-      </label>
-      <label style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", margin: "0 0 10px", fontSize: 13 }}>
-        {t("fldQuizReview")}
-        <select value={quizReview} onChange={(e) => setQuizReview(e.target.value as QuizReview)}
-                style={{ padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4 }}>
-          <option value="partial">{t("fldQuizReviewPartial")}</option>
-          <option value="zero">{t("fldQuizReviewZero")}</option>
-          <option value="off">{t("fldQuizReviewOff")}</option>
-        </select>
-      </label>
-
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: 14 }}>{t("stepsSection")}</strong>
-        <span style={{ display: "flex", gap: 6 }}>
-          {steps.length > 0 && (
-            <Button onClick={() => setPreview(preview === null ? 0 : null)}>{t("previewStudent")}</Button>
-          )}
-          <Button onClick={() => setSteps((xs) => [...xs, blankStep()])}>{t("addStep")}</Button>
-        </span>
-      </div>
-      {preview !== null && steps[preview] && (
-        <div style={{ border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 8, padding: 12, marginBottom: 10 }}>
-          <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
-            {steps.map((_, i) => (
-              <button key={i} onClick={() => setPreview(i)} style={{
-                padding: "2px 8px", borderRadius: 4, fontSize: 12, cursor: "pointer",
-                border: "1px solid #d97706", background: i === preview ? "#d97706" : "white",
-                color: i === preview ? "white" : "#92400e",
-              }}>{t("previewStep", { n: i + 1 })}</button>
-            ))}
-          </div>
-          <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }} dir="auto">
-            <strong>{`Step ${preview + 1} of ${steps.length}: ${steps[preview].title}`}</strong>
-            {"\n\n"}{steps[preview].text}
-          </div>
-        </div>
-      )}
-      {steps.map((st, i) => (
-        <div key={i} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, marginBottom: 8 }}>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
-            <strong style={{ fontSize: 12, color: "#6b7280", minWidth: 24 }}>{i + 1}</strong>
-            <input value={st.title} dir="auto" placeholder={t("fldStepTitle")} aria-label={t("fldStepTitle")}
-                   onChange={(e) => patchStep(i, { title: e.target.value })} style={{ ...field, flex: 1 }} />
-            <input value={st.minutes} placeholder={t("fldStepMinutes")} aria-label={t("fldStepMinutes")}
-                   onChange={(e) => patchStep(i, { minutes: e.target.value })} style={{ ...field, width: 70, flex: "none" }} />
-            <button onClick={() => moveStep(i, -1)} aria-label={t("moveUp")} style={iconBtn}>↑</button>
-            <button onClick={() => moveStep(i, 1)} aria-label={t("moveDown")} style={iconBtn}>↓</button>
-            <button onClick={() => setSteps((xs) => xs.filter((_, idx) => idx !== i))} aria-label={t("remove")}
-                    style={{ ...iconBtn, color: "#b91c1c" }}>✕</button>
-          </div>
-          <textarea value={st.text} dir="auto" placeholder={t("fldStepText")} aria-label={t("fldStepText")}
-                    onChange={(e) => patchStep(i, { text: e.target.value })}
-                    style={{ ...field, minHeight: 110, fontFamily: "ui-monospace, monospace", fontSize: 12 }} />
-          <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "flex-start" }}>
-            <textarea value={st.expected} dir="auto" placeholder={t("fldStepExpected")} aria-label={t("fldStepExpected")}
-                      onChange={(e) => patchStep(i, { expected: e.target.value })}
-                      style={{ ...field, minHeight: 70, background: "#fef3c7", flex: 1 }} />
-            <input value={st.questions} placeholder={t("fldStepQuestions")} aria-label={t("fldStepQuestions")}
-                   title={t("fldStepQuestions")}
-                   onChange={(e) => patchStep(i, { questions: e.target.value })} style={{ ...field, width: 90, flex: "none" }} />
-          </div>
-          <textarea value={st.expected_output} dir="ltr" placeholder={t("fldStepExpectedOutput")}
-                    aria-label={t("fldStepExpectedOutput")} title={t("fldStepExpectedOutput")}
-                    onChange={(e) => patchStep(i, { expected_output: e.target.value })}
-                    style={{ ...field, minHeight: 60, marginTop: 6, background: "#ecfdf5",
-                             fontFamily: "ui-monospace, monospace", fontSize: 12 }} />
-          <div style={{ marginTop: 6 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{t("fldStepChecks")}</span>
-              <span style={{ fontSize: 11, color: "#6b7280", flex: 1 }} dir="auto">{t("fldStepChecksHint")}</span>
-              <button onClick={() => patchStep(i, { checks: [...st.checks, { match: "", hint: "" }] })}
-                      style={{ ...iconBtn, width: "auto", padding: "0 8px" }}>+ {t("fldStepAddCheck")}</button>
-            </div>
-            {st.checks.map((c, ci) => (
-              <div key={ci} style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                <input value={c.match} dir="ltr" placeholder={t("fldStepCheckMatch")} aria-label={t("fldStepCheckMatch")}
-                       onChange={(e) => patchStep(i, { checks: st.checks.map((x, k) => (k === ci ? { ...x, match: e.target.value } : x)) })}
-                       style={{ ...field, flex: 1, fontFamily: "ui-monospace, monospace", fontSize: 12 }} />
-                <input value={c.hint} dir="auto" placeholder={t("fldStepCheckHint")} aria-label={t("fldStepCheckHint")}
-                       onChange={(e) => patchStep(i, { checks: st.checks.map((x, k) => (k === ci ? { ...x, hint: e.target.value } : x)) })}
-                       style={{ ...field, flex: 1 }} />
-                <button onClick={() => patchStep(i, { checks: st.checks.filter((_, k) => k !== ci) })}
-                        aria-label={t("remove")} style={{ ...iconBtn, color: "#b91c1c" }}>✕</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-
-      <Field label={t("fldErrorStrings")} value={errorStrings} onChange={setErrorStrings} textarea monospace minHeight={60} />
-
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, marginBottom: 4 }}>
-        <strong style={{ fontSize: 14 }}>{t("paramLabelsSection")}</strong>
-        <Button onClick={() => setParamLabels((ps) => [...ps, { key: "", label: "", note: "" }])}>
-          {t("addParamLabel")}
-        </Button>
-      </div>
-      <p style={{ fontSize: 12, color: "#6b7280", marginTop: 0, marginBottom: 8 }} dir="auto">{t("paramLabelsHint")}</p>
-      {paramLabels.map((pl, i) => (
-        <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
-          <input
-            value={pl.key}
-            dir="auto"
-            placeholder={t("fldParamKey")}
-            onChange={(e) => setParamLabels((ps) => ps.map((p, idx) => (idx === i ? { ...p, key: e.target.value } : p)))}
-            style={{ flex: "0 0 28%", padding: "5px 7px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 13, fontFamily: "ui-monospace, monospace", boxSizing: "border-box" }}
-          />
-          <input
-            value={pl.label}
-            dir="auto"
-            placeholder={t("fldParamLabel")}
-            onChange={(e) => setParamLabels((ps) => ps.map((p, idx) => (idx === i ? { ...p, label: e.target.value } : p)))}
-            style={{ flex: "0 0 32%", padding: "5px 7px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 13, boxSizing: "border-box" }}
-          />
-          <input
-            value={pl.note}
-            dir="auto"
-            placeholder={t("fldParamNote")}
-            onChange={(e) => setParamLabels((ps) => ps.map((p, idx) => (idx === i ? { ...p, note: e.target.value } : p)))}
-            style={{ flex: 1, padding: "5px 7px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 13, boxSizing: "border-box" }}
-          />
-          <button
-            onClick={() => setParamLabels((ps) => ps.filter((_, idx) => idx !== i))}
-            style={{ border: "none", background: "none", color: "#b91c1c", cursor: "pointer", fontSize: 12 }}
-            aria-label={t("remove")}
-          >
-            ✕
-          </button>
-        </div>
-      ))}
-
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, marginBottom: 8 }}>
-        <strong style={{ fontSize: 14 }}>{t("variantsSection")}</strong>
-        {showVariants ? (
-          <Button onClick={() => setVariants((vs) => [...vs, blankVariant()])}>{t("addVariant")}</Button>
-        ) : (
-          <Button onClick={() => { setShowVariants(true); setVariants([blankVariant()]); }}>{t("addVariantsBtn")}</Button>
+    <Modal
+      size="lg" title={title} dirty={dirty} onClose={onClose} footer={footer}
+      subtitle={initial && <span className="vc-mono" dir="ltr">{initial.exercise_id}</span>}
+    >
+      {/* Every field's change bubbles here: from then on, closing asks first. */}
+      <div ref={body} onChange={touch}>
+        <Notice className="u-mb-12">{t("exfFormOnly")}</Notice>
+        {mode === "edit" && initial?.source === "package" && initial.folder && (
+          <p className="u-sm u-soft u-mb-12">{t("exfSavesTo")} <code dir="ltr">{initial.folder}</code></p>
         )}
-      </div>
-      {!showVariants && (
-        <p style={{ fontSize: 12, color: "#6b7280", marginTop: 0 }} dir="auto">{t("noVariantsNote")}</p>
-      )}
+        {serverError && (
+          <div ref={serverNotice} className="u-mb-12">
+            <Notice tone="danger" title={t("exfNotSaved")}>
+              {serverError.length === 1 ? <span dir="auto">{serverError[0]}</span> : (
+                <ul className="vc-exercises-list">
+                  {serverError.map((line, i) => <li key={i} dir="auto">{line}</li>)}
+                </ul>
+              )}
+            </Notice>
+          </div>
+        )}
 
-      {showVariants && variants.map((v, i) => (
-        <div key={i} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 12, marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <Field label={t("fldVariantId")} value={v.id} onChange={(val) => patchVariant(i, { id: val })} placeholder="V-A1" monospace />
-            </div>
-            {variants.length > 1 && (
-              <button
-                onClick={() => setVariants((vs) => vs.filter((_, idx) => idx !== i))}
-                style={{ marginInlineStart: 8, marginTop: 22, border: "none", background: "none", color: "#b91c1c", cursor: "pointer", fontSize: 12 }}
-              >
-                {t("removeVariant")}
-              </button>
+        {/* ---- Basics ---- */}
+        <Section title={t("exfSecBasics")} open={open.basics} onToggle={() => toggle("basics")}
+                 problems={problemsIn("basics")}>
+          <div data-field="id">
+            {idLocked ? (
+              <FormField label={t("fldExerciseId")} hint={t("exfIdLocked")}>
+                <Input value={exerciseId} disabled mono dir="ltr" />
+              </FormField>
+            ) : (
+              <Field label={t("fldExerciseId")} value={exerciseId} onChange={setExerciseId} placeholder="my-task-1"
+                     monospace required hint={t("exfIdHint")} error={errors.id} />
             )}
           </div>
+          <div className="vc-exercises-grid">
+            <div data-field="titleEn">
+              <Field label={t("fldTitleEn")} value={titleEn} onChange={setTitleEn} required error={errors.titleEn}
+                     autoFocus={idLocked} />
+            </div>
+            <Field label={t("fldTitleHe")} value={titleHe} onChange={setTitleHe} />
+          </div>
+          <div data-field="brief">
+            <Field label={t("exfBrief")} value={briefMd} onChange={setBriefMd} textarea minHeight={140}
+                   required hint={t("exfBriefHint")} error={errors.brief} />
+          </div>
+          <div className="u-row u-wrap u-gap-8">
+            <Button size="sm" icon={<Eye />} onClick={runBriefCheck}>{t("applyBrief")}</Button>
+            <span className="u-xs u-muted">{t("applyBriefHint")}</span>
+          </div>
+          {briefCheck && (
+            <div className="vc-exercises-preview u-mt-12">
+              {briefCheck.refs.length === 0 ? (
+                <p className="u-sm u-muted u-mb-8">{t("applyNoRefs")}</p>
+              ) : (
+                <ul className="vc-exercises-refs">
+                  {briefCheck.refs.map((r) => (
+                    <li key={r.ref} className={r.ok ? "u-success" : "u-danger"}>
+                      {r.ok ? <CheckCircle2 aria-hidden="true" /> : <XCircle aria-hidden="true" />}
+                      <code dir="ltr">@{r.ref}</code>
+                      <span className="u-soft" dir="auto">{r.ok ? r.label : t("applyUnknownRef")}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="vc-exercises-preview__label">
+                {sameForAll ? t("exfPreviewAsWritten")
+                  : briefCheck.sampleId ? t("applyPreviewFor", { id: briefCheck.sampleId }) : t("applyPreviewNoVariant")}
+              </div>
+              <div className="vc-exercises-preview__text" dir="auto">{briefCheck.preview}</div>
+            </div>
+          )}
+        </Section>
 
-          <Field
-            label={t("fldParams")}
-            value={v.paramsText}
-            onChange={(val) => patchVariant(i, { paramsText: val })}
-            textarea
-            monospace
-            minHeight={50}
-            placeholder='{"max_number": 100, "operators": ["+","-"], "allow_parens": false}'
-          />
+        {/* ---- Tutor ---- */}
+        <Section title={t("exfSecTutor")} hint={t("exfSecTutorHint")} open={open.tutor}
+                 onToggle={() => toggle("tutor")} problems={0}>
+          <div className="vc-exercises-grid">
+            <FormField label={t("fldDefaultMode")}>
+              <Select value={defaultMode} onChange={(e) => setDefaultMode(e.target.value as "mentor" | "coding_partner")}>
+                <option value="mentor">{t("mentor")}</option>
+                <option value="coding_partner">{t("codingPartner")}</option>
+              </Select>
+            </FormField>
+            <Field label={t("fldCourseName")} value={courseName} onChange={setCourseName} />
+          </div>
+          <p className="vc-hint u-mb-12">{t("exfModeHint")}</p>
+          <Field label={t("fldTutorNotes")} value={tutorNotes} onChange={setTutorNotes} textarea minHeight={90}
+                 hint={t("exfTutorNotesHint")} />
+          <Field label={t("fldWelcome")} value={welcome} onChange={setWelcome} textarea hint={t("exfWelcomeHint")} />
+        </Section>
 
-          <span style={labelStyle}>{t("testInputs")}</span>
-          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 6 }}>
-            <thead>
-              <tr style={{ color: "#6b7280", fontSize: 12, textAlign: "start" }}>
-                <th style={{ textAlign: "start", fontWeight: 500 }}>{t("thInput")}</th>
-                <th style={{ textAlign: "start", fontWeight: 500 }}>{t("thExpected")}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {v.tests.map((row, ri) => (
-                <tr key={ri}>
-                  <td style={{ paddingBottom: 4, paddingInlineEnd: 6 }}>
-                    <input
-                      value={row.input}
-                      dir="auto"
-                      onChange={(e) => patchVariant(i, { tests: v.tests.map((r, idx) => (idx === ri ? { ...r, input: e.target.value } : r)) })}
-                      style={{ width: "100%", padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 13, fontFamily: "ui-monospace, monospace", boxSizing: "border-box" }}
-                    />
-                  </td>
-                  <td style={{ paddingBottom: 4, paddingInlineEnd: 6 }}>
-                    <input
-                      value={row.expected_output}
-                      dir="auto"
-                      onChange={(e) => patchVariant(i, { tests: v.tests.map((r, idx) => (idx === ri ? { ...r, expected_output: e.target.value } : r)) })}
-                      style={{ width: "100%", padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 13, fontFamily: "ui-monospace, monospace", boxSizing: "border-box" }}
-                    />
-                  </td>
-                  <td style={{ width: 1, whiteSpace: "nowrap" }}>
-                    <button
-                      onClick={() => patchVariant(i, { tests: v.tests.filter((_, idx) => idx !== ri) })}
-                      style={{ border: "none", background: "none", color: "#b91c1c", cursor: "pointer", fontSize: 12 }}
-                      aria-label={t("remove")}
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
+        {/* ---- Steps ---- */}
+        <Section title={t("exfSecSteps")} hint={t("exfSecStepsHint")} open={open.steps}
+                 onToggle={() => toggle("steps")} problems={problemsIn("steps")}
+                 extra={steps.length > 0 ? <span className="vc-badge">{stepCount}</span> : undefined}>
+          {steps.length === 0 && <p className="u-sm u-muted u-mb-12">{t("exfNoSteps")}</p>}
+          {steps.length > 0 && (
+            <div className="u-mb-12">
+              <Button size="sm" variant="quiet" icon={shownStep === null ? <Eye /> : <EyeOff />}
+                      onClick={() => setPreview(shownStep === null ? 0 : null)}>
+                {shownStep === null ? t("exfPreviewSteps") : t("exfHidePreview")}
+              </Button>
+            </div>
+          )}
+          {shownStep !== null && (
+            <div className="vc-exercises-preview">
+              <div className="vc-exercises-preview__label">{t("exfPreviewAsWritten")}</div>
+              <div className="vc-segmented vc-exercises-stepnav u-mb-8" role="group" aria-label={t("exfSecSteps")}>
+                {steps.map((_, i) => (
+                  <button key={i} type="button" aria-pressed={i === shownStep} aria-label={t("previewStep", { n: i + 1 })}
+                          onClick={() => setPreview(i)}>
+                    {i + 1}
+                  </button>
+                ))}
+              </div>
+              <div className="vc-exercises-preview__text" dir="auto">
+                <strong>{t("exfStepOf", { n: shownStep + 1, total: steps.length, title: steps[shownStep].title })}</strong>
+                {"\n\n"}{steps[shownStep].text}
+              </div>
+            </div>
+          )}
+
+          {steps.map((st, i) => (
+            <div key={i} className="vc-exercises-step">
+              <div className="vc-exercises-step__head">
+                <span className="vc-exercises-step__n">{t("previewStep", { n: i + 1 })}</span>
+                <Button variant="quiet" size="sm" iconOnly icon={<ArrowUp />} aria-label={t("moveUp")}
+                        disabled={i === 0} onClick={() => moveStep(i, -1)} />
+                <Button variant="quiet" size="sm" iconOnly icon={<ArrowDown />} aria-label={t("moveDown")}
+                        disabled={i === steps.length - 1} onClick={() => moveStep(i, 1)} />
+                <Button variant="quiet" size="sm" iconOnly icon={<Trash2 />} aria-label={t("exfRemoveStep", { n: i + 1 })}
+                        onClick={() => removeStep(i)} />
+              </div>
+              <div className="vc-exercises-row">
+                <div data-field={`s${i}.title`}>
+                  <FormField label={t("fldStepTitle")} required error={errors[`s${i}.title`]}>
+                    <Input value={st.title} aria-invalid={invalid(`s${i}.title`)}
+                           onChange={(e) => patchStep(i, { title: e.target.value })} />
+                  </FormField>
+                </div>
+                <div data-field={`s${i}.minutes`}>
+                  <FormField label={t("exfStepMinutes")} error={errors[`s${i}.minutes`]}>
+                    <Input value={st.minutes} inputMode="decimal" dir="ltr" aria-invalid={invalid(`s${i}.minutes`)}
+                           onChange={(e) => patchStep(i, { minutes: e.target.value })} />
+                  </FormField>
+                </div>
+              </div>
+              <div data-field={`s${i}.text`}>
+                <FormField label={t("fldStepText")} required error={errors[`s${i}.text`]}>
+                  <Textarea value={st.text} mono rows={6} aria-invalid={invalid(`s${i}.text`)}
+                            onChange={(e) => patchStep(i, { text: e.target.value })} />
+                </FormField>
+              </div>
+              <div className="vc-exercises-row">
+                <FormField label={t("fldStepExpected")}>
+                  <Textarea value={st.expected} rows={3} onChange={(e) => patchStep(i, { expected: e.target.value })} />
+                </FormField>
+                <div data-field={`s${i}.questions`}>
+                  <FormField label={t("exfStepQuestions")} hint={t("exfStepQuestionsHint")} error={errors[`s${i}.questions`]}>
+                    <Input value={st.questions} inputMode="numeric" dir="ltr" aria-invalid={invalid(`s${i}.questions`)}
+                           onChange={(e) => patchStep(i, { questions: e.target.value })} />
+                  </FormField>
+                </div>
+              </div>
+              <FormField label={t("exfStepOutput")} hint={t("exfStepOutputHint")}>
+                <Textarea value={st.expected_output} mono dir="ltr" rows={3}
+                          onChange={(e) => patchStep(i, { expected_output: e.target.value })} />
+              </FormField>
+
+              <div className="vc-exercises-sub">{t("fldStepChecks")}</div>
+              <p className="vc-hint u-mb-8">{t("fldStepChecksHint")}</p>
+              {st.checks.map((c, ci) => (
+                <div key={ci} className="vc-exercises-check-row" data-field={`s${i}.c${ci}`}>
+                  <FormField label={t("exfCheckMatch")} error={errors[`s${i}.c${ci}`]}>
+                    <Input value={c.match} mono dir="ltr" placeholder="Python 3" aria-invalid={invalid(`s${i}.c${ci}`)}
+                           onChange={(e) => patchStep(i, { checks: st.checks.map((x, k) => (k === ci ? { ...x, match: e.target.value } : x)) })} />
+                  </FormField>
+                  <FormField label={t("fldStepCheckHint")}>
+                    <Input value={c.hint}
+                           onChange={(e) => patchStep(i, { checks: st.checks.map((x, k) => (k === ci ? { ...x, hint: e.target.value } : x)) })} />
+                  </FormField>
+                  <Button variant="quiet" size="sm" iconOnly icon={<Trash2 />} aria-label={t("exfRemoveCheck")}
+                          onClick={() => { touch(); patchStep(i, { checks: st.checks.filter((_, k) => k !== ci) }); }} />
+                </div>
               ))}
-            </tbody>
-          </table>
-          <Button onClick={() => patchVariant(i, { tests: [...v.tests, { input: "", expected_output: "" }] })}>
-            {t("addTestInput")}
+              <Button size="sm" variant="quiet" icon={<Plus />}
+                      onClick={() => { touch(); patchStep(i, { checks: [...st.checks, { match: "", hint: "" }] }); }}>
+                {t("exfAddCheck")}
+              </Button>
+            </div>
+          ))}
+          <Button size="sm" icon={<Plus />} onClick={() => { touch(); setSteps((xs) => [...xs, blankStep()]); }}>
+            {t("addStep")}
           </Button>
-        </div>
-      ))}
+        </Section>
 
-      {error && (
-        <div style={{ color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "8px 12px", marginTop: 8, fontSize: 13 }} dir="auto">
-          {error}
-        </div>
-      )}
+        {/* ---- Chat behaviour ---- */}
+        <Section title={t("exfSecChat")} hint={t("exfSecChatHint")} open={open.chat}
+                 onToggle={() => toggle("chat")} problems={0}>
+          <Switch checked={chatHistory} onChange={setChatHistory}>{t("fldChatHistory")}</Switch>
+          <p className="vc-hint u-mb-12">{t("fldChatHistoryHint")}</p>
+          <div className="vc-exercises-grid">
+            <FormField label={t("fldResumeMinutes")} hint={t("fldResumeHint")}>
+              <Input value={resumeMinutes} inputMode="numeric" dir="ltr"
+                     placeholder={initial?.resume_minutes != null ? String(initial.resume_minutes) : "30"}
+                     onChange={(e) => setResumeMinutes(e.target.value.replace(/[^0-9]/g, ""))} />
+            </FormField>
+          </div>
+          <FormField label={t("exfOutputLabel")} hint={t(OUTPUT_HINT[outputInChat])}>
+            <Select value={outputInChat} onChange={(e) => setOutputInChat(e.target.value as OutputInChat)}>
+              <option value="confirm">{t("exfOutConfirm")}</option>
+              <option value="accept">{t("exfOutAccept")}</option>
+              <option value="ask">{t("exfOutAsk")}</option>
+              <option value="off">{t("exfOutOff")}</option>
+            </Select>
+          </FormField>
+          <FormField label={t("exfAnswerLabel")} hint={t(ANSWER_HINT[answerInChat])}>
+            <Select value={answerInChat} onChange={(e) => setAnswerInChat(e.target.value as AnswerInChat)}>
+              <option value="detect">{t("exfAnsDetect")}</option>
+              <option value="confirm">{t("exfAnsConfirm")}</option>
+              <option value="answer">{t("exfAnsAnswer")}</option>
+            </Select>
+          </FormField>
+          <FormField label={t("exfQuizLabel")} hint={t(QUIZ_HINT[quizReview])} className="u-mb-0">
+            <Select value={quizReview} onChange={(e) => setQuizReview(e.target.value as QuizReview)}>
+              <option value="partial">{t("exfQuizPartial")}</option>
+              <option value="zero">{t("exfQuizZero")}</option>
+              <option value="off">{t("exfQuizOff")}</option>
+            </Select>
+          </FormField>
+        </Section>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-        <Button onClick={onClose}>{t("cancel")}</Button>
-        <Button variant="primary" onClick={save} disabled={saving}>
-          {saving ? t("saving") : t("saveExercise")}
-        </Button>
+        {/* ---- Advanced ---- */}
+        <Section title={t("exfSecAdvanced")} hint={t("exfSecAdvancedHint")} open={open.advanced}
+                 onToggle={() => toggle("advanced")} problems={problemsIn("advanced")}
+                 extra={!sameForAll ? <span className="vc-badge">{t("exVersions", { n: variants.length })}</span> : undefined}>
+          <Switch checked={sameForAll} onChange={changeSameForAll}>{t("exfSame")}</Switch>
+          <p className="vc-hint u-mb-12">{sameForAll ? t("exfSameOnHint") : t("exfSameOffHint")}</p>
+
+          {!sameForAll && (
+            <div data-field="variants" className="u-mb-12">
+              {errors.variants && <p className="vc-error u-mb-8" role="alert">{errors.variants}</p>}
+              {variants.map((v, i) => (
+                <div key={i} className="vc-exercises-step">
+                  <div className="vc-exercises-step__head">
+                    <span className="vc-exercises-step__n">{t("exfVersionN", { n: i + 1 })}</span>
+                    {variants.length > 1 && (
+                      <Button variant="quiet" size="sm" iconOnly icon={<Trash2 />} aria-label={t("removeVariant")}
+                              onClick={() => removeVariant(i)} />
+                    )}
+                  </div>
+                  <div data-field={`v${i}.id`}>
+                    <FormField label={t("fldVariantId")} required hint={t("exfVersionIdHint")} error={errors[`v${i}.id`]}>
+                      <Input value={v.id} mono dir="ltr" placeholder="A" aria-invalid={invalid(`v${i}.id`)}
+                             onChange={(e) => patchVariant(i, { id: e.target.value })} />
+                    </FormField>
+                  </div>
+                  <div data-field={`v${i}.params`}>
+                    <FormField label={t("fldParams")} hint={t("exfParamsHint")} error={errors[`v${i}.params`]}>
+                      <Textarea value={v.paramsText} mono dir="ltr" rows={3} aria-invalid={invalid(`v${i}.params`)}
+                                placeholder='{"max_number": 100, "operators": ["+","-"], "allow_parens": false}'
+                                onChange={(e) => patchVariant(i, { paramsText: e.target.value })} />
+                    </FormField>
+                  </div>
+                  <div className="vc-exercises-sub">{t("testInputs")}</div>
+                  <p className="vc-hint u-mb-8">{t("exfTestsHint")}</p>
+                  {v.tests.length > 0 && (
+                    <table className="vc-exercises-tests">
+                      <thead>
+                        <tr>
+                          <th scope="col">{t("thInput")}</th>
+                          <th scope="col">{t("thExpected")}</th>
+                          <th scope="col"><span className="u-sr">{t("remove")}</span></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {v.tests.map((row, ri) => (
+                          <tr key={ri}>
+                            <td>
+                              <Input small mono value={row.input} aria-label={`${t("thInput")} ${ri + 1}`}
+                                     onChange={(e) => patchVariant(i, { tests: v.tests.map((r, idx) => (idx === ri ? { ...r, input: e.target.value } : r)) })} />
+                            </td>
+                            <td>
+                              <Input small mono value={row.expected_output} aria-label={`${t("thExpected")} ${ri + 1}`}
+                                     onChange={(e) => patchVariant(i, { tests: v.tests.map((r, idx) => (idx === ri ? { ...r, expected_output: e.target.value } : r)) })} />
+                            </td>
+                            <td>
+                              <Button variant="quiet" size="sm" iconOnly icon={<Trash2 />} aria-label={t("exfRemoveTest")}
+                                      onClick={() => { touch(); patchVariant(i, { tests: v.tests.filter((_, idx) => idx !== ri) }); }} />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  <Button size="sm" variant="quiet" icon={<Plus />}
+                          onClick={() => { touch(); patchVariant(i, { tests: [...v.tests, { input: "", expected_output: "" }] }); }}>
+                    {t("addTestInput")}
+                  </Button>
+                </div>
+              ))}
+              <Button size="sm" icon={<Plus />} onClick={() => { touch(); setVariants((vs) => [...vs, blankVariant()]); }}>
+                {t("addVariant")}
+              </Button>
+            </div>
+          )}
+
+          {(!sameForAll || paramLabels.length > 0) && (
+            <>
+              <hr className="vc-divider" />
+              <div className="vc-exercises-sub">{t("paramLabelsSection")}</div>
+              <p className="vc-hint u-mb-8">{t("paramLabelsHint")}</p>
+              {paramLabels.length > 0 && (
+                <div className="vc-exercises-names">
+                  <span className="vc-exercises-names__head" aria-hidden="true">{t("fldParamKey")}</span>
+                  <span className="vc-exercises-names__head" aria-hidden="true">{t("fldParamLabel")}</span>
+                  <span className="vc-exercises-names__head" aria-hidden="true">{t("fldParamNote")}</span>
+                  <span />
+                  {paramLabels.map((pl, i) => (
+                    <Fragment key={i}>
+                      <Input small mono dir="ltr" value={pl.key} aria-label={t("fldParamKey")}
+                             onChange={(e) => setParamLabels((ps) => ps.map((p, idx) => (idx === i ? { ...p, key: e.target.value } : p)))} />
+                      <Input small value={pl.label} aria-label={t("fldParamLabel")}
+                             onChange={(e) => setParamLabels((ps) => ps.map((p, idx) => (idx === i ? { ...p, label: e.target.value } : p)))} />
+                      <Input small value={pl.note} aria-label={t("fldParamNote")}
+                             onChange={(e) => setParamLabels((ps) => ps.map((p, idx) => (idx === i ? { ...p, note: e.target.value } : p)))} />
+                      <Button variant="quiet" size="sm" iconOnly icon={<Trash2 />} aria-label={t("exfRemoveName")}
+                              onClick={() => { touch(); setParamLabels((ps) => ps.filter((_, idx) => idx !== i)); }} />
+                    </Fragment>
+                  ))}
+                </div>
+              )}
+              <Button size="sm" variant="quiet" icon={<Plus />}
+                      onClick={() => { touch(); setParamLabels((ps) => [...ps, { key: "", label: "", note: "" }]); }}>
+                {t("addParamLabel")}
+              </Button>
+            </>
+          )}
+
+          <hr className="vc-divider" />
+          <Field label={t("fldErrorStrings")} value={errorStrings} onChange={setErrorStrings} textarea monospace
+                 hint={t("exfErrorStringsHint")} />
+          <div className="vc-exercises-grid">
+            <Field label={t("fldLanguage")} value={language} onChange={setLanguage} monospace hint={t("exfLanguageHint")} />
+            {plugin && (
+              <Field label={t("fldCheckCommand")} value={checkCommand} onChange={setCheckCommand} monospace
+                     hint={t("exfCheckCommandHint")} />
+            )}
+          </div>
+          {plugin && (
+            <Field label={t("fldBlockedHint")} value={blockedHint} onChange={setBlockedHint} hint={t("exfBlockedHintHint")} />
+          )}
+        </Section>
       </div>
     </Modal>
   );
 }
-
-const iconBtn: React.CSSProperties = {
-  border: "1px solid #e5e7eb", background: "white", borderRadius: 4, cursor: "pointer", fontSize: 12,
-  padding: "2px 6px",
-};

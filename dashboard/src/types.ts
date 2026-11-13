@@ -245,7 +245,8 @@ export interface PackageResult {
   ok: boolean;
   errors: string[];
   warnings: string[];
-  summary: { exercise_id?: string; title_en?: string; steps?: number; bank_questions?: number; folder?: string };
+  summary: { exercise_id?: string; title_en?: string; title_he?: string | null; steps?: number;
+             bank_questions?: number; folder?: string };
   installed_to?: string;
 }
 

@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import "../styles/review.css";
+import { useEffect, useId, useRef, useState } from "react";
+import { RefreshCw, Send } from "lucide-react";
 import { api } from "../api";
 import type { Lang, ProbeSuggestion, Student } from "../types";
-import { useLang } from "../i18n";
+import { useLang, type StringKey } from "../i18n";
+import { Button, FormField, Loading, Modal, Notice, Textarea, useToast } from "./ui";
 
 interface Props {
   student: Student;
@@ -9,17 +12,37 @@ interface Props {
   onSent: () => void;
 }
 
+/** The kinds of question the tutor suggests (backend/agents/probe.py), in plain words. */
+const KIND: Record<string, StringKey> = {
+  trace: "askKindTrace",
+  why: "askKindWhy",
+  counterfactual: "askKindWhatIf",
+  "failure-mode": "askKindFailure",
+  "bug-localization": "askKindBug",
+};
+
+/** The lecturer's own questions to one student: the tutor suggests some, the
+ *  lecturer picks, edits or writes their own, and the student is asked them in the chat. */
 export function AskThemModal({ student, onClose, onSent }: Props) {
   const { t, lang: dashLang } = useLang();
+  const toast = useToast();
+  const langLabel = useId();
   const [lang, setLang] = useState<Lang>(dashLang);
   const [suggestions, setSuggestions] = useState<ProbeSuggestion[]>([]);
   const [edited, setEdited] = useState<Record<number, string>>({});
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [own, setOwn] = useState("");
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [sending, setSending] = useState(false);
+  // Only the latest request's answer is used: one still out when the language
+  // is switched (or that React's development mode started twice) is ignored.
+  const latest = useRef(0);
 
   const fetchSuggestions = () => {
+    const mine = ++latest.current;
     setLoading(true);
+    setFailed(false);
     // Reset index-keyed selection/edits: after a refetch the list contents
     // change, so a stale checkbox #2 or edit would attach to a different (or
     // missing) question. Clear them so indices always match the new list.
@@ -28,128 +51,124 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
     api
       .suggestProbes(student.session_id, lang)
       .then((s) => {
-        setSuggestions(s);
-        setLoading(false);
+        if (mine === latest.current) setSuggestions(s);
       })
-      .catch((e) => {
-        console.error(e);
-        setLoading(false);
+      .catch(() => {
+        if (mine === latest.current) setFailed(true);
+      })
+      .finally(() => {
+        if (mine === latest.current) setLoading(false);
       });
   };
 
-  // Re-fetch when the session or the chosen language changes.
-  useEffect(fetchSuggestions, [student.session_id, lang]);
+  // Re-fetch when the session or the chosen language changes; an answer that
+  // arrives after that (or after the dialog closed) is ignored.
+  useEffect(() => {
+    fetchSuggestions();
+    return () => { latest.current += 1; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [student.session_id, lang]);
+
+  // What a send would send. Guard suggestions[i]: a refetch may have shortened the list.
+  const bodies: string[] = [];
+  picked.forEach((i) => {
+    const body = edited[i] ?? suggestions[i]?.body;
+    if (body) bodies.push(body);
+  });
+  if (own.trim()) bodies.push(own.trim());
+  const dirty = own.trim() !== "" || picked.size > 0 || Object.keys(edited).length > 0;
 
   const send = async () => {
-    const bodies: string[] = [];
-    // Guard suggestions[i] — a refetch may have shortened the list.
-    picked.forEach((i) => {
-      const body = edited[i] ?? suggestions[i]?.body;
-      if (body) bodies.push(body);
-    });
-    if (own.trim()) bodies.push(own.trim());
-    if (bodies.length === 0) return;
-    await api.sendProbes(student.session_id, bodies, picked.size > 0 ? "suggested" : "manual");
-    onSent();
+    if (bodies.length === 0 || sending) return;
+    setSending(true);
+    try {
+      await api.sendProbes(student.session_id, bodies, picked.size > 0 ? "suggested" : "manual");
+      toast.success(bodies.length === 1
+        ? t("askSentOne", { name: student.username })
+        : t("askSentMany", { n: bodies.length, name: student.username }));
+      onSent();
+    } catch (e) {
+      toast.error(t("askSendFailed"), e);
+      setSending(false);
+    }
+  };
+
+  const togglePick = (i: number, on: boolean) => {
+    const next = new Set(picked);
+    if (on) next.add(i);
+    else next.delete(i);
+    setPicked(next);
+  };
+
+  const kindName = (kind: string) => {
+    const key = KIND[kind.trim().toLowerCase()];
+    return key ? t(key) : kind;
   };
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 100,
-      }}
-      onClick={onClose}
+    <Modal
+      title={t("askTitle", { name: student.username })}
+      subtitle={t("askLead")}
+      size="lg"
+      dirty={dirty && !sending}
+      onClose={onClose}
+      footer={
+        <>
+          <span className="u-push" />
+          <Button onClick={onClose}>{t("cancel")}</Button>
+          <Button variant="primary" icon={<Send />} busy={sending} disabled={bodies.length === 0} onClick={send}>
+            {bodies.length === 0 ? t("askSendNone")
+              : bodies.length === 1 ? t("askSendOne") : t("askSendMany", { n: bodies.length })}
+          </Button>
+        </>
+      }
     >
-      <div
-        style={{ background: "white", padding: 24, borderRadius: 8, width: 720, maxHeight: "80vh", overflow: "auto" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-          <h3 style={{ marginTop: 0 }}>
-            {t("askTitle", { name: student.username, variant: student.variant })}
-          </h3>
-          {/* Language the probe questions are generated in. */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-            <span style={{ color: "#6b7280", fontSize: 12 }}>{t("answersIn")}:</span>
+      <div className="u-row u-wrap u-between u-gap-12 u-mb-12">
+        <h3 className="u-md">{t("askSuggestions")}</h3>
+        <div className="u-row u-wrap">
+          {/* The language the questions are written in. */}
+          <span className="u-muted u-sm" id={langLabel}>{t("askLang")}</span>
+          <div className="vc-segmented" role="group" aria-labelledby={langLabel}>
             {(["en", "he"] as Lang[]).map((opt) => (
-              <button
-                key={opt}
-                onClick={() => setLang(opt)}
-                style={{
-                  padding: "3px 8px", borderRadius: 4, fontSize: 12, cursor: "pointer",
-                  border: "1px solid " + (lang === opt ? "#111827" : "#d1d5db"),
-                  background: lang === opt ? "#111827" : "white",
-                  color: lang === opt ? "white" : "#374151",
-                  fontWeight: 600,
-                }}
-              >
-                {opt === "en" ? "EN" : "עב"}
+              <button key={opt} type="button" lang={opt} aria-pressed={lang === opt} onClick={() => setLang(opt)}>
+                {opt === "en" ? "English" : "עברית"}
               </button>
             ))}
           </div>
-        </div>
-
-        {loading && <p>{t("genSuggestions")}</p>}
-
-        {suggestions.map((s, i) => (
-          <div key={i} style={{ border: "1px solid #eee", borderRadius: 6, padding: 12, marginBottom: 8 }}>
-            <label style={{ display: "flex", alignItems: "start", gap: 8 }}>
-              <input
-                type="checkbox"
-                checked={picked.has(i)}
-                onChange={(e) => {
-                  const next = new Set(picked);
-                  if (e.target.checked) next.add(i);
-                  else next.delete(i);
-                  setPicked(next);
-                }}
-              />
-              <div style={{ flex: 1 }}>
-                <div>
-                  <strong>[{s.kind}]</strong>
-                </div>
-                <textarea
-                  value={edited[i] ?? s.body}
-                  dir="auto"
-                  onChange={(e) => setEdited({ ...edited, [i]: e.target.value })}
-                  style={{ width: "100%", minHeight: 60, marginTop: 4 }}
-                />
-                <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{s.rationale}</div>
-              </div>
-            </label>
-          </div>
-        ))}
-
-        <button onClick={fetchSuggestions} disabled={loading} style={{ marginRight: 8 }}>
-          {t("suggestMore")}
-        </button>
-
-        <hr />
-        <label>
-          {t("writeOwn")}
-          <textarea
-            value={own}
-            dir="auto"
-            onChange={(e) => setOwn(e.target.value)}
-            style={{ width: "100%", minHeight: 50, marginTop: 4 }}
-          />
-        </label>
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-          <button onClick={onClose}>{t("cancel")}</button>
-          <button
-            onClick={send}
-            style={{ background: "#f97316", color: "white", border: "none", padding: "8px 16px", borderRadius: 6 }}
-          >
-            {t("sendQuestions", { n: picked.size + (own.trim() ? 1 : 0) })}
-          </button>
+          <Button size="sm" icon={<RefreshCw />} disabled={loading} onClick={fetchSuggestions}>{t("suggestMore")}</Button>
         </div>
       </div>
-    </div>
+
+      {failed && <Notice tone="warning" className="u-mb-12">{t("askSuggestFailed")}</Notice>}
+      {loading ? (
+        <Loading>{t("genSuggestions")}</Loading>
+      ) : suggestions.length === 0 ? (
+        !failed && <p className="u-muted u-sm">{t("askNoSuggestions")}</p>
+      ) : (
+        <div className="u-col">
+          {suggestions.map((s, i) => (
+            <div key={i} className="vc-review-ask" data-picked={picked.has(i)}>
+              <input type="checkbox" checked={picked.has(i)} aria-label={t("askPick", { n: i + 1 })}
+                     onChange={(e) => togglePick(i, e.target.checked)} />
+              <div className="u-grow u-col u-gap-6">
+                <div><span className="vc-badge vc-badge--brand" dir="auto">{kindName(s.kind)}</span></div>
+                <Textarea
+                  value={edited[i] ?? s.body}
+                  rows={3}
+                  aria-label={t("askEditLabel", { n: i + 1 })}
+                  onChange={(e) => setEdited({ ...edited, [i]: e.target.value })}
+                />
+                {s.rationale && <div className="vc-hint" dir="auto">{s.rationale}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <hr className="vc-divider" />
+      <FormField label={t("writeOwn")} className="u-mb-0">
+        <Textarea value={own} rows={3} onChange={(e) => setOwn(e.target.value)} />
+      </FormField>
+    </Modal>
   );
 }

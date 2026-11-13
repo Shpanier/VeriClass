@@ -1,164 +1,133 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Ban, Check as CheckIcon, SquareTerminal, TriangleAlert, X } from "lucide-react";
 import { api } from "../api";
 import type { Student, TerminalCommand, TerminalFullOutput } from "../types";
 import { arrivedLate, eventTime } from "../proctor";
 import { useLang } from "../i18n";
+import { formatDateTime, parseServerTime } from "../lib/time";
+import { Button, Check, EmptyState, Loading, Modal, Notice, Time, useToast } from "./ui";
 
 /**
- * One student's VeriClass-terminal log: every line they entered, newest first —
- * what ran (exit code, output) and what the plugin refused (and why). Polls
- * every 2s like the other live viewers. "Refused only" narrows to the alerts.
+ * One student's VeriClass-terminal log (IDE plugin): every line they entered,
+ * newest first: what ran (exit code, output) and what the plugin refused (and
+ * why). Polls every 2s like the other live viewers. "Only refused commands"
+ * narrows the list to the alerts.
  */
 export function TerminalLogModal({ student, onClose }: { student: Student; onClose: () => void }) {
   const { t } = useLang();
-  const [rows, setRows] = useState<TerminalCommand[]>([]);
+  const [rows, setRows] = useState<TerminalCommand[] | null>(null);
+  const [failed, setFailed] = useState(false);
   const [refusedOnly, setRefusedOnly] = useState(false);
 
   useEffect(() => {
-    const tick = () => api.terminalCommands(student.session_id).then(setRows).catch(console.error);
+    let alive = true;
+    // A background poll: a failure stays quiet (the page reports a lost
+    // server); only a log that never arrived says so, below.
+    const tick = () => api.terminalCommands(student.session_id)
+      .then((list) => { if (alive) { setRows(list); setFailed(false); } })
+      .catch(() => { if (alive) setFailed(true); });
     tick();
-    const id = setInterval(tick, 2000);
-    return () => clearInterval(id);
+    const id = window.setInterval(tick, 2000);
+    return () => { alive = false; window.clearInterval(id); };
   }, [student.session_id]);
 
-  const refused = rows.filter((r) => !r.allowed && !r.syntax_error);
-  const shown = refusedOnly ? refused : rows;
+  const all = rows ?? [];
+  const refused = all.filter((r) => !r.allowed && !r.syntax_error);
+  const shown = refusedOnly ? refused : all;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 100,
-      }}
-      onClick={onClose}
+    <Modal
+      size="lg"
+      onClose={onClose}
+      title={<><bdi>{student.username}</bdi> · {t("terminalLog")}</>}
+      subtitle={rows ? t("terminalSummary", { n: all.length, refused: refused.length }) : undefined}
+      footer={<><span className="u-push" /><Button onClick={onClose}>{t("close")}</Button></>}
     >
-      <div
-        style={{
-          background: "white",
-          padding: 20,
-          borderRadius: 8,
-          width: "min(860px, 94vw)",
-          maxHeight: "85vh",
-          display: "flex",
-          flexDirection: "column",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <h3 style={{ margin: 0 }}>
-            ⌨ {t("terminalLog")} · {student.username}
-          </h3>
-          <button onClick={onClose}>{t("close")}</button>
-        </header>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12, color: "#666", marginTop: 4 }}>
-          <span>{t("terminalSummary", { n: rows.length, refused: refused.length })}</span>
-          <label style={{ marginInlineStart: "auto", display: "flex", gap: 4, alignItems: "center", cursor: "pointer" }}>
-            <input type="checkbox" checked={refusedOnly} onChange={(e) => setRefusedOnly(e.target.checked)} />
-            {t("terminalRefusedOnly")}
-          </label>
-        </div>
-
-        <div style={{ marginTop: 12, flex: 1, overflowY: "auto", border: "1px solid #eee", borderRadius: 6 }}>
-          {shown.length === 0 && <p style={{ color: "#888", padding: 12 }}>{t("noTerminalCommands")}</p>}
-          {shown.map((r) => (
-            <CommandRow key={r.id} r={r} />
-          ))}
-        </div>
-      </div>
-    </div>
+      {rows === null ? (
+        failed ? <Notice tone="danger">{t("tlLoadFailed")}</Notice> : <Loading />
+      ) : rows.length === 0 ? (
+        <EmptyState icon={<SquareTerminal />} title={t("noTerminalCommands")}>{t("tlEmptyText")}</EmptyState>
+      ) : (
+        <>
+          <div className="u-mb-12">
+            <Check checked={refusedOnly} onChange={setRefusedOnly}>{t("terminalRefusedOnly")}</Check>
+          </div>
+          {shown.length === 0 ? (
+            <p className="u-muted u-sm">{t("tlNoRefused")}</p>
+          ) : (
+            <div className="vc-students-list">
+              {shown.map((r) => <CommandRow key={r.id} r={r} />)}
+            </div>
+          )}
+        </>
+      )}
+    </Modal>
   );
 }
 
 function CommandRow({ r }: { r: TerminalCommand }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const toast = useToast();
   const [full, setFull] = useState<TerminalFullOutput | null>(null);
   const [loading, setLoading] = useState(false);
   const loadFull = () => {
     setLoading(true);
-    api.terminalOutput(r.id).then(setFull).catch(console.error).finally(() => setLoading(false));
+    api.terminalOutput(r.id)
+      .then(setFull)
+      .catch((e) => toast.error(t("tlOutputFailed"), e))
+      .finally(() => setLoading(false));
   };
   // Only the tail is in the row; the rest came in pieces.
   const hasMore = (r.output_chunks ?? 0) > 0 && (r.output_chars ?? 0) > (r.output_tail?.length ?? 0);
   const blocked = !r.allowed && !r.syntax_error;
-  const failed = r.allowed && r.exit_code != null && r.exit_code !== 0;
-  const status = blocked
-    ? { icon: "🚫", text: t("terminalRefused"), color: "#991b1b" }
+  const failedRun = r.allowed && r.exit_code != null && r.exit_code !== 0;
+  const status: { tone: "danger" | "warning" | "success"; icon: ReactNode; text: string } = blocked
+    ? { tone: "danger", icon: <Ban aria-hidden="true" />, text: t("terminalRefused") }
     : r.syntax_error
-      ? { icon: "⚠", text: t("terminalSyntax"), color: "#92400e" }
-      : failed
-        ? { icon: "✗", text: t("terminalExit", { n: r.exit_code ?? "" }), color: "#b45309" }
-        : { icon: "✓", text: t("terminalExit", { n: r.exit_code ?? 0 }), color: "#047857" };
+      ? { tone: "warning", icon: <TriangleAlert aria-hidden="true" />, text: t("terminalSyntax") }
+      : failedRun
+        ? { tone: "warning", icon: <X aria-hidden="true" />, text: t("terminalExit", { n: r.exit_code ?? "" }) }
+        : { tone: "success", icon: <CheckIcon aria-hidden="true" />, text: t("terminalExit", { n: r.exit_code ?? 0 }) };
+  const received = parseServerTime(r.created_at);
 
   return (
-    <div
-      style={{
-        padding: "8px 12px",
-        borderBottom: "1px solid #f0f0f0",
-        background: blocked ? "#fef2f2" : "white",
-      }}
-    >
-      <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-        <span style={{ color: status.color, fontWeight: 700, whiteSpace: "nowrap", fontSize: 12 }}>
-          {status.icon} {status.text}
-        </span>
-        <code
-          dir="ltr"
-          style={{
-            flex: 1,
-            fontFamily: "ui-monospace, Menlo, Consolas, monospace",
-            fontSize: 13,
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-all",
-            fontWeight: blocked ? 700 : 500,
-            color: blocked ? "#991b1b" : "#111",
-          }}
-        >
-          <span style={{ color: "#9ca3af" }}>{r.cwd ? `${r.cwd}$ ` : "$ "}</span>
+    <div className={blocked ? "vc-students-row vc-students-row--alert" : "vc-students-row"}>
+      <div className="vc-students-row__line">
+        <span className={`vc-badge vc-badge--${status.tone}`}>{status.icon}{status.text}</span>
+        <code className="vc-students-cmd" dir="ltr">
+          <span className="vc-students-cmd__prompt">{r.cwd ? `${r.cwd}$ ` : "$ "}</span>
           {r.line}
         </code>
-        <span style={{ fontSize: 11, color: "#999", whiteSpace: "nowrap" }}>
-          {r.duration_ms != null && r.allowed ? `${(r.duration_ms / 1000).toFixed(1)}s · ` : ""}
-          {eventTime(r)}
-          {arrivedLate(r) && <span style={{ color: "#a16207" }} title={r.created_at}> · {t("arrivedLate")}</span>}
-          {r.via === "export" && <span style={{ color: "#7c3aed" }}> · {t("fromExport")}</span>}
-          {r.client_os && <span title={r.shell ?? undefined}> · {r.client_os.split(" ")[0]}</span>}
-        </span>
+        <div className="vc-students-row__when">
+          <span>
+            {r.duration_ms != null && r.allowed && <>{t("tlDuration", { s: (r.duration_ms / 1000).toFixed(1) })} · </>}
+            <Time value={eventTime(r)} mode="clock" />
+          </span>
+          {arrivedLate(r) && (
+            <span className="u-warning" title={received ? t("plArrivedAt", { time: formatDateTime(received, lang) }) : undefined}>
+              {t("arrivedLate")}
+            </span>
+          )}
+          {r.via === "export" && <span className="u-brand">{t("fromExport")}</span>}
+          {r.client_os && <span title={r.shell ?? undefined}>{r.client_os.split(" ")[0]}</span>}
+        </div>
       </div>
       {r.reason && (
-        <div style={{ fontSize: 12, color: status.color, marginTop: 2 }} dir="ltr">
+        <div className={`vc-students-row__detail ${status.tone === "danger" ? "u-danger" : status.tone === "warning" ? "u-warning" : ""}`}
+             dir="ltr">
           {r.reason}
         </div>
       )}
       {r.output_tail && (
-        <details style={{ marginTop: 4 }}>
-          <summary style={{ fontSize: 12, color: "#6b7280", cursor: "pointer" }}>{t("terminalOutput")}</summary>
-          <pre
-            dir="ltr"
-            style={{
-              margin: "4px 0 0",
-              padding: 8,
-              background: "#0f172a",
-              color: "#e2e8f0",
-              borderRadius: 4,
-              fontSize: 12,
-              maxHeight: 240,
-              overflow: "auto",
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {full ? full.output : r.output_tail}
-          </pre>
+        <details>
+          <summary>{t("terminalOutput")}</summary>
+          <pre className="vc-pre" dir="ltr">{full ? full.output : r.output_tail}</pre>
           {hasMore && !full && (
-            <button onClick={loadFull} disabled={loading} style={{ marginTop: 4, fontSize: 12 }}>
+            <Button variant="link" size="sm" className="u-mt-4" busy={loading} onClick={loadFull}>
               {loading ? t("loading") : t("showFullOutput", { n: r.output_chars ?? 0 })}
-            </button>
+            </Button>
           )}
-          {full && !full.complete && <div style={{ fontSize: 12, color: "#a16207" }}>{t("outputIncomplete")}</div>}
+          {full && !full.complete && <div className="u-xs u-warning u-mt-4">{t("outputIncomplete")}</div>}
         </details>
       )}
     </div>

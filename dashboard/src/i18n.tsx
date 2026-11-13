@@ -1104,9 +1104,17 @@ type Vars = Record<string, string | number>;
 /** The translate function, for passing to helpers and child components. */
 export type Translate = (key: StringKey, vars?: Vars) => string;
 
+/** Fills {name} placeholders. A number can choose the wording:
+ *  "{n:# student|# students}" gives "1 student" / "3 students" (# is the number). */
 function format(s: string, vars?: Vars): string {
   if (!vars) return s;
-  return s.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? String(vars[k]) : `{${k}}`));
+  return s
+    .replace(/\{(\w+):([^{}|]*)\|([^{}]*)\}/g, (whole, k, one, many) => {
+      if (!(k in vars)) return whole;
+      const n = Number(vars[k]);
+      return (n === 1 ? one : many).replace(/#/g, String(vars[k]));
+    })
+    .replace(/\{(\w+)\}/g, (_, k) => (k in vars ? String(vars[k]) : `{${k}}`));
 }
 
 interface LangCtx {

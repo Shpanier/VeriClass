@@ -1,0 +1,149 @@
+/* The review area: the queue where the lecturer answers students' questions,
+   "Ask them" (the lecturer's questions to a student), and the read-only view of
+   a student's chat. Built from tokens.css; logical properties throughout. */
+
+/* ---------- the section ---------- */
+.vc-review { margin-bottom: 20px; }
+.vc-review[data-on="true"] { border-color: var(--c-brand-border); }
+.vc-review__head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 20px; }
+.vc-review__titles { flex: 1 1 320px; min-width: 0; }
+.vc-review__title { display: flex; align-items: center; gap: 8px; font-size: var(--fs-lg); font-weight: 700; }
+.vc-review__title > svg { width: 18px; height: 18px; color: var(--c-text-3); flex: none; }
+.vc-review__hint { margin-top: 2px; color: var(--c-text-3); font-size: var(--fs-sm); }
+.vc-review__switch { display: flex; align-items: center; gap: 8px; margin-inline-start: auto; }
+.vc-review__body { display: grid; gap: 12px; margin-top: 14px; }
+
+/* Settings that apply to every question. */
+.vc-review-options {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; padding: 8px 12px;
+  border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface-2);
+  font-size: var(--fs-sm); color: var(--c-text-2);
+}
+.vc-review-options__item { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+
+/* What the four levels mean. */
+.vc-review-legend { font-size: var(--fs-sm); color: var(--c-text-3); }
+.vc-review-legend > summary { width: fit-content; font-weight: 600; }
+.vc-review-legend > summary:hover { color: var(--c-text); }
+.vc-review-legend__list { display: grid; gap: 4px; margin: 8px 0 2px; padding: 0; list-style: none; }
+.vc-review-legend__list li { display: flex; align-items: center; gap: 8px; }
+.vc-review-legend__name { min-width: 8.5em; color: var(--c-text); font-weight: 600; }
+
+/* How much a level gives away: one to four filled dots. */
+.vc-review-pips { display: inline-flex; gap: 2px; flex: none; }
+.vc-review-pips > span { width: 6px; height: 6px; border-radius: 50%; background: var(--c-border-strong); }
+.vc-review-pips > span[data-on="true"] { background: var(--c-brand); }
+
+/* ---------- a question ---------- */
+.vc-review-card {
+  display: grid; gap: 12px; padding: 14px 16px; min-width: 0;
+  border: 1px solid var(--c-border); border-radius: var(--radius-lg); background: var(--c-surface); box-shadow: var(--shadow-sm);
+}
+.vc-review-card__head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
+.vc-review-card__who { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; flex: 1 1 auto; min-width: 0; }
+.vc-review-card__name { font-size: var(--fs-md); font-weight: 700; }
+.vc-review-card__del { display: flex; align-items: center; gap: 12px; margin-inline-start: auto; }
+.vc-review-card__del .vc-check { font-size: var(--fs-xs); }
+
+.vc-review-card__question {
+  padding: 10px 14px; border-inline-start: 3px solid var(--c-brand); border-radius: var(--radius-sm);
+  background: var(--c-surface-2); color: var(--c-text); font-size: var(--fs-lg); line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.vc-review-card__translation {
+  padding: 8px 12px; border: 1px solid var(--c-info-border); border-radius: var(--radius-sm); background: var(--c-info-soft);
+}
+.vc-review-card__translation-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; color: var(--c-info); font-size: var(--fs-xs); font-weight: 650; }
+.vc-review-card__translation-head > svg { width: 14px; height: 14px; }
+
+/* Where the student is, and the chat just before the question. */
+.vc-review-context { display: grid; gap: 6px; padding: 8px 12px; border: 1px solid var(--c-border); border-radius: var(--radius); font-size: var(--fs-sm); }
+.vc-review-where { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; color: var(--c-text-2); }
+.vc-review-where > svg { width: 14px; height: 14px; color: var(--c-text-3); flex: none; }
+.vc-review-where__step { font-weight: 600; color: var(--c-text); }
+.vc-review-status { display: inline-flex; align-items: center; gap: 6px; }
+.vc-review-status[data-tone="success"] { color: var(--c-success); }
+.vc-review-status[data-tone="warning"] { color: var(--c-warning); }
+.vc-review-status[data-tone="danger"] { color: var(--c-danger); }
+.vc-review-status[data-tone="brand"] { color: var(--c-brand); }
+.vc-review-status[data-tone="muted"] { color: var(--c-text-3); }
+.vc-review-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+
+.vc-review-before__title { color: var(--c-text-3); font-size: var(--fs-xs); font-weight: 650; }
+.vc-review-entry {
+  display: flex; gap: 10px; width: 100%; padding: 4px 6px; margin: 0;
+  border: 0; border-radius: var(--radius-sm); background: none; color: var(--c-text-2);
+  font-size: var(--fs-sm); text-align: start;
+}
+.vc-review-entry:hover { background: var(--c-surface-2); }
+.vc-review-entry__kind { flex: 0 0 8.5em; padding-top: 1px; color: var(--c-text-3); font-size: var(--fs-xs); font-weight: 650; }
+.vc-review-entry__kind[data-author="student"] { color: var(--c-brand); }
+.vc-review-entry__text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vc-review-entry__text[data-open="false"] { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* The bar above the answers: save to the bank, the answers' language, draft again. */
+.vc-review-card__bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
+.vc-review-card__tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-inline-start: auto; }
+.vc-review-card__tools-label { color: var(--c-text-3); font-size: var(--fs-xs); font-weight: 600; }
+
+/* ---------- one answer: a row of its own ---------- */
+.vc-review-rows { display: grid; gap: 8px; }
+.vc-review-row {
+  --tone: var(--c-brand);
+  display: grid; gap: 8px; padding: 10px 12px; min-width: 0;
+  border: 1px solid var(--c-border); border-inline-start: 3px solid var(--tone); border-radius: var(--radius);
+  background: var(--c-surface);
+}
+.vc-review-row[data-tone="bank"] { --tone: var(--c-success); }
+.vc-review-row[data-tone="best"] { --tone: var(--c-info); }
+.vc-review-row[data-tone="own"] { --tone: var(--c-border-strong); background: var(--c-surface-2); }
+.vc-review-row[data-tone="failed"] { --tone: var(--c-danger); background: var(--c-danger-soft); }
+.vc-review-row__head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 26px; }
+.vc-review-row__label { display: inline-flex; align-items: center; gap: 7px; color: var(--c-text); font-size: var(--fs-sm); font-weight: 700; }
+.vc-review-row__label > svg { width: 15px; height: 15px; color: var(--tone); flex: none; }
+.vc-review-row__meta { color: var(--c-text-3); font-size: var(--fs-xs); }
+.vc-review-row__sub { color: var(--c-text-2); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.vc-review-row__sub-label { color: var(--c-text-3); font-weight: 600; }
+.vc-review-row .vc-textarea { min-height: 0; line-height: 1.5; }
+.vc-review-row__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.vc-review-row .vc-segmented > button { min-height: 24px; padding: 0 9px; font-size: var(--fs-xs); }
+
+.vc-review-drafting { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--c-text-3); font-size: var(--fs-sm); }
+.vc-review-details { margin-top: 2px; color: var(--c-text-2); font-size: var(--fs-xs); }
+.vc-review-details > summary { width: fit-content; font-weight: 600; }
+.vc-review-details > div { margin-top: 4px; }
+
+/* ---------- "Ask them" ---------- */
+.vc-review-ask { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--c-border); border-radius: var(--radius); }
+.vc-review-ask[data-picked="true"] { border-color: var(--c-brand-border); background: var(--c-brand-soft); }
+.vc-review-ask > input[type="checkbox"] { width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--c-brand); flex: none; }
+.vc-review-ask .vc-textarea { min-height: 0; }
+
+/* ---------- a student's chat ---------- */
+.vc-review-chat__top { display: grid; gap: 10px; padding: 12px 20px 0; }
+.vc-review-chat__params { display: flex; flex-wrap: wrap; gap: 6px; }
+.vc-review-chat__params:last-child { margin-bottom: 12px; }
+.vc-review-chat__params .vc-badge { white-space: normal; }
+.vc-review-chat__tabs { margin-bottom: -1px; }
+/* Fixed height, so the dialog doesn't change size as messages arrive. */
+.vc-review-chat { height: 58vh; min-height: 240px; overflow-y: auto; padding: 10px 20px 14px; background: var(--c-surface-2); }
+.vc-review-chat__top + .vc-review-chat { border-top: 1px solid var(--c-border); }
+.vc-review-msg { display: flex; justify-content: flex-start; margin: 8px 0; }
+.vc-review-msg[data-side="end"] { justify-content: flex-end; }
+.vc-review-msg__bubble {
+  max-width: 80%; min-width: 0; padding: 8px 12px; border: 1px solid var(--c-border); border-radius: var(--radius-lg);
+  background: var(--c-surface); font-size: var(--fs-sm); line-height: 1.5; overflow-wrap: anywhere;
+}
+.vc-review-msg[data-who="student"] .vc-review-msg__bubble { background: var(--c-brand-soft); border-color: var(--c-brand-border); }
+.vc-review-msg[data-who="note"] .vc-review-msg__bubble { background: var(--c-warning-soft); border-color: var(--c-warning-border); }
+.vc-review-msg__meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; margin-bottom: 4px; color: var(--c-text-3); font-size: var(--fs-xs); }
+.vc-review-msg__who { color: var(--c-text-2); font-weight: 700; }
+.vc-review-msg__model { color: var(--c-text-3); opacity: 0.9; }
+.vc-review-msg__body { display: grid; gap: 6px; }
+.vc-review-msg__body > .vc-pre { font-size: 12px; }
+
+.vc-review-probe {
+  margin: 10px 0; padding: 10px 12px; border: 1px solid var(--c-info-border); border-inline-start: 3px solid var(--c-info);
+  border-radius: var(--radius); background: var(--c-info-soft); font-size: var(--fs-sm); line-height: 1.5;
+}
+.vc-review-probe__answer { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--c-info-border); }

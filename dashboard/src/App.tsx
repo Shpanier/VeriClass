@@ -262,6 +262,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
               <ReviewQueue exerciseId={liveId} onViewChat={viewReviewChat} />
               <StudentGrid
                 students={visible}
+                loaded={studentsLoaded}
                 paramLabels={liveExercise?.param_labels}
                 onModeChange={async (id, mode) => {
                   try {

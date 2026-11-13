@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { CalendarDays, CalendarPlus, RefreshCw, Trash2, UserCheck } from "lucide-react";
 import { api } from "../api";
-import type { Attendance, ExerciseSummary, Meeting } from "../types";
+import type { Attendance, ExerciseSummary, Lang, Meeting } from "../types";
 import { useLang } from "../i18n";
-import { Modal } from "./ui/Modal";
-import { Button } from "./ui/Button";
-import { controlStyle } from "./ui/Field";
+import { describeError } from "../lib/errors";
+import { Button, FormField, Input, Modal, Notice, Select, Spinner, Time, useConfirm, useToast } from "./ui";
 
 // YYYY-MM-DD, local. Not toLocaleDateString: it builds an Intl formatter on every
 // call, and this runs on every render of every course card.
@@ -13,127 +13,215 @@ const today = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
+// One formatter per language, made once.
+const dayFormats = new Map<Lang, Intl.DateTimeFormat>();
+
+/** "Fri, 13 Nov 2026" for a YYYY-MM-DD date, in the dashboard's language. */
+function formatDay(iso: string, lang: Lang): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return iso;
+  let f = dayFormats.get(lang);
+  if (!f) {
+    f = new Intl.DateTimeFormat(lang === "he" ? "he-IL" : "en-GB",
+                                { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+    dayFormats.set(lang, f);
+  }
+  return f.format(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+}
+
 // A course's meetings (backend/courses.py): on a meeting's date the course's
 // students open its exercise without choosing; attendance comes from the
-// sessions of that day.
+// sessions of that day. Unlike the rest of the course card, a meeting is saved
+// as soon as it is added or deleted.
 export function MeetingsSection({ courseId, exercises, onChanged }: {
   courseId: string;
   exercises: ExerciseSummary[];
   onChanged: () => void;
 }) {
   const { t, lang } = useLang();
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const toast = useToast();
+  const confirm = useConfirm();
+  const headId = useId();
+  const [meetings, setMeetings] = useState<Meeting[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [date, setDate] = useState(today);
   const [exerciseId, setExerciseId] = useState(exercises[0]?.exercise_id ?? "");
   const [title, setTitle] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [opening, setOpening] = useState<number | null>(null);
   const [attendance, setAttendance] = useState<Attendance | null>(null);
 
-  const load = () => api.meetings(courseId).then(setMeetings).catch(console.error);
+  const load = () =>
+    api.meetings(courseId)
+      .then((m) => { setMeetings(m); setLoadError(null); })
+      .catch((e) => setLoadError(describeError(e, t)));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [courseId]);
 
   const add = async () => {
-    setError(null);
+    setAdding(true);
     try {
       await api.addMeeting(courseId, date, exerciseId, title.trim());
       setTitle("");
       await load();
       onChanged(); // the course may now offer the exercise
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error(t("coMeetingAddFailed"), e);
+    } finally {
+      setAdding(false);
     }
   };
 
-  const remove = async (id: number) => {
+  const remove = async (m: Meeting) => {
+    const day = formatDay(m.meeting_date, lang);
+    if (!(await confirm({
+      title: t("coMeetingDeleteTitle", { date: day }), body: t("coMeetingDeleteBody"),
+      confirmLabel: t("coMeetingDeleteYes"), danger: true,
+    }))) return;
     try {
-      await api.deleteMeeting(id);
+      await api.deleteMeeting(m.id);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error(t("coMeetingDeleteFailed"), e);
+    }
+  };
+
+  const openAttendance = async (id: number) => {
+    setOpening(id);
+    try {
+      setAttendance(await api.attendance(id));
+    } catch (e) {
+      toast.error(t("coAttendanceFailed"), e);
+    } finally {
+      setOpening(null);
     }
   };
 
   const now = today();
-  const exTitle = (id: string) => {
+  const titleOf = (ex: ExerciseSummary) => (lang === "he" && ex.title_he) || ex.title_en;
+  // Titles that more than one exercise has: those also show the exercise's id.
+  const seen = new Map<string, number>();
+  exercises.forEach((ex) => seen.set(titleOf(ex), (seen.get(titleOf(ex)) ?? 0) + 1));
+  const repeated = (ex: ExerciseSummary) => (seen.get(titleOf(ex)) ?? 0) > 1;
+  const exerciseName = (id: string, fallback?: string | null) => {
     const ex = exercises.find((e) => e.exercise_id === id);
-    return ex ? (lang === "he" ? ex.title_he ?? ex.title_en : ex.title_en) : id;
+    return { name: ex ? titleOf(ex) : fallback ?? id, showId: !ex || repeated(ex) };
   };
 
   return (
-    <div style={{ marginTop: 16 }}>
-      <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>{t("meetingsTitle")}</h4>
-      <p style={{ color: "#6b7280", fontSize: 12, margin: "0 0 8px" }}>{t("meetingsHint")}</p>
-      {meetings.length === 0 && <p style={{ color: "#9ca3af", fontSize: 13, margin: "0 0 8px" }}>{t("noMeetings")}</p>}
-      {meetings.map((m) => (
-        <div key={m.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, padding: "3px 0", flexWrap: "wrap" }}>
-          <code dir="ltr">{m.meeting_date}</code>
-          {m.meeting_date === now && (
-            <span style={{ fontSize: 11, background: "#dcfce7", color: "#166534", padding: "1px 6px", borderRadius: 999 }}>
-              {t("todayLabel")}
-            </span>
-          )}
-          <span style={{ flex: 1, minWidth: 0 }} dir="auto">
-            {m.title ? `${m.title} · ` : ""}{exTitle(m.exercise_id)}
-          </span>
-          <Button style={{ padding: "3px 8px" }} onClick={() => api.attendance(m.id).then(setAttendance).catch(console.error)}>
-            {t("attendanceBtn", { a: m.attended, m: m.members })}
-          </Button>
-          <Button style={{ padding: "3px 8px" }} onClick={() => remove(m.id)}>{t("deleteMeeting")}</Button>
-        </div>
-      ))}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...controlStyle, width: 150 }} />
-        <select value={exerciseId} onChange={(e) => setExerciseId(e.target.value)} style={{ ...controlStyle, width: 240 }}>
-          {exercises.map((ex) => (
-            <option key={ex.exercise_id} value={ex.exercise_id}>{exTitle(ex.exercise_id)}</option>
-          ))}
-        </select>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("meetingTitlePlaceholder")}
-               dir="auto" style={{ ...controlStyle, width: 180 }} />
-        <Button disabled={!date || !exerciseId} onClick={add}>{t("addMeeting")}</Button>
+    <section className="vc-courses-meetings" aria-labelledby={headId}>
+      <div className="u-row u-wrap u-gap-8">
+        <h3 id={headId} className="vc-courses-sub">
+          <CalendarDays /> {t("meetingsTitle")}
+          {meetings && <span className="vc-badge vc-badge--count">{meetings.length}</span>}
+        </h3>
+        <span className="vc-badge vc-badge--info">{t("coMeetingsSavedBadge")}</span>
       </div>
-      {error && <p style={{ color: "#b91c1c", fontSize: 13 }}>{error}</p>}
+      <p className="vc-hint u-mb-8">{t("meetingsHint")} {t("coMeetingsSaved")}</p>
+
+      {loadError && (
+        <Notice tone="danger" className="u-mb-8"
+                action={<Button size="sm" icon={<RefreshCw />} onClick={load}>{t("retry")}</Button>}>
+          {t("coMeetingsLoadFailed")} {loadError}
+        </Notice>
+      )}
+      {meetings === null && !loadError && <div className="u-row u-muted u-sm"><Spinner /> {t("loading")}</div>}
+      {meetings?.length === 0 && <p className="u-muted u-sm">{t("noMeetings")}</p>}
+      {meetings && meetings.length > 0 && (
+        <div className="vc-courses-meetings__list">
+          {meetings.map((m) => {
+            const day = formatDay(m.meeting_date, lang);
+            const ex = exerciseName(m.exercise_id, m.exercise_title);
+            return (
+              <div key={m.id} className="vc-courses-meeting" data-past={m.meeting_date < now}>
+                <span className="vc-courses-meeting__date">
+                  <span dir="auto">{day}</span>
+                  {m.meeting_date === now && <span className="vc-badge vc-badge--success">{t("todayLabel")}</span>}
+                </span>
+                <span className="vc-courses-meeting__what">
+                  {m.title && <><span className="u-bold" dir="auto">{m.title}</span><span className="u-muted"> · </span></>}
+                  <span dir="auto">{ex.name}</span>
+                  {ex.showId && <> <span className="u-muted u-xs vc-mono" dir="ltr">({m.exercise_id})</span></>}
+                </span>
+                <Button size="sm" icon={<UserCheck />} busy={opening === m.id} onClick={() => openAttendance(m.id)}>
+                  {t("attendanceBtn", { a: m.attended, m: m.members })}
+                </Button>
+                <Button
+                  size="sm" variant="quiet" iconOnly icon={<Trash2 />} onClick={() => remove(m)}
+                  aria-label={t("coMeetingDeleteAria", { date: day })} title={t("coMeetingDeleteAria", { date: day })}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="vc-courses-meeting-add">
+        <FormField label={t("coMeetingDate")}>
+          <Input type="date" dir="ltr" value={date} onChange={(e) => setDate(e.target.value)} />
+        </FormField>
+        <FormField label={t("coMeetingExercise")}>
+          <Select value={exerciseId} onChange={(e) => setExerciseId(e.target.value)}>
+            {exercises.map((ex) => (
+              <option key={ex.exercise_id} value={ex.exercise_id}>
+                {repeated(ex) ? `${titleOf(ex)} (${ex.exercise_id})` : titleOf(ex)}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+        <FormField label={t("coMeetingTitle")}>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("coMeetingTitlePh")} />
+        </FormField>
+        <Button icon={<CalendarPlus />} busy={adding} disabled={!date || !exerciseId} onClick={add}>{t("addMeeting")}</Button>
+      </div>
 
       {attendance && (
-        <Modal onClose={() => setAttendance(null)} width={760}>
-          <h3 style={{ marginTop: 0 }}>
-            {t("attendanceTitle", { d: attendance.meeting.meeting_date })}
-            <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 14 }}>
-              {" "}· {attendance.counts.attended}/{attendance.counts.members}
-            </span>
-          </h3>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: "#f9fafb" }}>
-                <th style={th}>{t("colName")}</th>
-                <th style={th} />
-                <th style={th}>{t("firstSeen")}</th>
-                <th style={th}>{t("colMessages")}</th>
-                <th style={th}>{t("colStepsApproved")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {attendance.rows.map((r) => (
-                <tr key={r.user_id} style={{ borderTop: "1px solid #f3f4f6" }}>
-                  <td style={td} dir="auto">{r.username}{r.group ? ` · ${r.group}` : ""}</td>
-                  <td style={{ ...td, color: r.attended ? "#166534" : "#b91c1c", fontWeight: 600 }}>
-                    {r.attended ? t("attendedYes") : t("attendedNo")}
-                  </td>
-                  <td style={td} dir="ltr">{r.first_seen ?? ""}</td>
-                  <td style={td}>{r.messages}</td>
-                  <td style={td}>{r.steps_approved}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
-            <Button onClick={() => setAttendance(null)}>{t("close")}</Button>
-          </div>
+        <Modal
+          size="lg" onClose={() => setAttendance(null)}
+          title={t("attendanceTitle", { d: formatDay(attendance.meeting.meeting_date, lang) })}
+          subtitle={t("coAttendanceSub", {
+            a: attendance.counts.attended, m: attendance.counts.members,
+            exercise: exerciseName(attendance.meeting.exercise_id, attendance.meeting.exercise_title).name,
+          })}
+          footer={<><span className="u-push" /><Button onClick={() => setAttendance(null)}>{t("close")}</Button></>}
+        >
+          {attendance.rows.length === 0 ? (
+            <p className="u-muted">{t("coAttendanceEmpty")}</p>
+          ) : (
+            <div className="vc-table-wrap">
+              <table className="vc-table">
+                <thead>
+                  <tr>
+                    <th scope="col">{t("colName")}</th>
+                    <th scope="col">{t("coColAttended")}</th>
+                    <th scope="col">{t("firstSeen")}</th>
+                    <th scope="col">{t("colMessages")}</th>
+                    <th scope="col">{t("colStepsApproved")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attendance.rows.map((r) => (
+                    <tr key={r.user_id}>
+                      <td>
+                        <span dir="auto">{r.username}</span>
+                        {r.group && <span className="u-muted"> · <span dir="auto">{r.group}</span></span>}
+                      </td>
+                      <td>
+                        {r.attended
+                          ? <span className="vc-badge vc-badge--success">{t("attendedYes")}</span>
+                          : <span className="vc-badge">{t("attendedNo")}</span>}
+                      </td>
+                      <td>{r.first_seen ? <Time value={r.first_seen} mode="full" /> : <span className="u-muted">–</span>}</td>
+                      <td>{r.messages}</td>
+                      <td>{r.steps_approved}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Modal>
       )}
-    </div>
+    </section>
   );
 }
-
-const th: React.CSSProperties = { padding: "6px 8px", textAlign: "start", fontWeight: 600 };
-const td: React.CSSProperties = { padding: "4px 8px" };

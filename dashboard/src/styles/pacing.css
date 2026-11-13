@@ -1,0 +1,165 @@
+/* Class pacing (PacingPanel) and step checks (StepChecks): the lecturer's
+   cockpit during a live class. Built from the tokens; logical properties only. */
+
+.vc-pacing { margin-bottom: 24px; }
+.vc-pacing .vc-empty { padding: 16px 12px; }
+.vc-pacing .vc-empty__title { font-size: var(--fs-md); }
+
+/* ---------- head: title, hint, course ---------- */
+.vc-pacing__head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.vc-pacing__title { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-lg); font-weight: 700; }
+.vc-pacing__title > svg { width: 18px; height: 18px; color: var(--c-brand); flex: none; }
+.vc-pacing__hint { margin-top: 4px; color: var(--c-text-3); font-size: var(--fs-sm); }
+.vc-pacing-course { display: inline-flex; align-items: center; gap: 8px; margin-inline-start: auto; font-size: var(--fs-sm); font-weight: 600; color: var(--c-text-2); }
+.vc-pacing-course .vc-select { width: auto; max-width: 280px; }
+
+/* "How this works": closed by default, small. */
+.vc-pacing-how { margin-top: 6px; font-size: var(--fs-sm); color: var(--c-text-2); }
+.vc-pacing-how > summary { display: inline-flex; align-items: center; gap: 4px; color: var(--c-brand); font-weight: 600; font-size: var(--fs-xs); }
+.vc-pacing-how > summary > svg { width: 14px; height: 14px; }
+.vc-pacing-how ul { margin: 6px 0 0; padding-inline-start: 18px; display: grid; gap: 4px; max-width: 760px; }
+.vc-pacing-how p { margin: 6px 0 0; max-width: 760px; }
+
+/* ---------- the status line and the main controls ---------- */
+.vc-pacing-status {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 14px;
+  padding: 12px 14px; border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface-2);
+}
+.vc-pacing-status__text { flex: 1 1 260px; min-width: 0; }
+.vc-pacing-status__main { font-size: var(--fs-lg); font-weight: 700; line-height: 1.3; }
+.vc-pacing-status__sub { margin-top: 2px; font-size: var(--fs-sm); color: var(--c-text-2); }
+.vc-pacing-status__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.vc-pacing-status__actions .vc-select { width: auto; max-width: 230px; }
+
+/* What waits for the lecturer, in words. */
+.vc-pacing-needs-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--c-text-2); }
+
+/* ---------- step chips ---------- */
+.vc-pacing-legend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 14px 0 8px;
+  font-size: var(--fs-xs); color: var(--c-text-3);
+}
+.vc-pacing-legend__item { display: inline-flex; align-items: center; gap: 4px; }
+.vc-pacing-legend__item > svg { width: 13px; height: 13px; flex: none; }
+.vc-pacing-legend__swatch { display: inline-block; width: 16px; height: 12px; border-radius: 3px; border: 1px dashed var(--c-brand); }
+
+.vc-pacing-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.vc-pacing-chip {
+  min-width: 60px; padding: 4px 8px; border: 1px solid var(--c-border); border-radius: var(--radius-sm);
+  background: var(--c-surface-3); color: var(--c-text-3); font-size: var(--fs-xs); line-height: 1.4; text-align: center;
+}
+.vc-pacing-chip[data-state="open"] { background: var(--c-surface); border-color: var(--c-success-border); color: var(--c-text); }
+.vc-pacing-chip[data-state="next"] { border-style: dashed; border-color: var(--c-brand); }
+.vc-pacing-chip__label { display: flex; align-items: center; justify-content: center; gap: 3px; font-size: var(--fs-sm); font-weight: 700; }
+.vc-pacing-chip__counts { display: flex; justify-content: center; gap: 7px; }
+.vc-pacing-count { display: inline-flex; align-items: center; gap: 2px; }
+.vc-pacing-count > svg, .vc-pacing-chip__label > svg { width: 12px; height: 12px; flex: none; }
+.vc-pacing-count--here { color: var(--c-info); font-weight: 700; }
+.vc-pacing-count--quiz { color: var(--c-warning); font-weight: 700; }
+
+/* ---------- things that wait for the lecturer ---------- */
+.vc-pacing-wait {
+  margin-top: 16px; padding: 14px; border: 1px solid var(--c-warning-border);
+  border-inline-start: 4px solid var(--c-warning); border-radius: var(--radius); background: var(--c-warning-soft);
+}
+.vc-pacing-wait--urgent { border-color: var(--c-danger-border); border-inline-start-color: var(--c-danger); background: var(--c-danger-soft); }
+.vc-pacing-wait__head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.vc-pacing-wait__title { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-md); font-weight: 700; }
+.vc-pacing-wait__title > svg { width: 18px; height: 18px; flex: none; color: var(--c-warning); }
+.vc-pacing-wait--urgent .vc-pacing-wait__title > svg { color: var(--c-danger); }
+.vc-pacing-wait__hint { margin-top: 2px; font-size: var(--fs-sm); color: var(--c-text-2); }
+
+.vc-pacing-item { margin-top: 10px; padding: 12px; border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface); }
+.vc-pacing-item__head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
+.vc-pacing-item__who { font-weight: 700; overflow-wrap: anywhere; }
+.vc-pacing-item__step { font-weight: 600; color: var(--c-brand); }
+.vc-pacing-item__meta { font-size: var(--fs-xs); color: var(--c-text-3); }
+
+/* The student's text next to what only the lecturer sees. */
+.vc-pacing-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-top: 10px; }
+.vc-pacing-compare__label { display: block; margin-bottom: 4px; font-size: var(--fs-xs); font-weight: 650; color: var(--c-text-2); }
+.vc-pacing-text {
+  padding: 8px 10px; border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-surface-2);
+  font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+/* What only the lecturer sees (expected output, model answer): one tint everywhere. */
+.vc-pacing-text--private, .vc-pre.vc-pacing-private { background: var(--c-brand-soft); border-color: var(--c-brand-border); color: var(--c-text); }
+.vc-pacing-out { max-height: 260px; overflow: auto; }
+.vc-pacing-pre { margin: 0; font-size: var(--fs-xs); }
+.vc-pacing-missing { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; font-size: var(--fs-xs); color: var(--c-warning); }
+.vc-pacing-missing > svg { flex: none; width: 14px; height: 14px; margin-top: 1px; }
+
+/* The decision row: continue on one side, "send back" with its own note on the other. */
+.vc-pacing-decide { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; margin-top: 12px; }
+.vc-pacing-decide--center { align-items: center; }
+.vc-pacing-sendback {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; flex: 1 1 380px; min-width: 0;
+  padding: 8px 10px; border: 1px dashed var(--c-border-strong); border-radius: var(--radius);
+}
+.vc-pacing-sendback__field { flex: 1 1 220px; min-width: 0; }
+.vc-pacing-sendback__field .vc-label { margin-bottom: 3px; font-size: var(--fs-xs); }
+.vc-pacing-group { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.vc-pacing-field { display: inline-flex; flex-direction: column; min-width: 0; }
+.vc-pacing-field .vc-label { margin-bottom: 3px; font-size: var(--fs-xs); }
+.vc-pacing-field .vc-select { width: auto; }
+.vc-pacing-note { flex: 1 1 260px; width: auto; min-width: 0; }
+.vc-pacing-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
+.vc-pacing-tell { margin-top: 10px; }
+.vc-pacing-tell .vc-select { width: auto; max-width: 100%; }
+
+/* ---------- collapsible blocks: students, questions ---------- */
+.vc-pacing-block { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--c-border); }
+.vc-pacing-block > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; list-style: none; font-size: var(--fs-md); font-weight: 700; }
+.vc-pacing-block > summary::-webkit-details-marker { display: none; }
+.vc-pacing-chev { width: 16px; height: 16px; flex: none; color: var(--c-text-3); transition: transform 0.12s; }
+.vc-pacing-block:not([open]) > summary .vc-pacing-chev { transform: rotate(-90deg); }
+[dir="rtl"] .vc-pacing-block:not([open]) > summary .vc-pacing-chev { transform: rotate(90deg); }
+
+.vc-pacing-students {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px;
+  margin: 10px 0 0; padding: 0; list-style: none;
+}
+.vc-pacing-student { padding: 8px 10px; border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface); font-size: var(--fs-sm); }
+.vc-pacing-student__row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.vc-pacing-student__name { font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
+.vc-pacing-student__marks { display: inline-flex; align-items: center; gap: 4px; }
+.vc-pacing-student__marks > svg { width: 15px; height: 15px; flex: none; }
+.vc-pacing-student .vc-select { width: auto; max-width: 160px; margin-inline-start: auto; }
+.vc-pacing-student__more { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; font-size: var(--fs-xs); color: var(--c-text-3); }
+.vc-pacing-student__more > span { display: inline-flex; align-items: center; gap: 4px; }
+.vc-pacing-student__more svg { width: 12px; height: 12px; flex: none; }
+.vc-pacing-flag { margin-top: 4px; }
+.vc-pacing-flag > summary { font-size: var(--fs-xs); color: var(--c-warning); }
+.vc-pacing-flag .vc-pre { margin-top: 4px; max-height: 220px; }
+
+.vc-pacing-quiz {
+  margin-top: 10px; padding: 12px; border: 1px solid var(--c-border); border-inline-start: 4px solid var(--c-warning);
+  border-radius: var(--radius); background: var(--c-surface);
+}
+.vc-pacing-quiz[data-approved="true"] { border-inline-start-color: var(--c-success); }
+.vc-pacing-quiz .vc-textarea { min-height: 56px; margin-top: 8px; font-size: var(--fs-sm); }
+.vc-pacing-quiz__answers { margin-top: 8px; font-size: var(--fs-xs); }
+.vc-pacing-quiz__answers > summary { color: var(--c-text-2); font-weight: 600; }
+.vc-pacing-quiz__answers ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.vc-pacing-quiz__answers li { padding: 4px 0; border-bottom: 1px solid var(--c-border); }
+.vc-pacing-quiz__answers li:last-child { border-bottom: 0; }
+
+/* ---------- step checks: the student's terminal (IDE plugin) ---------- */
+.vc-pacing-term { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface-2); font-size: var(--fs-xs); }
+.vc-pacing-term__title { margin-bottom: 6px; font-weight: 700; color: var(--c-text-2); }
+.vc-pacing-term__rule { margin-bottom: 6px; }
+.vc-pacing-term__name { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; }
+.vc-pacing-term__name > svg { width: 13px; height: 13px; flex: none; }
+.vc-pacing-term pre { margin: 2px 0 0; font-size: var(--fs-xs); }
+.vc-pacing-term__cmd { color: var(--c-info); }
+.vc-pacing-term__blocked { color: var(--c-danger); }
+.vc-pacing-term__exit { color: var(--c-text-3); }
+.vc-pacing-term__ok { color: var(--c-success); }
+.vc-pacing-term__fail { color: var(--c-danger); }
+.vc-pacing-term details { margin-top: 4px; }
+.vc-pacing-term summary { color: var(--c-text-2); font-weight: 600; }
+
+.vc-pacing-attach { margin-top: 10px; }
+.vc-pacing-attach > summary { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 600; color: var(--c-brand); }
+.vc-pacing-attach > summary > svg { width: 14px; height: 14px; }
+.vc-pacing-attach .vc-pre { margin-top: 6px; max-height: 360px; }

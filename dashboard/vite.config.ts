@@ -10,6 +10,8 @@ export default defineConfig({
   build: {
     outDir: "../backend/web",
     emptyOutDir: true,
+    // One file for a dashboard that runs on the lecturer's own computer.
+    chunkSizeWarningLimit: 900,
   },
   server: {
     port: Number(process.env.VERICLASS_DASHBOARD_PORT || 5173),

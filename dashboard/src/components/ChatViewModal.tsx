@@ -1,9 +1,32 @@
+import "../styles/review.css";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { Message, ParamLabel, Probe, SessionDetail, Student, TranscriptEntry, TranscriptResponse } from "../types";
 import { renderParams } from "../params";
 import { useLang } from "../i18n";
+import { Button, Check, Loading, Modal, Time } from "./ui";
+import { entryLabel, modelLabel } from "./ReviewQueue";
 
+/** A message's text: what is inside ``` fences looks like code, the rest is
+ *  ordinary text in its own direction (Hebrew or English). */
+function RichText({ text }: { text: string }) {
+  const parts = text.split("```");
+  return (
+    <div className="vc-review-msg__body">
+      {parts.map((part, i) => {
+        if (i % 2 === 1) {
+          // The fence's first line may name the language ("```python").
+          const code = /^[\w+#.-]*\n/.test(part) ? part.slice(part.indexOf("\n") + 1) : part;
+          return <pre key={i} className="vc-pre vc-pre--light" dir="ltr">{code.replace(/\n$/, "")}</pre>;
+        }
+        const prose = part.replace(/^\n+/, "").replace(/\n+$/, "");
+        return prose ? <div key={i} className="u-prewrap" dir="auto">{prose}</div> : null;
+      })}
+    </div>
+  );
+}
+
+/** A student's whole conversation, read only, refreshed every two seconds. */
 export function ChatViewModal({
   student,
   paramLabels,
@@ -16,218 +39,201 @@ export function ChatViewModal({
   const { t } = useLang();
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   // The chat as the student saw it (steps, pasted outputs, quiz, notes): for
-  // exercises that keep a transcript; the tutor's messages and probes otherwise.
+  // exercises that keep a transcript; the tutor's messages and the lecturer's questions otherwise.
   const [chat, setChat] = useState<TranscriptResponse | null>(null);
   const [view, setView] = useState<"chat" | "messages" | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  // Was the lecturer at the end of the conversation (as of their last scroll)?
+  const atBottom = useRef(true);
+  // The newest item last shown, with its view: a different one means something new arrived.
+  const lastShown = useRef<string | null>(null);
+  const session = detail?.session ?? student;
   const params = renderParams(detail?.session.variant_params ?? student.variant_params, paramLabels);
 
   useEffect(() => {
+    let alive = true;
     const tick = () => {
-      api.sessionDetail(student.session_id).then(setDetail).catch(console.error);
-      api.transcript(student.session_id).then(setChat).catch(console.error);
+      api.sessionDetail(student.session_id).then((d) => { if (alive) setDetail(d); })
+        .catch(() => { /* a background poll: the page's banner says when the server is unreachable */ });
+      api.transcript(student.session_id).then((c) => { if (alive) setChat(c); })
+        .catch(() => { /* as above */ });
     };
     tick();
-    const id = setInterval(tick, 2000);
-    return () => clearInterval(id);
+    const id = window.setInterval(tick, 2000);
+    return () => { alive = false; window.clearInterval(id); };
   }, [student.session_id]);
 
   const hasChat = !!chat?.enabled && chat.entries.length > 0;
   const shown = view ?? (hasChat ? "chat" : "messages");
-
-  useEffect(() => {
-    if (autoScroll) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [detail, chat, shown, autoScroll]);
-
   const items = interleave(detail?.messages ?? [], detail?.probes ?? []);
+  const entries = chat?.entries ?? [];
+  const newest = shown === "chat"
+    ? `chat|${entries.length ? entries[entries.length - 1].id : ""}`
+    : `messages|${items.length ? itemKey(items[items.length - 1]) : ""}`;
+
+  const toEnd = (smooth: boolean) => {
+    const el = scroller.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    atBottom.current = true;
+  };
+
+  // The polls replace the lists every two seconds; only a NEW item moves the
+  // view, and only when the lecturer follows new messages and was already at the
+  // end (one who scrolled up to read stays where they are). A view opens at its end.
+  useEffect(() => {
+    const before = lastShown.current;
+    lastShown.current = newest;
+    const nowIn = newest.split("|")[0];
+    if (before === null || before.split("|")[0] !== nowIn) toEnd(false);
+    else if (before !== newest && autoScroll && atBottom.current) toEnd(true);
+  }, [newest, autoScroll]);
+
+  const onScroll = () => {
+    const el = scroller.current;
+    if (el) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  };
+
+  const modeName = session.mode === "coding_partner" ? t("codingPartner") : t("mentor");
+  // "default" is the version of an exercise that has no versions: nothing to say.
+  const subtitle = [modeName, session.variant && session.variant !== "default"
+    ? t("chatVariant", { v: session.variant }) : null].filter(Boolean).join(" · ");
+
   const tab = (key: "chat" | "messages", label: string) => (
-    <button
-      onClick={() => setView(key)}
-      style={{
-        border: "1px solid #d1d5db", borderRadius: 4, padding: "3px 10px", cursor: "pointer",
-        background: shown === key ? "#111827" : "white", color: shown === key ? "white" : "#111827",
-      }}
-    >
+    <button type="button" role="tab" className="vc-tab" aria-selected={shown === key} onClick={() => setView(key)}>
       {label}
     </button>
   );
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 100,
-      }}
-      onClick={onClose}
+    <Modal
+      title={t("chatViewTitle", { name: student.username })}
+      subtitle={subtitle}
+      size="lg"
+      flush
+      onClose={onClose}
+      footer={
+        <>
+          <Check checked={autoScroll} onChange={(v) => { setAutoScroll(v); if (v) toEnd(true); }}>{t("autoScroll")}</Check>
+          <span className="u-muted u-xs">
+            {detail ? t("chatFooter", { m: detail.messages.length, p: detail.probes.length }) : t("loading")}
+          </span>
+          <span className="u-push" />
+          <Button onClick={onClose}>{t("close")}</Button>
+        </>
+      }
     >
-      <div
-        style={{
-          background: "white",
-          padding: 20,
-          borderRadius: 8,
-          width: 820,
-          maxHeight: "85vh",
-          display: "flex",
-          flexDirection: "column",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h3 style={{ margin: 0 }}>
-            💬 {student.username} · {student.variant} · {student.mode}
-          </h3>
-          <div>
-            <label style={{ fontSize: 12, marginRight: 12 }}>
-              <input
-                type="checkbox"
-                checked={autoScroll}
-                onChange={(e) => setAutoScroll(e.target.checked)}
-              />{" "}
-              {t("autoScroll")}
-            </label>
-            <button onClick={onClose}>{t("close")}</button>
-          </div>
-        </header>
-
-        {params.length > 0 && (
-          <div style={{ marginTop: 8, fontSize: 12, color: "#4b5563", display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {params.map((p, i) => (
-              <span key={i} title={p.note ?? undefined} style={{ background: "#f3f4f6", borderRadius: 6, padding: "2px 8px" }}>
-                <span style={{ color: "#6b7280" }}>{p.label}:</span>{" "}
-                <span style={{ fontWeight: 600 }} dir="auto">{p.value}</span>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {chat?.enabled && (
-          <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
-            {tab("chat", t("chatViewTranscript", { n: chat.entries.length }))}
-            {tab("messages", t("chatViewMessages", { m: detail?.messages.length ?? 0, p: detail?.probes.length ?? 0 }))}
-          </div>
-        )}
-
-        <div
-          style={{
-            marginTop: 12,
-            flex: 1,
-            overflowY: "auto",
-            border: "1px solid #eee",
-            borderRadius: 6,
-            padding: 12,
-            background: "#fafafa",
-          }}
-        >
-          {shown === "chat" ? (
-            <>
-              {chat?.truncated && <p style={{ color: "#888", fontSize: 12 }}>{t("chatViewTruncated")}</p>}
-              {(chat?.entries.length ?? 0) === 0 && <p style={{ color: "#888" }}>{t("noMessages")}</p>}
-              {chat?.entries.map((e) => <TranscriptBubble key={`t${e.id}`} e={e} />)}
-            </>
-          ) : (
-            <>
-              {items.length === 0 && (
-                <p style={{ color: "#888" }}>{t("noMessages")}</p>
-              )}
-              {items.map((item) =>
-                item.kind === "message" ? (
-                  <MessageBubble key={`m${item.data.id}`} m={item.data} />
-                ) : (
-                  <ProbeBubble key={`p${item.data.id}`} p={item.data} />
-                )
-              )}
-            </>
+      {(params.length > 0 || chat?.enabled) && (
+        <div className="vc-review-chat__top">
+          {params.length > 0 && (
+            <div className="vc-review-chat__params">
+              {params.map((p, i) => (
+                <span key={i} className="vc-badge" title={p.note ?? undefined}>
+                  {p.label}: <strong dir="auto">{p.value}</strong>
+                </span>
+              ))}
+            </div>
           )}
-          <div ref={bottomRef} />
+          {chat?.enabled && (
+            <div className="vc-tabs vc-review-chat__tabs" role="tablist">
+              {tab("chat", t("chatViewTranscript", { n: chat.entries.length }))}
+              {tab("messages", t("chatViewMessages", { m: detail?.messages.length ?? 0, p: detail?.probes.length ?? 0 }))}
+            </div>
+          )}
         </div>
+      )}
 
-        <footer style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-          {detail
-            ? t("chatFooter", { m: detail.messages.length, p: detail.probes.length })
-            : t("loading")}
-        </footer>
+      <div ref={scroller} className="vc-review-chat" onScroll={onScroll} tabIndex={0}
+           role={chat?.enabled ? "tabpanel" : "region"} aria-label={t("chatViewLog")}>
+        {!detail && !chat ? (
+          <Loading />
+        ) : shown === "chat" ? (
+          <>
+            {chat?.truncated && <p className="u-muted u-xs u-mt-8">{t("chatViewTruncated")}</p>}
+            {entries.length === 0 && <p className="u-muted u-mt-8">{t("noMessages")}</p>}
+            {entries.map((e) => <TranscriptBubble key={`t${e.id}`} e={e} />)}
+          </>
+        ) : (
+          <>
+            {items.length === 0 && <p className="u-muted u-mt-8">{t("noMessages")}</p>}
+            {items.map((item) =>
+              item.kind === "message"
+                ? <MessageBubble key={itemKey(item)} m={item.data} />
+                : <ProbeBubble key={itemKey(item)} p={item.data} />,
+            )}
+          </>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
-/** One transcript entry: the student's on the right, the chat's and the
-server's notes on the left (notes tinted). */
+/** One transcript entry: the student's at the end side, the chat's and the
+ *  server's notes at the start (notes tinted). */
 function TranscriptBubble({ e }: { e: TranscriptEntry }) {
+  const { t } = useLang();
   const isStudent = e.author === "student";
   const isNote = e.author === "system" || e.origin === "server";
   return (
-    <div style={{ display: "flex", justifyContent: isStudent ? "flex-end" : "flex-start", margin: "8px 0" }}>
-      <div
-        dir="auto"
-        style={{
-          background: isStudent ? "#dbeafe" : isNote ? "#fef3c7" : "white",
-          border: "1px solid #ddd",
-          borderRadius: 8,
-          padding: "8px 12px",
-          maxWidth: "78%",
-          whiteSpace: "pre-wrap",
-          overflowWrap: "anywhere",
-          fontSize: 13,
-        }}
-      >
-        <div style={{ fontSize: 10, color: "#666", marginBottom: 4 }} dir="ltr">
-          {e.author} · {e.kind}{e.step != null ? ` · step ${e.step}` : ""} · {e.created_at}
+    <div className="vc-review-msg" data-side={isStudent ? "end" : "start"}
+         data-who={isStudent ? "student" : isNote ? "note" : "tutor"}>
+      <div className="vc-review-msg__bubble">
+        <div className="vc-review-msg__meta">
+          <span className="vc-review-msg__who">
+            {t(entryLabel(e))}{e.step != null && e.kind === "step" ? ` ${e.step}` : ""}
+          </span>
+          {e.step != null && e.kind !== "step" && <span>{t("chatStepN", { n: e.step })}</span>}
+          <Time value={e.created_at} mode="clock" />
         </div>
-        {e.content}
+        <RichText text={e.content} />
       </div>
     </div>
   );
 }
 
+/** A turn of the conversation with the tutor; who wrote it, and (small) the model behind it. */
 function MessageBubble({ m }: { m: Message }) {
+  const { t } = useLang();
   const isUser = m.role === "user";
+  const mode = m.mode_at_time === "coding_partner" ? t("codingPartner") : m.mode_at_time === "mentor" ? t("mentor") : null;
+  const by = m.model === "bank" ? t("chatFromBank") : m.model ? modelLabel(m.model) : null;
   return (
-    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", margin: "8px 0" }}>
-      <div
-        style={{
-          background: isUser ? "#dbeafe" : "white",
-          border: "1px solid #ddd",
-          borderRadius: 8,
-          padding: "8px 12px",
-          maxWidth: "78%",
-          whiteSpace: "pre-wrap",
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          fontSize: 13,
-        }}
-      >
-        <div style={{ fontSize: 10, color: "#666", marginBottom: 4 }}>
-          {m.role} · {m.created_at} · {m.mode_at_time}
-          {m.model && <> · {m.model}{m.cached ? " (cached)" : ""}</>}
+    <div className="vc-review-msg" data-side={isUser ? "end" : "start"} data-who={isUser ? "student" : "tutor"}>
+      <div className="vc-review-msg__bubble">
+        <div className="vc-review-msg__meta">
+          <span className="vc-review-msg__who">{isUser ? t("reviewKindStudent") : t("reviewKindTutor")}</span>
+          <Time value={m.created_at} mode="clock" />
+          {mode && <span>{mode}</span>}
+          {by && <span className="vc-review-msg__model">{by}{m.cached ? ` · ${t("chatCached")}` : ""}</span>}
         </div>
-        {m.body}
+        <RichText text={m.body} />
       </div>
     </div>
   );
 }
 
+/** A question the lecturer sent the student ("Ask them"), and the student's graded answer. */
 function ProbeBubble({ p }: { p: Probe }) {
   const { t } = useLang();
   const grade = p.override_grade ?? p.auto_grade;
   return (
-    <div style={{ margin: "10px 0", padding: 10, background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 8 }}>
-      <div style={{ fontSize: 11, color: "#9a3412", marginBottom: 4 }}>
-        🔎 {t("instructorProbe")} · {p.status} · {p.sent_at}
-        {p.source !== "manual" ? ` · ${p.source}` : ""}
+    <div className="vc-review-probe">
+      <div className="vc-review-msg__meta">
+        <span className="vc-review-msg__who">{t("instructorProbe")}</span>
+        <Time value={p.sent_at} mode="clock" />
+        <span>{p.status === "answered" ? t("chatProbeAnswered") : t("chatProbeWaiting")}</span>
+        {p.source === "suggested" && <span>{t("chatProbeSuggested")}</span>}
+        {p.source === "edited" && <span>{t("chatProbeEdited")}</span>}
       </div>
-      <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{p.body}</div>
+      <RichText text={p.body} />
       {p.answer && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #fdba74" }}>
-          <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>
-            {t("answerGrade", { g: grade ?? "?" })}
-            {p.override_grade != null ? ` ${t("overridden")}` : ""}
+        <div className="vc-review-probe__answer">
+          <div className="vc-review-msg__meta">
+            <span className="vc-review-msg__who">{t("answerGrade", { g: grade ?? "?" })}</span>
+            {p.override_grade != null && <span>{t("overridden")}</span>}
           </div>
-          <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{p.answer}</div>
+          <RichText text={p.answer} />
         </div>
       )}
     </div>
@@ -237,6 +243,10 @@ function ProbeBubble({ p }: { p: Probe }) {
 type Item =
   | { kind: "message"; ts: string; data: Message }
   | { kind: "probe"; ts: string; data: Probe };
+
+function itemKey(item: Item): string {
+  return item.kind === "message" ? `m${item.data.id}` : `p${item.data.id}`;
+}
 
 function interleave(messages: Message[], probes: Probe[]): Item[] {
   const items: Item[] = [

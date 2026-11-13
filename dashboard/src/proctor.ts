@@ -1,4 +1,4 @@
-import type { ExamState, Student } from "./types";
+import type { Student } from "./types";
 
 // Shared helpers for the exam/proctor UI: an alert tone (generated with Web
 // Audio, no asset needed) and human labels for proctor event kinds.
@@ -50,32 +50,6 @@ export function alertBeep(): void {
   });
 }
 
-const KIND_LABEL: Record<string, string> = {
-  exam_started: "started the exam",
-  focus_lost: "switched away from CLion",
-  minimized: "minimized CLion",
-  fullscreen_exited: "left full screen",
-  focus_regained: "returned (refocused)",
-  window_restored: "returned (restored)",
-  blocked_command: "ran a command that isn't allowed",
-  stock_terminal_opened: "tried to open the IDE's own Terminal",
-  fullscreen_restored: "back in full screen",
-  tool_window_opened: "opened a panel that isn't allowed",
-  other_window_opened: "opened another window",
-  other_window_closed: "closed the other window",
-  file_opened: "opened an editor tab",
-  paste_external: "pasted text from outside the IDE",
-  paste_internal: "pasted text copied inside the IDE",
-  other_app_in_front: "another app in front of the IDE",
-  window_unmaximized: "made the IDE window smaller",
-  window_maximized: "window maximized again",
-  ide_closed: "closed the IDE",
-};
-
-export function kindLabel(kind: string): string {
-  return KIND_LABEL[kind] ?? kind;
-}
-
 const LEAVE_KINDS = new Set(["focus_lost", "minimized", "fullscreen_exited", "other_app_in_front", "window_unmaximized", "ide_closed"]);
 
 export function isLeaveKind(kind: string | null): boolean {
@@ -106,16 +80,6 @@ export function needsAttention(s: Student): boolean {
   return s.exam_state != null && s.exam_state !== "ok";
 }
 
-export const STATE_STYLE: Record<ExamState, { icon: string; color: string; bg: string }> = {
-  ok: { icon: "🟢", color: "#047857", bg: "#ecfdf5" },
-  away: { icon: "🔴", color: "#b91c1c", bg: "#fef2f2" },
-  other_window: { icon: "🟠", color: "#c2410c", bg: "#fff7ed" },
-  not_fullscreen: { icon: "🟡", color: "#a16207", bg: "#fefce8" },
-  not_maximized: { icon: "🟡", color: "#a16207", bg: "#fefce8" },
-  ide_closed: { icon: "🔴", color: "#b91c1c", bg: "#fef2f2" },
-  no_signal: { icon: "⚫", color: "#374151", bg: "#f3f4f6" },
-};
-
 /** The time it happened on the student's machine when known, else when it arrived. */
 export function eventTime(e: { client_at?: string | null; created_at: string }): string {
   return e.client_at ?? e.created_at;
@@ -127,11 +91,4 @@ export function arrivedLate(e: { client_at?: string | null; created_at: string }
   const a = Date.parse(e.client_at.replace(" ", "T") + "Z");
   const b = Date.parse(e.created_at.replace(" ", "T") + "Z");
   return !Number.isNaN(a) && !Number.isNaN(b) && b - a > 60_000;
-}
-
-export function formatAway(ms: number | null): string {
-  if (ms == null) return "";
-  const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
-  return `${Math.floor(s / 60)}m ${s % 60}s`;
 }

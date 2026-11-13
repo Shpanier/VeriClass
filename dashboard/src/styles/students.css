@@ -1,0 +1,146 @@
+/* The class page's student area: the exercise picker, the student cards, the
+   exam alert bar and the IDE plugin's dialogs (exam log, terminal log,
+   submissions, verifying an exported log). Built from tokens.css. */
+
+/* ---------- the exercise picker ---------- */
+.vc-students-head { margin-bottom: 20px; }
+.vc-students-head__row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.vc-students-head__label { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -0.01em; }
+.vc-students-head__select { width: auto; min-width: 240px; max-width: min(520px, 100%); font-weight: 600; }
+.vc-students-head__facts { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.vc-students-head .vc-hint { margin-top: 6px; }
+
+/* ---------- the student cards ---------- */
+.vc-students-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.vc-students-toolbar__search { position: relative; display: block; }
+.vc-students-toolbar__search > svg {
+  position: absolute; inset-inline-start: 9px; top: 50%; width: 14px; height: 14px;
+  transform: translateY(-50%); color: var(--c-text-3); pointer-events: none;
+}
+.vc-students-toolbar__search .vc-input { width: 220px; padding-inline-start: 28px; }
+
+.vc-students-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.vc-students-card--alert { border-width: 2px; }
+.vc-students-card__head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.vc-students-card__who { flex: 1; min-width: 0; }
+.vc-students-card__name { font-size: var(--fs-md); font-weight: 650; line-height: 1.3; }
+.vc-students-card__meta { font-size: var(--fs-xs); color: var(--c-text-3); }
+.vc-students-card__foot {
+  display: flex; flex-direction: column; gap: 10px; margin-top: auto;
+  padding-top: 10px; border-top: 1px solid var(--c-border);
+}
+
+.vc-students-avatar {
+  display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 50%;
+  background: var(--c-brand-soft); color: var(--c-brand); font-size: var(--fs-sm); font-weight: 700;
+}
+.vc-students-avatar--danger { background: var(--c-danger); color: #fff; }
+.vc-students-avatar--warning { background: var(--c-warning); color: #fff; }
+.vc-students-avatar--muted { background: var(--c-text-3); color: #fff; }
+
+.vc-students-pill { flex: none; max-width: 50%; }
+.vc-students-pill > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+.vc-students-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.vc-students-params { font-size: var(--fs-xs); color: var(--c-text-2); line-height: 1.6; }
+.vc-students-params__label { color: var(--c-text-3); }
+.vc-students-params__value { font-weight: 600; }
+
+.vc-students-live { display: grid; gap: 2px; font-size: var(--fs-xs); color: var(--c-text-2); line-height: 1.5; }
+.vc-students-live__files { text-align: start; overflow-wrap: anywhere; }
+.vc-students-live__active { font-weight: 700; color: var(--c-text); }
+
+.vc-students-note { display: flex; align-items: flex-start; gap: 6px; font-size: var(--fs-xs); line-height: 1.45; }
+.vc-students-note > svg { flex: none; width: 14px; height: 14px; margin-top: 1px; }
+.vc-students-note__text {
+  min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+
+.vc-students-mode { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-2); }
+.vc-students-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.vc-students-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-inline-start: -6px; }
+
+/* ---------- the exam alert bar (IDE plugin) ---------- */
+.vc-students-alarm {
+  position: sticky; top: 64px; z-index: 40; margin-bottom: 16px;
+  border-width: 2px; box-shadow: var(--shadow);
+}
+.vc-card.vc-students-alarm--now { background: var(--c-danger); border-color: var(--c-danger-hover); color: #fff; }
+.vc-students-alarm__head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.vc-students-alarm__icon { display: inline-grid; place-items: center; color: var(--c-danger); }
+.vc-students-alarm__icon > svg { width: 22px; height: 22px; }
+.vc-students-alarm--now .vc-students-alarm__icon { color: #fff; }
+.vc-students-alarm__title { font-size: var(--fs-lg); font-weight: 700; color: var(--c-danger); }
+.vc-students-alarm--now .vc-students-alarm__title { color: #fff; }
+.vc-students-alarm__summary { font-size: var(--fs-sm); color: var(--c-text-2); }
+.vc-students-alarm--now .vc-students-alarm__summary { color: #fff; opacity: 0.92; }
+.vc-students-alarm__people { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* ---------- the plugin dialogs ---------- */
+.vc-students-list { border: 1px solid var(--c-border); border-radius: var(--radius); overflow: hidden; }
+.vc-students-list__title { margin-bottom: 6px; font-size: var(--fs-xs); font-weight: 650; color: var(--c-text-3); }
+.vc-students-row { padding: 8px 12px; border-bottom: 1px solid var(--c-border); background: var(--c-surface); }
+.vc-students-row:last-child { border-bottom: 0; }
+.vc-students-row--alert { background: var(--c-danger-soft); }
+.vc-students-row__line { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.vc-students-row__icon { flex: none; align-self: center; width: 16px; height: 16px; }
+.vc-students-row__body { flex: 1; min-width: 0; }
+.vc-students-row__title { font-weight: 550; }
+.vc-students-row--alert .vc-students-row__title { font-weight: 700; color: var(--c-danger); }
+.vc-students-row__detail { font-size: var(--fs-xs); color: var(--c-text-2); overflow-wrap: anywhere; }
+.vc-students-row__detail.u-danger { color: var(--c-danger); }
+.vc-students-row__detail.u-warning { color: var(--c-warning); }
+.vc-students-row__when { flex: none; display: grid; justify-items: end; font-size: var(--fs-xs); color: var(--c-text-3); white-space: nowrap; text-align: end; }
+.vc-students-row .vc-pre { margin-top: 6px; max-height: 240px; }
+.vc-students-row details > summary { margin-top: 4px; font-size: var(--fs-xs); color: var(--c-text-2); }
+
+.vc-students-cmd {
+  flex: 1; min-width: 0; padding: 0; border-radius: 0; background: none;
+  font-family: var(--font-mono); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere; text-align: start;
+}
+.vc-students-cmd__prompt { color: var(--c-text-3); }
+.vc-students-row--alert .vc-students-cmd { font-weight: 700; color: var(--c-danger); }
+
+.vc-students-details { margin-top: 14px; }
+.vc-students-details > summary { margin-bottom: 8px; font-weight: 650; }
+.vc-students-details > summary > svg { width: 16px; height: 16px; margin-inline: 4px; vertical-align: -3px; color: var(--c-text-3); }
+.vc-students-details .vc-students-list { max-height: 35vh; overflow: auto; }
+
+/* Submissions and the recommended grade. */
+.vc-students-grade { margin-bottom: 16px; }
+.vc-students-scores { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 22px; }
+.vc-students-score { line-height: 1; }
+.vc-students-score__value { font-size: var(--fs-2xl); font-weight: 800; }
+.vc-students-score__of { margin-inline-start: 6px; font-size: var(--fs-sm); color: var(--c-text-3); }
+.vc-students-subscore__label { font-size: var(--fs-xs); color: var(--c-text-3); }
+.vc-students-subscore__value { font-size: var(--fs-lg); font-weight: 700; }
+.vc-students-signals { display: grid; gap: 4px; margin: 10px 0 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+.vc-students-signals > li { display: flex; align-items: flex-start; gap: 6px; }
+.vc-students-signals > li > svg { flex: none; width: 14px; height: 14px; margin-top: 3px; }
+.vc-students-override .vc-input { width: 90px; }
+
+.vc-students-sub { margin-bottom: 14px; border: 1px solid var(--c-border); border-radius: var(--radius); overflow: hidden; }
+.vc-students-sub__head {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px;
+  background: var(--c-surface-2); border-bottom: 1px solid var(--c-border); font-size: var(--fs-sm);
+}
+.vc-students-sub__head > svg { width: 16px; height: 16px; color: var(--c-text-3); }
+.vc-students-sub__checks { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; }
+.vc-students-sub__case { display: inline-grid; place-items: center; }
+.vc-students-sub__case > svg { width: 14px; height: 14px; }
+.vc-students-sub__label { margin: 10px 12px 4px; font-size: var(--fs-xs); font-weight: 650; color: var(--c-text-3); }
+.vc-students-sub .vc-pre { margin: 0 12px 12px; max-height: 260px; }
+.vc-students-sub__empty { margin: 0 12px 12px; font-size: var(--fs-sm); color: var(--c-text-3); }
+
+/* Verifying an exported log. */
+.vc-students-file { display: block; font-size: var(--fs-sm); color: var(--c-text-2); }
+.vc-students-file::file-selector-button {
+  margin-inline-end: 10px; min-height: var(--control-h-sm); padding: 0 12px;
+  border: 1px solid var(--c-border-strong); border-radius: var(--radius-sm);
+  background: var(--c-surface); color: var(--c-text); font: inherit; font-weight: 600; cursor: pointer;
+}
+.vc-students-file::file-selector-button:hover { background: var(--c-surface-2); }
+.vc-students-trace { max-height: 50vh; }
+.vc-students-trace th { position: sticky; top: 0; z-index: 1; }
+.vc-students-trace td { vertical-align: top; }
+.vc-students-trace tr[data-bad="true"] td { background: var(--c-danger-soft); }

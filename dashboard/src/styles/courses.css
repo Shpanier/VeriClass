@@ -1,0 +1,146 @@
+/* The "Courses & students" tab: the page head, the course cards (exercise and
+   student pick lists, meetings), the passwords table and the student import.
+   Built from the tokens; logical properties only, so Hebrew flips by itself. */
+
+/* ---------- the page head ---------- */
+.vc-courses-head { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 12px 20px; margin-bottom: 20px; }
+.vc-courses-head__text { flex: 1; min-width: 280px; }
+.vc-courses-head__title { font-size: var(--fs-xl); margin-bottom: 4px; }
+.vc-courses-head__lead { max-width: 720px; color: var(--c-text-2); }
+.vc-courses-head__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.vc-courses-start { margin-bottom: 24px; }
+.vc-courses-start .vc-checklist { margin-top: 10px; }
+
+/* ---------- a search box with its icon ---------- */
+.vc-courses-search { position: relative; flex: 1 1 200px; min-width: 160px; max-width: 320px; }
+.vc-courses-search > svg {
+  position: absolute; inset-inline-start: 9px; top: 50%; transform: translateY(-50%);
+  width: 15px; height: 15px; color: var(--c-text-3); pointer-events: none;
+}
+.vc-courses-search > .vc-input { padding-inline-start: 30px; }
+
+/* ---------- creating a course ---------- */
+.vc-courses-create { margin-bottom: 16px; scroll-margin-top: 72px; }
+.vc-courses-create__fields { display: grid; gap: 0 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 12px; }
+
+/* ---------- a course card ---------- */
+.vc-courses-cards { display: grid; gap: 16px; }
+.vc-card.vc-courses-card { padding: 0; scroll-margin-top: 72px; }
+.vc-courses-card[data-dirty="true"] { border-color: var(--c-warning-border); }
+.vc-courses-card__head {
+  display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px 12px;
+  padding: 14px 18px; border-bottom: 1px solid var(--c-border);
+}
+.vc-input.vc-courses-card__name { max-width: 440px; font-size: var(--fs-lg); font-weight: 650; }
+.vc-courses-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; color: var(--c-text-3); font-size: var(--fs-xs); }
+.vc-courses-card__body { padding: 16px 18px 18px; }
+.vc-courses-card__cols { display: grid; gap: 20px 24px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.vc-courses-card__cols > section { min-width: 0; }
+
+/* Save, undo and delete. With unsaved changes it stays on screen at the
+   bottom of the window while any part of the card is visible. */
+.vc-courses-card__foot {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 10px 18px; border-top: 1px solid var(--c-border); background: var(--c-surface-2);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+.vc-courses-card__foot[data-dirty="true"] {
+  position: sticky; bottom: 0; z-index: 5;
+  background: var(--c-warning-soft); border-top-color: var(--c-warning-border);
+  box-shadow: 0 -6px 16px -8px rgba(16, 24, 40, 0.22);
+}
+
+.vc-courses-sub { display: flex; align-items: center; gap: 8px; font-size: var(--fs-md); font-weight: 650; }
+.vc-courses-sub > svg { width: 16px; height: 16px; color: var(--c-text-3); flex: none; }
+.vc-courses-sub + .vc-hint { margin-top: 2px; margin-bottom: 8px; }
+
+/* A few controls above a pick list: filter, select all, clear. */
+.vc-courses-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+
+/* A scrolling list of rows with a checkbox each (exercises, students). */
+.vc-courses-pick {
+  max-height: 320px; overflow: auto;
+  border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface);
+}
+.vc-courses-pick__row {
+  display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 5px 10px;
+  border-bottom: 1px solid var(--c-border); font-size: var(--fs-sm);
+}
+.vc-courses-pick__row:last-child { border-bottom: 0; }
+.vc-courses-pick__row[data-on="true"] { background: var(--c-brand-soft); }
+.vc-courses-pick__main { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; cursor: pointer; }
+.vc-courses-pick__main input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--c-brand); }
+.vc-courses-pick__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vc-courses-pick__id {
+  flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--c-text-3); font-family: var(--font-mono); font-size: var(--fs-xs);
+}
+.vc-courses-pick__badges { display: flex; flex-wrap: wrap; gap: 4px; flex: none; max-width: 40%; justify-content: flex-end; }
+.vc-courses-pick__empty { padding: 12px; color: var(--c-text-3); font-size: var(--fs-sm); }
+
+/* "Default" next to an offered exercise; kept in place (invisible) on the others. */
+.vc-courses-default {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  color: var(--c-text-2); font-size: var(--fs-xs); white-space: nowrap; cursor: pointer;
+}
+.vc-courses-default input { margin: 0; accent-color: var(--c-brand); }
+.vc-courses-default[data-off="true"] { visibility: hidden; }
+.vc-courses-default[data-default="true"] { color: var(--c-brand); font-weight: 650; }
+
+/* A username, or the dots that hide it. */
+.vc-courses-code { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--c-text-2); white-space: nowrap; }
+.vc-courses-code[data-hidden="true"] { color: var(--c-text-3); letter-spacing: 0.08em; }
+
+/* ---------- meetings ---------- */
+.vc-courses-meetings { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--c-border); }
+.vc-courses-meetings__list { border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface); }
+.vc-courses-meeting {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 7px 10px;
+  border-bottom: 1px solid var(--c-border); font-size: var(--fs-sm);
+}
+.vc-courses-meeting:last-child { border-bottom: 0; }
+.vc-courses-meeting__date { display: inline-flex; align-items: center; gap: 8px; min-width: 150px; font-weight: 650; }
+.vc-courses-meeting[data-past="true"] .vc-courses-meeting__date { color: var(--c-text-3); font-weight: 600; }
+.vc-courses-meeting__what { flex: 1; min-width: 160px; }
+.vc-courses-meeting-add {
+  display: grid; gap: 8px 10px; align-items: end; margin-top: 12px;
+  grid-template-columns: minmax(150px, 170px) minmax(180px, 1.4fr) minmax(140px, 1fr) auto;
+}
+.vc-courses-meeting-add .vc-field { margin-bottom: 0; }
+@media (max-width: 860px) {
+  .vc-courses-meeting-add { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---------- students and passwords ---------- */
+.vc-courses-pw-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 10px; }
+.vc-courses-pw-form { display: inline-flex; align-items: center; gap: 6px; }
+.vc-courses-pw-form .vc-input { width: 170px; }
+.vc-courses-actions { display: inline-flex; align-items: center; gap: 6px; }
+.vc-courses-table td:last-child { white-space: nowrap; text-align: end; }
+.vc-courses-table th:last-child { text-align: end; }
+
+/* ---------- the student import ---------- */
+.vc-courses-import .vc-steps { margin-bottom: 16px; }
+.vc-courses-get { display: grid; gap: 6px; margin: 6px 0 0; padding-inline-start: 18px; color: var(--c-text-2); font-size: var(--fs-sm); }
+.vc-courses-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  padding: 22px 16px; border: 2px dashed var(--c-border-strong); border-radius: var(--radius-lg);
+  background: var(--c-surface-2); text-align: center; cursor: pointer;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+.vc-courses-drop:hover, .vc-courses-drop[data-over="true"] { border-color: var(--c-brand); background: var(--c-brand-soft); }
+.vc-courses-drop:focus-within { border-color: var(--c-brand); box-shadow: var(--ring); }
+.vc-courses-drop[data-file="true"] { border-style: solid; border-color: var(--c-success-border); background: var(--c-success-soft); }
+.vc-courses-drop__icon {
+  display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
+  background: var(--c-surface); color: var(--c-brand); box-shadow: var(--shadow-sm);
+}
+.vc-courses-drop[data-file="true"] .vc-courses-drop__icon { color: var(--c-success); }
+.vc-courses-drop__icon > svg { width: 20px; height: 20px; }
+.vc-courses-drop__title { font-weight: 650; color: var(--c-text); overflow-wrap: anywhere; }
+.vc-courses-drop__note { color: var(--c-text-3); font-size: var(--fs-xs); }
+.vc-courses-import__table { max-height: 360px; }
+.vc-courses-import__table th { position: sticky; top: 0; z-index: 1; }
+.vc-courses-problem { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.vc-courses-problem__text { color: var(--c-danger); font-size: var(--fs-xs); }
