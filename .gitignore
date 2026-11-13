@@ -63,3 +63,9 @@ rosters/
 
 # Local Claude Code settings and the private exercise-writing skill (lecturers who want it: see README, "Writing exercises").
 .claude/
+
+# The chat ships its own English and Hebrew labels; Chainlit adds its stock files for other
+# languages next to them when it starts.
+.chainlit/translations/*
+!.chainlit/translations/en-US.json
+!.chainlit/translations/he-IL.json

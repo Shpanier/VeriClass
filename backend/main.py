@@ -155,6 +155,11 @@ if _CHAT_PATH:
 
     mount_chainlit(app=app, target=str(Path(__file__).resolve().parent.parent / "student_app" / "app.py"),
                    path=_CHAT_PATH)
+    # The chat's own files (logo, sign-in picture, theme). Chainlit serves them
+    # under the chat's path; its sign-in page asks for the picture at /public.
+    _PUBLIC = Path(__file__).resolve().parent.parent / "public"
+    if _PUBLIC.is_dir():
+        app.mount("/public", StaticFiles(directory=_PUBLIC), name="chat-public")
 
 
 # The lecturer's dashboard at "/". Registered last, so every address above

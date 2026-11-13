@@ -1,231 +1,260 @@
 {
-    "components": {
-        "atoms": {
-            "buttons": {
-                "userButton": {
-                    "menu": {
-                        "settings": "\u05d4\u05d2\u05d3\u05e8\u05d5\u05ea",
-                        "settingsKey": "S",
-                        "APIKeys": "API Keys",
-                        "logout": "\u05d4\u05ea\u05e0\u05ea\u05e7"
-                    }
-                }
-            }
-        },
-        "molecules": {
-            "newChatButton": {
-                "newChat": "\u05e6'\u05d0\u05d8 \u05d7\u05d3\u05e9"
-            },
-            "tasklist": {
-                "TaskList": {
-                    "title": "\ud83d\uddd2\ufe0f Task List",
-                    "loading": "\u05d8\u05d5\u05e2\u05df...",
-                    "error": "\u05e9\u05d2\u05d9\u05d0\u05d4"
-                }
-            },
-            "attachments": {
-                "cancelUpload": "\u05d1\u05d8\u05dc \u05d4\u05e2\u05dc\u05d0\u05d4",
-                "removeAttachment": "\u05d4\u05e1\u05e8 \u05e7\u05d5\u05d1\u05e5 \u05de\u05e6\u05d5\u05e8\u05e3"
-            },
-            "newChatDialog": {
-                "createNewChat": "\u05e6\u05d5\u05e8 \u05e6'\u05d0\u05d8 \u05d7\u05d3\u05e9?",
-                "clearChat": "\u05e4\u05e2\u05d5\u05dc\u05d4 \u05d6\u05d5 \u05ea\u05e0\u05e7\u05d4 \u05d0\u05ea \u05d4\u05d4\u05d5\u05d3\u05e2\u05d5\u05ea \u05d4\u05e0\u05d5\u05db\u05d7\u05d9\u05d5\u05ea \u05d5\u05ea\u05ea\u05d7\u05d9\u05dc \u05e6'\u05d0\u05d8 \u05d7\u05d3\u05e9.",
-                "cancel": "\u05d1\u05d8\u05dc",
-                "confirm": "\u05d0\u05e9\u05e8"
-            },
-            "settingsModal": {
-                "settings": "\u05d4\u05d2\u05d3\u05e8\u05d5\u05ea",
-                "expandMessages": "\u05d4\u05e8\u05d7\u05d1 \u05d4\u05d5\u05d3\u05e2\u05d5\u05ea",
-                "hideChainOfThought": "\u05d4\u05e1\u05ea\u05e8 \u05e9\u05e8\u05e9\u05e8\u05ea \u05de\u05d7\u05e9\u05d1\u05d5\u05ea",
-                "darkMode": "\u05de\u05e6\u05d1 \u05db\u05d4\u05d4"
-            },
-            "detailsButton": {
-                "using": "\u05de\u05e9\u05ea\u05de\u05e9 \u05d1-",
-                "running": "\u05e8\u05e5",
-                "took_one": "\u05dc\u05e7\u05d7 \u05e6\u05e2\u05d3 {{count}}",
-                "took_other": "\u05dc\u05e7\u05d7 \u05e6\u05e2\u05d3\u05d9\u05dd {{count}}"
-            },
-            "auth": {
-                "authLogin": {
-                    "title": "\u05d4\u05ea\u05d7\u05d1\u05e8 \u05db\u05d3\u05d9 \u05dc\u05d2\u05e9\u05ea \u05dc\u05d0\u05e4\u05dc\u05d9\u05e7\u05e6\u05d9\u05d4.",
-                    "form": {
-                        "email": "\u05db\u05ea\u05d5\u05d1\u05ea \u05d0\u05d9\u05de\u05d9\u05d9\u05dc",
-                        "password": "\u05e1\u05d9\u05e1\u05de\u05d0",
-                        "noAccount": "\u05d0\u05d9\u05df \u05dc\u05da \u05d7\u05e9\u05d1\u05d5\u05df?",
-                        "alreadyHaveAccount": "\u05db\u05d1\u05e8 \u05d9\u05e9 \u05dc\u05da \u05d7\u05e9\u05d1\u05d5\u05df?",
-                        "signup": "\u05d4\u05d9\u05e8\u05e9\u05dd",
-                        "signin": "\u05d4\u05d9\u05db\u05e0\u05e1",
-                        "or": "\u05d0\u05d5",
-                        "continue": "\u05d4\u05de\u05e9\u05da",
-                        "forgotPassword": "\u05e9\u05db\u05d7\u05ea \u05e1\u05d9\u05e1\u05de\u05d4?",
-                        "passwordMustContain": "\u05d4\u05e1\u05d9\u05e1\u05de\u05d4 \u05e9\u05dc\u05da \u05d7\u05d9\u05d9\u05d1\u05ea \u05dc\u05d4\u05db\u05d9\u05dc:",
-                        "emailRequired": "\u05d0\u05d9\u05de\u05d9\u05d9\u05dc \u05d4\u05d5\u05d0 \u05e9\u05d3\u05d4 \u05d7\u05d5\u05d1\u05d4",
-                        "passwordRequired": "\u05e1\u05d9\u05e1\u05de\u05d4 \u05d4\u05d9\u05d0 \u05e9\u05d3\u05d4 \u05d7\u05d5\u05d1\u05d4"
-                    },
-                    "error": {
-                        "default": "\u05dc\u05d0 \u05e0\u05d9\u05ea\u05df \u05dc\u05d4\u05d9\u05db\u05e0\u05e1.",
-                        "signin": "\u05e0\u05e1\u05d4 \u05dc\u05d4\u05d9\u05db\u05e0\u05e1 \u05e2\u05dd \u05d7\u05e9\u05d1\u05d5\u05df \u05d0\u05d7\u05e8.",
-                        "oauthsignin": "\u05e0\u05e1\u05d4 \u05dc\u05d4\u05d9\u05db\u05e0\u05e1 \u05e2\u05dd \u05d7\u05e9\u05d1\u05d5\u05df \u05d0\u05d7\u05e8.",
-                        "redirect_uri_mismatch": "\u05db\u05ea\u05d5\u05d1\u05ea \u05d4-URI \u05dc\u05d4\u05e4\u05e0\u05d9\u05d4 \u05d0\u05d9\u05e0\u05d4 \u05ea\u05d5\u05d0\u05de\u05ea \u05dc\u05ea\u05e6\u05d5\u05e8\u05ea \u05d4\u05d0\u05e4\u05dc\u05d9\u05e7\u05e6\u05d9\u05d4 \u05e9\u05dc oauth.",
-                        "oauthcallbackerror": "\u05e0\u05e1\u05d4 \u05dc\u05d4\u05d9\u05db\u05e0\u05e1 \u05e2\u05dd \u05d7\u05e9\u05d1\u05d5\u05df \u05d0\u05d7\u05e8.",
-                        "oauthcreateaccount": "\u05e0\u05e1\u05d4 \u05dc\u05d4\u05d9\u05db\u05e0\u05e1 \u05e2\u05dd \u05d7\u05e9\u05d1\u05d5\u05df \u05d0\u05d7\u05e8.",
-                        "emailcreateaccount": "\u05e0\u05e1\u05d4 \u05dc\u05d4\u05d9\u05db\u05e0\u05e1 \u05e2\u05dd \u05d7\u05e9\u05d1\u05d5\u05df \u05d0\u05d7\u05e8.",
-                        "callback": "\u05e0\u05e1\u05d4 \u05dc\u05d4\u05d9\u05db\u05e0\u05e1 \u05e2\u05dd \u05d7\u05e9\u05d1\u05d5\u05df \u05d0\u05d7\u05e8.",
-                        "oauthaccountnotlinked": "\u05db\u05d3\u05d9 \u05dc\u05d0\u05e9\u05e8 \u05d0\u05ea \u05d6\u05d4\u05d5\u05ea\u05da, \u05d4\u05d9\u05db\u05e0\u05e1 \u05e2\u05dd \u05d0\u05d5\u05ea\u05d5 \u05d7\u05e9\u05d1\u05d5\u05df \u05e9\u05d1\u05d5 \u05d4\u05e9\u05ea\u05de\u05e9\u05ea \u05d1\u05de\u05e7\u05d5\u05e8.",
-                        "emailsignin": "\u05dc\u05d0 \u05e0\u05d9\u05ea\u05df \u05dc\u05e9\u05dc\u05d5\u05d7 \u05d0\u05ea \u05d4\u05d0\u05d9\u05de\u05d9\u05d9\u05dc.",
-                        "emailverify": "\u05d0\u05e0\u05d0 \u05d0\u05e9\u05e8 \u05d0\u05ea \u05d4\u05d0\u05d9\u05de\u05d9\u05d9\u05dc \u05e9\u05dc\u05da, \u05d0\u05d9\u05de\u05d9\u05d9\u05dc \u05d7\u05d3\u05e9 \u05e0\u05e9\u05dc\u05d7.",
-                        "credentialssignin": "\u05d4\u05db\u05e0\u05d9\u05e1\u05d4 \u05e0\u05db\u05e9\u05dc\u05d4. \u05d1\u05d3\u05d5\u05e7 \u05e9\u05d4\u05e4\u05e8\u05d8\u05d9\u05dd \u05e9\u05e1\u05d9\u05e4\u05e7\u05ea \u05e0\u05db\u05d5\u05e0\u05d9\u05dd.",
-                        "sessionrequired": "\u05d0\u05e0\u05d0 \u05d4\u05d9\u05db\u05e0\u05e1 \u05db\u05d3\u05d9 \u05dc\u05d2\u05e9\u05ea \u05dc\u05d3\u05e3 \u05d6\u05d4."
-                    }
-                },
-                "authVerifyEmail": {
-                    "almostThere": "\u05d0\u05ea\u05d4 \u05db\u05de\u05e2\u05d8 \u05e9\u05dd! \u05e9\u05dc\u05d7\u05e0\u05d5 \u05d0\u05d9\u05de\u05d9\u05d9\u05dc \u05d0\u05dc ",
-                    "verifyEmailLink": "\u05d0\u05e0\u05d0 \u05dc\u05d7\u05e5 \u05e2\u05dc \u05d4\u05e7\u05d9\u05e9\u05d5\u05e8 \u05d1\u05d0\u05d9\u05de\u05d9\u05d9\u05dc \u05d6\u05d4 \u05db\u05d3\u05d9 \u05dc\u05d4\u05e9\u05dc\u05d9\u05dd \u05d0\u05ea \u05d4\u05d4\u05e8\u05e9\u05de\u05d4 \u05e9\u05dc\u05da.",
-                    "didNotReceive": "\u05dc\u05d0 \u05de\u05d5\u05e6\u05d0 \u05d0\u05ea \u05d4\u05d0\u05d9\u05de\u05d9\u05d9\u05dc?",
-                    "resendEmail": "\u05e9\u05dc\u05d7 \u05e9\u05d5\u05d1 \u05d0\u05d9\u05de\u05d9\u05d9\u05dc",
-                    "goBack": "\u05d7\u05d6\u05d5\u05e8 \u05d0\u05d7\u05d5\u05e8\u05d4",
-                    "emailSent": "\u05d4\u05d0\u05d9\u05de\u05d9\u05d9\u05dc \u05e0\u05e9\u05dc\u05d7 \u05d1\u05d4\u05e6\u05dc\u05d7\u05d4.",
-                    "verifyEmail": "\u05d0\u05de\u05ea \u05d0\u05ea \u05db\u05ea\u05d5\u05d1\u05ea \u05d4\u05d0\u05d9\u05de\u05d9\u05d9\u05dc \u05e9\u05dc\u05da"
-                },
-                "providerButton": {
-                    "continue": "\u05d4\u05de\u05e9\u05da \u05e2\u05dd {{provider}}",
-                    "signup": "\u05d4\u05d9\u05e8\u05e9\u05dd \u05e2\u05dd {{provider}}"
-                },
-                "authResetPassword": {
-                    "newPasswordRequired": "\u05e1\u05d9\u05e1\u05de\u05d4 \u05d7\u05d3\u05e9\u05d4 \u05d4\u05d9\u05d0 \u05e9\u05d3\u05d4 \u05d7\u05d5\u05d1\u05d4",
-                    "passwordsMustMatch": "\u05d4\u05e1\u05d9\u05e1\u05de\u05d0\u05d5\u05ea \u05d7\u05d9\u05d9\u05d1\u05d5\u05ea \u05dc\u05d4\u05ea\u05d0\u05d9\u05dd",
-                    "confirmPasswordRequired": "\u05d0\u05d9\u05e9\u05d5\u05e8 \u05e1\u05d9\u05e1\u05de\u05d4 \u05d4\u05d5\u05d0 \u05e9\u05d3\u05d4 \u05d7\u05d5\u05d1\u05d4",
-                    "newPassword": "\u05e1\u05d9\u05e1\u05de\u05d0 \u05d7\u05d3\u05e9\u05d4",
-                    "confirmPassword": "\u05d0\u05e9\u05e8 \u05e1\u05d9\u05e1\u05de\u05d0",
-                    "resetPassword": "\u05d0\u05e4\u05e1 \u05e1\u05d9\u05e1\u05de\u05d4"
-                },
-                "authForgotPassword": {
-                    "email": "\u05db\u05ea\u05d5\u05d1\u05ea \u05d0\u05d9\u05de\u05d9\u05d9\u05dc",
-                    "emailRequired": "\u05d0\u05d9\u05de\u05d9\u05d9\u05dc \u05d4\u05d5\u05d0 \u05e9\u05d3\u05d4 \u05d7\u05d5\u05d1\u05d4",
-                    "emailSent": "\u05d0\u05e0\u05d0 \u05d1\u05d3\u05d5\u05e7 \u05d0\u05ea \u05db\u05ea\u05d5\u05d1\u05ea \u05d4\u05d0\u05d9\u05de\u05d9\u05d9\u05dc {{email}} \u05dc\u05e7\u05d1\u05dc\u05ea \u05d4\u05d5\u05e8\u05d0\u05d5\u05ea \u05dc\u05d0\u05d9\u05e4\u05d5\u05e1 \u05d4\u05e1\u05d9\u05e1\u05de\u05d4 \u05e9\u05dc\u05da.",
-                    "enterEmail": "\u05d4\u05d6\u05df \u05d0\u05ea \u05db\u05ea\u05d5\u05d1\u05ea \u05d4\u05d0\u05d9\u05de\u05d9\u05d9\u05dc \u05e9\u05dc\u05da \u05d5\u05d0\u05e0\u05d5 \u05e0\u05e9\u05dc\u05d7 \u05dc\u05da \u05d4\u05d5\u05e8\u05d0\u05d5\u05ea \u05dc\u05d0\u05d9\u05e4\u05d5\u05e1 \u05d4\u05e1\u05d9\u05e1\u05de\u05d4 \u05e9\u05dc\u05da.",
-                    "resendEmail": "\u05e9\u05dc\u05d7 \u05e9\u05d5\u05d1 \u05d0\u05d9\u05de\u05d9\u05d9\u05dc",
-                    "continue": "\u05d4\u05de\u05e9\u05da",
-                    "goBack": "\u05d7\u05d6\u05d5\u05e8 \u05d0\u05d7\u05d5\u05e8\u05d4"
-                }
-            }
-        },
-        "organisms": {
-            "chat": {
-                "history": {
-                    "index": {
-                        "showHistory": "\u05d4\u05e6\u05d2 \u05d4\u05d9\u05e1\u05d8\u05d5\u05e8\u05d9\u05d4",
-                        "lastInputs": "\u05e7\u05dc\u05d8 \u05d0\u05d7\u05e8\u05d5\u05df",
-                        "noInputs": "\u05e8\u05d9\u05e7...",
-                        "loading": "\u05d8\u05d5\u05e2\u05df..."
-                    }
-                },
-                "inputBox": {
-                    "input": {
-                        "placeholder": "\u05db\u05ea\u05d5\u05d1 \u05d4\u05d5\u05d3\u05e2\u05d4 \u05db\u05d0\u05df..."
-                    },
-                    "speechButton": {
-                        "start": "\u05d4\u05ea\u05d7\u05dc \u05d4\u05e7\u05dc\u05d8\u05d4",
-                        "stop": "\u05e2\u05e6\u05d5\u05e8 \u05d4\u05e7\u05dc\u05d8\u05d4"
-                    },
-                    "SubmitButton": {
-                        "sendMessage": "\u05e9\u05dc\u05d7 \u05d4\u05d5\u05d3\u05e2\u05d4",
-                        "stopTask": "\u05e2\u05e6\u05d5\u05e8 \u05de\u05e9\u05d9\u05de\u05d4"
-                    },
-                    "UploadButton": {
-                        "attachFiles": "\u05e6\u05e8\u05e3 \u05e7\u05d1\u05e6\u05d9\u05dd"
-                    },
-                    "waterMark": {
-                        "text": "\u05e0\u05d1\u05e0\u05d4 \u05e2\u05dd"
-                    }
-                },
-                "Messages": {
-                    "index": {
-                        "running": "\u05e8\u05e5",
-                        "executedSuccessfully": "\u05d1\u05d5\u05e6\u05e2 \u05d1\u05d4\u05e6\u05dc\u05d7\u05d4",
-                        "failed": "\u05e0\u05db\u05e9\u05dc",
-                        "feedbackUpdated": "\u05de\u05e9\u05d5\u05d1 \u05e2\u05d5\u05d3\u05db\u05df",
-                        "updating": "\u05de\u05e2\u05d3\u05db\u05df"
-                    }
-                },
-                "dropScreen": {
-                    "dropYourFilesHere": "\u05e9\u05d7\u05e8\u05e8 \u05d0\u05ea \u05d4\u05e7\u05d1\u05e6\u05d9\u05dd \u05e9\u05dc\u05da \u05db\u05d0\u05df"
-                },
-                "index": {
-                    "failedToUpload": "\u05d4\u05e2\u05dc\u05d0\u05d4 \u05e0\u05db\u05e9\u05dc\u05d4",
-                    "cancelledUploadOf": "\u05d4\u05e2\u05dc\u05d0\u05d4 \u05e9\u05dc \u05d1\u05d5\u05d8\u05dc\u05d4",
-                    "couldNotReachServer": "\u05dc\u05d0 \u05e0\u05d9\u05ea\u05df \u05d4\u05d9\u05d4 \u05dc\u05d4\u05d2\u05d9\u05e2 \u05dc\u05e9\u05e8\u05ea",
-                    "continuingChat": "\u05de\u05de\u05e9\u05d9\u05da \u05d1\u05e6'\u05d0\u05d8 \u05d4\u05e7\u05d5\u05d3\u05dd"
-                },
-                "settings": {
-                    "settingsPanel": "\u05dc\u05d5\u05d7 \u05d4\u05d2\u05d3\u05e8\u05d5\u05ea",
-                    "reset": "\u05d0\u05e4\u05e1",
-                    "cancel": "\u05d1\u05d8\u05dc",
-                    "confirm": "\u05d0\u05e9\u05e8"
-                }
-            },
-            "threadHistory": {
-                "sidebar": {
-                    "filters": {
-                        "FeedbackSelect": {
-                            "feedbackAll": "\u05de\u05e9\u05d5\u05d1: \u05d4\u05db\u05dc",
-                            "feedbackPositive": "\u05de\u05e9\u05d5\u05d1: \u05d7\u05d9\u05d5\u05d1\u05d9",
-                            "feedbackNegative": "\u05de\u05e9\u05d5\u05d1: \u05e9\u05dc\u05d9\u05dc\u05d9"
-                        },
-                        "SearchBar": {
-                            "search": "\u05d7\u05d9\u05e4\u05d5\u05e9"
-                        }
-                    },
-                    "DeleteThreadButton": {
-                        "confirmMessage": "\u05e4\u05e2\u05d5\u05dc\u05d4 \u05d6\u05d5 \u05ea\u05de\u05d7\u05e7 \u05d0\u05ea \u05d4\u05e9\u05e8\u05e9\u05d5\u05e8 \u05d5\u05db\u05df \u05d0\u05ea \u05d4\u05d4\u05d5\u05d3\u05e2\u05d5\u05ea \u05d5\u05d4\u05e8\u05db\u05d9\u05d1\u05d9\u05dd \u05e9\u05dc\u05d5.",
-                        "cancel": "\u05d1\u05d8\u05dc",
-                        "confirm": "\u05d0\u05e9\u05e8",
-                        "deletingChat": "\u05de\u05d5\u05d7\u05e7 \u05e6'\u05d0\u05d8",
-                        "chatDeleted": "\u05d4\u05e6'\u05d0\u05d8 \u05e0\u05de\u05d7\u05e7"
-                    },
-                    "index": {
-                        "pastChats": "\u05e6'\u05d0\u05d8\u05d9\u05dd \u05e7\u05d5\u05d3\u05de\u05d9\u05dd"
-                    },
-                    "ThreadList": {
-                        "empty": "\u05e8\u05d9\u05e7...",
-                        "today": "\u05d4\u05d9\u05d5\u05dd",
-                        "yesterday": "\u05d0\u05ea\u05de\u05d5\u05dc",
-                        "previous7days": "7 \u05d9\u05de\u05d9\u05dd \u05e7\u05d5\u05d3\u05de\u05d9\u05dd",
-                        "previous30days": "30 \u05d9\u05de\u05d9\u05dd \u05e7\u05d5\u05d3\u05de\u05d9\u05dd"
-                    },
-                    "TriggerButton": {
-                        "closeSidebar": "\u05e1\u05d2\u05d5\u05e8 \u05e1\u05e8\u05d2\u05dc \u05e6\u05d3",
-                        "openSidebar": "\u05e4\u05ea\u05d7 \u05e1\u05e8\u05d2\u05dc \u05e6\u05d3"
-                    }
-                },
-                "Thread": {
-                    "backToChat": "\u05d7\u05d6\u05d5\u05e8 \u05dc\u05e6'\u05d0\u05d8",
-                    "chatCreatedOn": "\u05d4\u05e6'\u05d0\u05d8 \u05d4\u05d6\u05d4 \u05e0\u05d5\u05e6\u05e8 \u05d1\u05ea\u05d0\u05e8\u05d9\u05da"
-                }
-            },
-            "header": {
-                "chat": "\u05e6'\u05d0\u05d8",
-                "readme": "\u05d0\u05d5\u05d3\u05d5\u05ea"
-            }
-        }
+  "common": {
+    "actions": {
+      "cancel": "ביטול",
+      "confirm": "אישור",
+      "continue": "המשך",
+      "goBack": "חזרה",
+      "reset": "איפוס",
+      "submit": "שליחה"
     },
-    "hooks": {
-        "useLLMProviders": {
-            "failedToFetchProviders": "\u05e0\u05db\u05e9\u05dc\u05d4 \u05d4\u05d1\u05d0\u05ea \u05e1\u05e4\u05e7\u05d9\u05dd:"
-        }
-    },
-    "pages": {
-        "Design": {},
-        "Env": {
-            "savedSuccessfully": "\u05e0\u05e9\u05de\u05e8 \u05d1\u05d4\u05e6\u05dc\u05d7\u05d4",
-            "requiredApiKeys": "\u05de\u05e4\u05ea\u05d7\u05d5\u05ea API \u05e0\u05d3\u05e8\u05e9\u05d9\u05dd",
-            "requiredApiKeysInfo": "\u05db\u05d3\u05d9 \u05dc\u05d4\u05e9\u05ea\u05de\u05e9 \u05d1\u05d0\u05e4\u05dc\u05d9\u05e7\u05e6\u05d9\u05d4 \u05d6\u05d5, \u05e0\u05d3\u05e8\u05e9\u05d9\u05dd \u05de\u05e4\u05ea\u05d7\u05d5\u05ea \u05d4-API \u05d4\u05d1\u05d0\u05d9\u05dd. \u05d4\u05de\u05e4\u05ea\u05d7\u05d5\u05ea \u05de\u05d0\u05d5\u05d7\u05e1\u05e0\u05d9\u05dd \u05d1\u05d0\u05d7\u05e1\u05d5\u05df \u05d4\u05de\u05e7\u05d5\u05de\u05d9 \u05e9\u05dc \u05d4\u05de\u05db\u05e9\u05d9\u05e8 \u05e9\u05dc\u05da."
-        },
-        "Page": {
-            "notPartOfProject": "\u05d0\u05ea\u05d4 \u05dc\u05d0 \u05d7\u05dc\u05e7 \u05de\u05d4\u05e4\u05e8\u05d5\u05d9\u05e7\u05d8 \u05d4\u05d6\u05d4."
-        },
-        "ResumeButton": {
-            "resumeChat": "\u05d4\u05de\u05e9\u05da \u05e6'\u05d0\u05d8"
-        }
+    "status": {
+      "loading": "טוען…",
+      "error": {
+        "default": "אירעה שגיאה",
+        "serverConnection": "אין חיבור לשרת המעבדה. ספרו למרצה."
+      }
     }
+  },
+  "auth": {
+    "login": {
+      "title": "כניסה ל־VeriClass",
+      "form": {
+        "email": {
+          "label": "שם משתמש",
+          "required": "הקלידו את שם המשתמש",
+          "placeholder": "שם המשתמש שקיבלתם מהמרצה"
+        },
+        "password": {
+          "label": "סיסמה",
+          "required": "הקלידו את הסיסמה"
+        },
+        "actions": {
+          "signin": "כניסה"
+        },
+        "alternativeText": {
+          "or": "או"
+        }
+      },
+      "errors": {
+        "default": "הכניסה נכשלה. נסו שוב.",
+        "signin": "הכניסה נכשלה. נסו שוב.",
+        "oauthSignin": "נסה להתחבר עם חשבון אחר",
+        "redirectUriMismatch": "כתובת ההפניה אינה תואמת את תצורת אפליקציית OAuth",
+        "oauthCallback": "נסה להתחבר עם חשבון אחר",
+        "oauthCreateAccount": "נסה להתחבר עם חשבון אחר",
+        "emailCreateAccount": "נסה להתחבר עם חשבון אחר",
+        "callback": "נסה להתחבר עם חשבון אחר",
+        "oauthAccountNotLinked": "כדי לאמת את זהותך, התחבר עם אותו חשבון בו השתמשת במקור",
+        "emailSignin": "לא ניתן היה לשלוח את האימייל",
+        "emailVerify": "אנא אמת את האימייל שלך, נשלח אימייל חדש",
+        "credentialsSignin": "שם המשתמש או הסיסמה שגויים.",
+        "sessionRequired": "היכנסו כדי לפתוח את הצ'אט."
+      }
+    },
+    "provider": {
+      "continue": "המשך עם {{provider}}"
+    }
+  },
+  "chat": {
+    "input": {
+      "placeholder": "כתבו הודעה, או הדביקו את הפלט…",
+      "actions": {
+        "send": "שליחה",
+        "stop": "עצירה",
+        "attachFiles": "צרף קבצים"
+      }
+    },
+    "speech": {
+      "start": "התחל הקלטה",
+      "stop": "עצור הקלטה",
+      "connecting": "מתחבר"
+    },
+    "favorites": {
+      "use": "השתמש בהודעה מועדפת",
+      "headline": "הודעות מועדפות",
+      "remove": "הסר מהמועדפים",
+      "empty": {
+        "title": "עדיין אין הנחיות שמורות",
+        "description": "התחל בשליחת הנחיה וסמן אותה בכוכב או סמן הנחיה משיחות קודמות"
+      }
+    },
+    "commands": {
+      "button": "כלים",
+      "changeTool": "שנה כלי",
+      "availableTools": "כלים זמינים"
+    },
+    "fileUpload": {
+      "dragDrop": "גרור ושחרר קבצים כאן",
+      "browse": "עיין בקבצים",
+      "sizeLimit": "מגבלה:",
+      "errors": {
+        "failed": "העלאה נכשלה",
+        "cancelled": "העלאה בוטלה של"
+      },
+      "actions": {
+        "cancelUpload": "ביטול העלאה",
+        "removeAttachment": "הסרת קובץ מצורף"
+      }
+    },
+    "messages": {
+      "status": {
+        "using": "משתמש ב",
+        "used": "השתמש ב"
+      },
+      "actions": {
+        "copy": {
+          "button": "העתקה",
+          "success": "הועתק"
+        }
+      },
+      "feedback": {
+        "positive": "מועיל",
+        "negative": "לא מועיל",
+        "edit": "ערוך משוב",
+        "dialog": {
+          "title": "הוסף תגובה",
+          "submit": "שלח משוב",
+          "yourFeedback": "המשוב שלך..."
+        },
+        "status": {
+          "updating": "מעדכן",
+          "updated": "המשוב עודכן"
+        }
+      }
+    },
+    "history": {
+      "title": "קלטים אחרונים",
+      "empty": "כל כך ריק...",
+      "show": "הצג היסטוריה"
+    },
+    "settings": {
+      "title": "פאנל הגדרות",
+      "customize": "התאם אישית את הגדרות הצ'אט שלך כאן"
+    },
+    "watermark": "העוזר יכול לטעות. אם משהו נראה לא נכון, שאלו את המרצה."
+  },
+  "threadHistory": {
+    "sidebar": {
+      "title": "צ'אטים קודמים",
+      "filters": {
+        "search": "חיפוש",
+        "placeholder": "Search conversations..."
+      },
+      "timeframes": {
+        "today": "היום",
+        "yesterday": "אתמול",
+        "previous7days": "7 ימים אחרונים",
+        "previous30days": "30 ימים אחרונים"
+      },
+      "empty": "לא נמצאו שיחות",
+      "actions": {
+        "close": "סגור סרגל צד",
+        "open": "פתח סרגל צד"
+      }
+    },
+    "thread": {
+      "untitled": "שיחה ללא כותרת",
+      "menu": {
+        "rename": "שינוי שם",
+        "share": "שיתוף",
+        "delete": "Delete"
+      },
+      "actions": {
+        "share": {
+          "title": "שיתוף קישור לשיחה",
+          "button": "שיתוף",
+          "status": {
+            "copied": "הקישור הועתק",
+            "created": "קישור השיתוף נוצר!",
+            "unshared": "השיתוף בוטל עבור שיחה זו"
+          },
+          "error": {
+            "create": "יצירת קישור השיתוף נכשלה",
+            "unshare": "ביטול השיתוף של השיחה נכשל"
+          }
+        },
+        "delete": {
+          "title": "אשר מחיקה",
+          "description": "פעולה זו תמחק את השיחה וכן את ההודעות והאלמנטים שלה. לא ניתן לבטל פעולה זו",
+          "success": "הצ'אט נמחק",
+          "inProgress": "מוחק צ'אט"
+        },
+        "rename": {
+          "title": "שנה שם שיחה",
+          "description": "הזן שם חדש לשיחה זו",
+          "form": {
+            "name": {
+              "label": "שם",
+              "placeholder": "הזן שם חדש"
+            }
+          },
+          "success": "שם השיחה שונה!",
+          "inProgress": "משנה שם שיחה"
+        }
+      }
+    }
+  },
+  "navigation": {
+    "header": {
+      "chat": "צ'אט",
+      "readme": "עזרה",
+      "theme": {
+        "light": "בהיר",
+        "dark": "כהה",
+        "system": "כמו במחשב שלי"
+      }
+    },
+    "newChat": {
+      "button": "טעינת הצ'אט מחדש",
+      "dialog": {
+        "title": "לטעון את הצ'אט מחדש?",
+        "description": "הצ'אט מתחיל מחדש, והמעבדה ממשיכה מהמקום שבו אתם נמצאים. שום דבר שעשיתם לא נמחק.",
+        "tooltip": "טעינת הצ'אט מחדש"
+      }
+    },
+    "user": {
+      "menu": {
+        "settings": "הגדרות",
+        "settingsKey": "ה",
+        "apiKeys": "מפתחות API",
+        "logout": "יציאה"
+      }
+    }
+  },
+  "apiKeys": {
+    "title": "מפתחות API נדרשים",
+    "description": "כדי להשתמש באפליקציה זו, נדרשים מפתחות API הבאים. המפתחות מאוחסנים באחסון המקומי של המכשיר שלך.",
+    "success": {
+      "saved": "נשמר בהצלחה"
+    }
+  },
+  "alerts": {
+    "info": "Info",
+    "note": "Note",
+    "tip": "Tip",
+    "important": "Important",
+    "warning": "Warning",
+    "caution": "Caution",
+    "debug": "Debug",
+    "example": "Example",
+    "success": "Success",
+    "help": "Help",
+    "idea": "Idea",
+    "pending": "Pending",
+    "security": "Security",
+    "beta": "Beta",
+    "best-practice": "Best Practice"
+  },
+  "components": {
+    "MultiSelectInput": {
+      "placeholder": "בחר..."
+    },
+    "DatePickerInput": {
+      "placeholder": {
+        "single": "בחר תאריך",
+        "range": "בחר טווח תאריכים"
+      }
+    }
+  }
 }

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+import sys
 import uuid
 
 import chainlit as cl
@@ -10,6 +11,11 @@ from chainlit.session import WebsocketSession
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# The chat's own lines, in Hebrew and English (this folder isn't a package:
+# Chainlit loads this file by its path).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from chat_texts import text as _text  # noqa: E402
 
 BACKEND = os.environ.get("BACKEND_URL", "http://127.0.0.1:8010")
 
@@ -24,6 +30,46 @@ log = logging.getLogger("vericlass.student")
 # shows its own login page, with a hidden password field. Without it, the chat
 # asks for the username and then the password (typed in plain sight).
 AUTH_PAGE = bool(os.environ.get("CHAINLIT_AUTH_SECRET", "").strip())
+
+_HEBREW = re.compile(r"[֐-׿]")
+
+
+def _lang() -> str:
+    """The language of the chat's own lines for this student: "he" or "en"
+    (student_app/chat_texts.py). The lecturer's setting CHAT_LANGUAGE=he|en
+    fixes it. On "auto" it is the lab's language once a lab is open
+    (_follow_lab), and the browser's language before that (signing in,
+    choosing a course)."""
+    forced = os.environ.get("CHAT_LANGUAGE", "auto").strip().lower()
+    if forced in ("he", "en"):
+        return forced
+    try:
+        chosen = cl.user_session.get("lang")
+        browser = cl.user_session.get("languages") or ""
+    except Exception:  # no chat session yet
+        return "en"
+    if chosen:
+        return chosen
+    return "he" if re.search(r"(?:^|[\s,;])he\b", browser, re.I) else "en"
+
+
+def _follow_lab(exercise: dict) -> None:
+    """From here on the chat speaks the lab's language: Hebrew when the lab's
+    brief is written in Hebrew (the rule the server's own notes follow,
+    backend/pacing.py), otherwise English."""
+    steps = exercise.get("steps") or []
+    sample = f"{steps[0].get('title', '') if steps else ''} {exercise.get('brief_md') or ''}"
+    cl.user_session.set("lang", "he" if _HEBREW.search(sample) else "en")
+
+
+def _t(key: str, **values) -> str:
+    return _text(key, _lang(), **values)
+
+
+def _title(item: dict) -> str:
+    """An exercise's title in the chat's language."""
+    return (item.get("title_he") or item["title_en"]) if _lang() == "he" else item["title_en"]
+
 
 # A short message that means "I finished this step" in a class-paced lab: the
 # typed form of the step's button.
@@ -140,13 +186,13 @@ async def _replay() -> list[dict]:
     if not entries:
         return []
     if t.get("truncated"):
-        await cl.Message(content="_…הודעות ישנות יותר לא מוצגות._").send()
+        await cl.Message(content=_t("older_hidden")).send()
     for e in entries:
         if e["author"] == "student":
             await cl.Message(content=e["content"], author="student", type="user_message").send()
         else:
             await cl.Message(content=e["content"]).send()
-    await cl.Message(content="↩️ **חזרתם למפגש.** כל מה שהיה עד עכשיו מופיע למעלה, וממשיכים מאותו מקום.").send()
+    await cl.Message(content=_t("resumed")).send()
     return entries
 
 
@@ -191,7 +237,7 @@ async def _open_questions() -> None:
         return
     if open_q:
         lines = "\n".join(f"- «{' '.join(q['question'].split())[:120]}»" for q in open_q)
-        await _say(f"⏳ **עדיין אצל המרצה:**\n{lines}\n\nהתשובה תופיע כאן כשהמרצה יענה.", record=False)
+        await _say(_t("still_with_lecturer", lines=lines), record=False)
 
 
 def _forget_shown() -> None:
@@ -236,24 +282,23 @@ async def _chat_login():
         await cl.Message(content=f"🛠️ Dev mode: auto-login with `{dev_code}`.").send()
         code, password = dev_code, dev_code  # the default password is the code
     else:
-        code = (await _prompt("🎓 ברוכים הבאים ל־VeriClass. הקלידו את שם המשתמש שלכם.")).upper()
+        code = (await _prompt(_t("ask_username"))).upper()
         if not code:
-            await cl.Message(content="לא התקבל שם משתמש. רעננו את הדף כדי לנסות שוב.").send()
+            await cl.Message(content=_t("no_username")).send()
             return None
-        password = await _prompt("עכשיו את הסיסמה. (עד שהמרצה משנה אותה, היא זהה לשם המשתמש.)")
+        password = await _prompt(_t("ask_password"))
         if not password:
-            await cl.Message(content="לא התקבלה סיסמה. רעננו את הדף כדי לנסות שוב.").send()
+            await cl.Message(content=_t("no_password")).send()
             return None
     r = await _login(code, password)
     if r is None:
-        await cl.Message(content="⚠️ אין חיבור לשרת המעבדה. פנו למרצה.").send()
+        await cl.Message(content=_t("no_server")).send()
         return None
     if r.status_code in (401, 429):
-        detail = r.json().get("detail", "Wrong username or password.")
-        await cl.Message(content=f"❌ {detail} רעננו את הדף כדי לנסות שוב.").send()
+        await cl.Message(content=_t("wrong_login" if r.status_code == 401 else "too_many_logins")).send()
         return None
     if r.status_code != 200:
-        await cl.Message(content="⚠️ ההתחברות נכשלה. נסו שוב בעוד רגע.").send()
+        await cl.Message(content=_t("login_failed")).send()
         return None
     return r.json()
 
@@ -284,7 +329,7 @@ async def _pick(question: str, options: list[tuple[str, str]], about: str = ""):
                 await action.remove()
             except Exception:  # the browser may be gone; nothing to tidy then
                 pass
-        ask.content = f"{question}\n\n_⏸️ הופסק._"
+        ask.content = f"{question}\n\n{_t('stopped')}"
         await ask.update()
         await cl.context.emitter.clear("clear_ask")
         await cl.context.emitter.task_end()
@@ -294,7 +339,7 @@ async def _pick(question: str, options: list[tuple[str, str]], about: str = ""):
             cl.user_session.set("open_pick", None)
     # Chainlit then replaces the question with "Selected: …" in English; keep
     # the question, with the answer under it, in the chat's language.
-    ask.content = f"{question}\n\n**{res['label']}**" if res else f"{question}\n\n_לא נבחרה תשובה._"
+    ask.content = f"{question}\n\n**{res['label']}**" if res else f"{question}\n\n{_t('nothing_chosen')}"
     await ask.update()
     return ((res or {}).get("payload") or {}).get("value")
 
@@ -317,7 +362,7 @@ async def _choose(courses: list[dict]):
         return None, None
     course = courses[0]
     if len(courses) > 1:
-        chosen = await _pick("בחרו קורס:", [(c["course_id"], c["name"]) for c in courses])
+        chosen = await _pick(_t("choose_course"), [(c["course_id"], c["name"]) for c in courses])
         if chosen in (None, _INTERRUPTED):
             return False
         course = next(c for c in courses if c["course_id"] == chosen)
@@ -325,9 +370,9 @@ async def _choose(courses: list[dict]):
     if len(exercises) == 1:
         return course["course_id"], exercises[0]["exercise_id"]
     exercises = sorted(exercises, key=lambda e: e["exercise_id"] != course["default_exercise"])
-    options = [(e["exercise_id"], (e.get("title_he") or e["title_en"])
+    options = [(e["exercise_id"], _title(e)
                 + (" ⭐" if e["exercise_id"] == course["default_exercise"] else "")) for e in exercises]
-    chosen = await _pick(f"**{course['name']}**: בחרו תרגיל (⭐ = הבחירה של המרצה):", options)
+    chosen = await _pick(_t("choose_exercise", course=course["name"]), options)
     if chosen in (None, _INTERRUPTED):
         return False
     return course["course_id"], chosen
@@ -346,7 +391,7 @@ async def on_chat_start():
 
     choice = await _choose(login.get("courses") or [])
     if choice is False:
-        await cl.Message(content="לא התקבלה בחירה. רעננו את הדף כדי לנסות שוב.").send()
+        await cl.Message(content=_t("no_choice")).send()
         return
     course_id, exercise_id = choice
     body = {k: v for k, v in (("course_id", course_id), ("exercise_id", exercise_id)) if v}
@@ -366,10 +411,11 @@ async def on_chat_start():
             exercise = ex.json()
     except httpx.HTTPError as e:
         log.warning("session/exercise setup failed: %s", e)
-        hint = " התנתקו והתחברו שוב." if AUTH_PAGE else " רעננו את הדף כדי לנסות שוב."
-        await cl.Message(content="⚠️ לא הצלחנו לפתוח את המפגש שלכם." + hint).send()
+        hint = _t("hint_relogin" if AUTH_PAGE else "hint_reload")
+        await cl.Message(content=_t("session_failed") + hint).send()
         return
 
+    _follow_lab(exercise)
     paced = exercise.get("pacing") == "class"
     cl.user_session.set("token", token)
     cl.user_session.set("session_id", sess["session_id"])
@@ -414,7 +460,7 @@ async def on_chat_end():
 def _format_param_value(value) -> str:
     """Render a param value for humans: bools as yes/no, lists comma-joined."""
     if isinstance(value, bool):
-        return "yes" if value else "no"
+        return _t("yes" if value else "no")
     if isinstance(value, (list, tuple)):
         return ", ".join(str(x) for x in value)
     return str(value)
@@ -450,17 +496,16 @@ async def _send_briefing(exercise: dict, variant_id: str, mode: str, paced: bool
     """The exercise's brief; the variant, its tests and the mode only for an
     exercise that has them (not for a class-paced lab)."""
     v = exercise.get("variant") or {}
-    title = exercise.get("title_he") or exercise["title_en"]
-    parts = [f"### 📘 {title}", exercise["brief_md"]]
+    parts = [f"### {_title(exercise)}", exercise["brief_md"]]
     params_block = _format_params(v.get("params") or {}, exercise.get("param_labels", []))
     if params_block:
-        parts.append(f"**Your variant ({variant_id}):**\n{params_block}")
+        parts.append(f"{_t('variant_head', variant=variant_id)}\n{params_block}")
     tests = v.get("test_inputs") or []
     if tests:
-        parts.append("**Test inputs you must pass:**\n" + "\n".join(
-            f"- `mcalc \"{t['input']}\"` → `{t['expected_output']}`" for t in tests))
+        parts.append(_t("tests_head") + "\n" + "\n".join(
+            _t("test_line", input=t["input"], output=t["expected_output"]) for t in tests))
     if not paced:
-        parts.append(f"**Mode:** `{mode}`")
+        parts.append(_t(f"mode_{mode}") if mode in ("mentor", "coding_partner") else _t("mode_other", mode=mode))
     actions = [
         # chainlit 2.x: Action carries a `payload` dict instead of `value`.
         cl.Action(name="suggest", payload={"value": s}, label=s)
@@ -523,14 +568,14 @@ async def _pasted_output(text: str) -> bool:
         return False
     n, label, needs_output = d["step"], d["label"], d.get("needs_output", True)
     if d["kind"] == "maybe":
-        question = f"🤔 שלחתם שאלה, או את התשובה לשלב {label}?"
-        answer_label = f"📋 זה הפלט של שלב {label}" if needs_output else f"✅ סיימתי את שלב {label}"
-        chosen = await _pick(question, [("answer", answer_label), ("question", "❓ זו שאלה")], about="step")
+        question = _t("maybe_step_q", label=label)
+        answer_label = _t("opt_output" if needs_output else "opt_done", label=label)
+        chosen = await _pick(question, [("answer", answer_label), ("question", _t("opt_question"))], about="step")
         if chosen == _INTERRUPTED:
             return True  # the teacher moved the student meanwhile; their note says where
         await _record({"author": "tutor", "kind": "text", "step": n, "content": question},
                       *([{"author": "student", "kind": "text", "step": n,
-                          "content": answer_label if chosen == "answer" else "❓ זו שאלה"}] if chosen else []))
+                          "content": answer_label if chosen == "answer" else _t("opt_question")}] if chosen else []))
         if chosen != "answer":
             return False
     async with cl.user_session.get("lock"):
@@ -538,7 +583,7 @@ async def _pasted_output(text: str) -> bool:
         if not st or not st.get("open") or st["step"]["n"] != n:
             return False
         if d["kind"] == "output":
-            await _say(f"📋 זיהיתי שזה הפלט של שלב {label}.", kind="result", step=n)
+            await _say(_t("detected_output", label=label), kind="result", step=n)
         await _after_finish(await _post_finish(n, text if needs_output else ""), n)
     return True
 
@@ -547,7 +592,7 @@ async def _ask(text: str):
     token = cl.user_session.get("token")
     session_id = cl.user_session.get("session_id")
     if not token or not session_id:
-        await cl.Message(content="המפגש פג. רעננו את הדף.").send()
+        await cl.Message(content=_t("expired")).send()
         return
 
     out = cl.Message(content="")
@@ -581,7 +626,7 @@ async def _ask(text: str):
                         await out.stream_token(chunk)
     except httpx.HTTPError as e:
         log.warning("ask stream failed: %s", e)
-        out.content = "⚠️ החיבור לצ'אט נקטע. נסו שוב."
+        out.content = _t("cut")
         await out.update()
         return
     await out.update()
@@ -590,8 +635,8 @@ async def _ask(text: str):
 
 def _ask_error_message(status: int) -> str:
     if status in (401, 403):
-        return "⚠️ המפגש פג. רעננו את הדף והתחברו שוב."
-    return "⚠️ הצ'אט לא זמין כרגע. נסו שוב בעוד רגע."
+        return _t("expired_login")
+    return _t("unavailable")
 
 
 # --- class-paced labs (backend/pacing.py) --------------------------------------------
@@ -636,14 +681,13 @@ async def _show_state():
         # was added, the teacher moved the student): stop waiting, and say why.
         cl.user_session.set("awaiting_output", None)
         label = (cl.user_session.get("labels") or {}).get(awaiting, str(awaiting))
-        why = ("נוספה שאלה (היא כאן בצ'אט). ענו עליה, ואז לחצו שוב «סיימתי»."
-               if st.get("quiz_pending") else "השלב השתנה.")
-        await _say(f"⏸️ **המרצה עצר אתכם:** ההדבקה לשלב {label} הופסקה. {why}", kind="note", step=awaiting)
+        why = _t("why_question" if st.get("quiz_pending") else "why_changed")
+        await _say(_t("paste_stopped", label=label, why=why), kind="note", step=awaiting)
     if last is not None and st["current"] < last:
         # The teacher sent the student back. The server's note normally came
         # through the transcript already; without a transcript, say it here.
         if not cl.user_session.get("reset_shown") and not cl.user_session.get("history"):
-            await _say(f"↩️ המרצה החזיר אתכם לשלב {st.get('current_label') or st['current']}.", kind="note")
+            await _say(_t("sent_back", label=st.get("current_label") or st["current"]), kind="note")
         _forget_shown()
     cl.user_session.set("reset_shown", False)
     review = cl.user_session.get("in_review")
@@ -651,20 +695,19 @@ async def _show_state():
             and not cl.user_session.get("history")):
         # Sent back by the teacher; without a transcript its note can't arrive, so say it here.
         cl.user_session.set("in_review", None)
-        await _say(f"↩️ המרצה בדק את הפלט ששלחתם לשלב {st['current_label']}, והוא עוד לא תקין. "
-                   "הריצו שוב והדביקו את הפלט החדש.", kind="returned", step=review,
+        await _say(_t("output_returned", label=st["current_label"]), kind="returned", step=review,
                    actions=[_paste_again(review)])
     if review is not None and st["current"] > review:
         # The teacher let them past the step whose output didn't match.
         cl.user_session.set("in_review", None)
         label = (cl.user_session.get("labels") or {}).get(review, str(review))
-        await _say(f"✅ המרצה אישר את שלב {label}. אפשר להמשיך.", kind="result", step=review)
+        await _say(_t("step_approved", label=label), kind="result", step=review)
     if cl.user_session.get("quiz_held") and not st.get("quiz_review"):
         # The teacher decided about the quiz answer that waited. The server's note
         # says what (the transcript); without a transcript, say it here.
         cl.user_session.set("quiz_held", False)
         if not cl.user_session.get("history"):
-            await _say("📬 המרצה קרא את התשובה שלכם לשאלה.", kind="note")
+            await _say(_t("answer_read"), kind="note")
     if st["open"]:
         step = st["step"]
         if cl.user_session.get("shown_step") != step["n"]:
@@ -676,37 +719,35 @@ async def _show_state():
         if cl.user_session.get("waiting_for") != st["current"]:
             cl.user_session.set("waiting_for", st["current"])
             if st["current"] == 1:
-                text = "⏸️ המרצה עוד לא פתח את השלב הראשון. הוא יופיע כאן ברגע שייפתח."
+                text = _t("first_not_open")
             else:
-                text = (f"⏸️ סיימתם את כל השלבים שפתוחים כרגע. שלב {st['current_label']} יופיע כאן "
-                        "כשהמרצה יפתח אותו לכל הכיתה. בינתיים אפשר לשאול כאן שאלות על מה שעשיתם.")
+                text = _t("wait_next", label=st["current_label"])
             await _say(text, kind="note", step=st["current"])
     elif st["finished"] and not cl.user_session.get("finished_note"):
         cl.user_session.set("finished_note", True)
-        await _say("🎉 סיימתם את כל השלבים של המעבדה. כל הכבוד!", kind="note", step=st["total"] + 1)
+        await _say(_t("lab_done"), kind="note", step=st["total"] + 1)
 
 
 async def _send_step(step: dict, unlocked: bool):
-    head = f"🔓 **המרצה פתח את שלב {step['label']}.**\n\n" if unlocked else ""
-    how = ("כשסיימתם: לחצו **סיימתי**, והדביקו את כל הפלט שקיבלתם בטרמינל."
-           if step["needs_output"] else "כשסיימתם: לחצו **סיימתי**.")
+    head = _t("step_opened", label=step["label"]) if unlocked else ""
+    how = _t("how_output" if step["needs_output"] else "how_done")
     await _say(f"{head}{step['markdown']}\n\n---\n{how}", kind="step", step=step["n"],
                actions=[_finish_action(step)])
 
 
 def _paste_again(n: int) -> cl.Action:
-    return cl.Action(name="finish", payload={"step": n}, label="📋 להדביק שוב")
+    return cl.Action(name="finish", payload={"step": n}, label=_t("btn_paste_again"))
 
 
 def _finish_action(step: dict) -> cl.Action:
-    return cl.Action(name="finish", payload={"step": step["n"]}, label=f"✅ סיימתי את שלב {step['label']}")
+    return cl.Action(name="finish", payload={"step": step["n"]}, label=_t("btn_done", label=step["label"]))
 
 
 async def _send_finish_button(step: dict):
     """After a new login: the step's text is in the replayed conversation; only
     its button needs to come back."""
-    how = "לחצו **סיימתי** והדביקו את הפלט." if step["needs_output"] else "לחצו **סיימתי**."
-    await _say(f"📍 אתם בשלב **{step['label']}** (למעלה). כשסיימתם: {how}", record=False,
+    how = _t("resume_how_output" if step["needs_output"] else "resume_how_done")
+    await _say(_t("where_you_are", label=step["label"], how=how), record=False,
                actions=[_finish_action(step)])
 
 
@@ -721,7 +762,7 @@ async def _finish(n: int, action: cl.Action = None):
     async with cl.user_session.get("lock"):
         st = await _get_state()
         if st is None:
-            await cl.Message(content="⚠️ אין חיבור לשרת. נסו שוב בעוד רגע.").send()
+            await cl.Message(content=_t("no_server_retry")).send()
             return
         if not st.get("open") or st["step"]["n"] != n:
             await _not_this_step(st, n)
@@ -732,8 +773,7 @@ async def _finish(n: int, action: cl.Action = None):
             # or ask a question meanwhile.
             cl.user_session.set("awaiting_output", n)
             cl.user_session.set("awaiting_action", action)
-            await _say(f"📋 הדביקו כאן את הפלט של שלב {st['step']['label']}: כל מה שהופיע בטרמינל אחרי "
-                       "הפקודות (אפשר גם עם הפקודות עצמן). ואז שלחו.", step=n)
+            await _say(_t("paste_here", label=st["step"]["label"]), step=n)
             return
         r = await _post_finish(n, "")
         await _after_finish(r, n, action)
@@ -766,15 +806,12 @@ async def _after_finish(r, n: int, action: cl.Action = None):
     Call with the lock."""
     label = (cl.user_session.get("labels") or {}).get(n, str(n))
     if r is None:
-        await cl.Message(content="⚠️ לא הצלחנו לשמור את השלב. נסו שוב בעוד רגע.").send()
+        await cl.Message(content=_t("save_failed")).send()
         return
     if r["status"] == "missing":
         # The hints would give the expected output away; the teacher sees them.
         cl.user_session.set("in_review", n)
-        await _say(f"🔍 הפלט של שלב {label} לא נראה כמו מה שציפינו לו.\n\n"
-                   "בדקו את «שימו לב» בשלב, הריצו שוב, והדביקו את הפלט החדש. "
-                   "המרצה רואה את הפלט ששלחתם, ואם הכול בסדר הוא יאשר לכם להמשיך: "
-                   "השלב הבא יופיע כאן לבד.", kind="result", step=n,
+        await _say(_t("output_mismatch", label=label), kind="result", step=n,
                    actions=[_paste_again(n)])
         return
     if r["status"] != "done":
@@ -784,10 +821,10 @@ async def _after_finish(r, n: int, action: cl.Action = None):
     if action is not None:
         await action.remove()
     cl.user_session.set("in_review", None)
-    note = " הפלט נראה תקין." if r.get("ok") else ""
+    note = _t("output_ok") if r.get("ok") else ""
     if r.get("quiz"):
-        note += " לפני השלב הבא, שאלה קצרה."
-    await _say(f"✅ שלב {label} הושלם.{note}", kind="result", step=n)
+        note += _t("quiz_next")
+    await _say(_t("step_done", label=label, note=note), kind="result", step=n)
     await _ask_pending_probes()
     await _show_state()
 
@@ -795,15 +832,15 @@ async def _after_finish(r, n: int, action: cl.Action = None):
 async def _not_this_step(st: dict, n: int):
     label = (cl.user_session.get("labels") or {}).get(n, str(n))
     if st.get("finished"):
-        text = "כבר סיימתם את כל השלבים. 🎉"
+        text = _t("all_done")
     elif st.get("quiz_pending"):
-        text = "קודם ענו על השאלה שלמעלה, ואז השלב הבא יופיע."
+        text = _t("answer_first")
     elif st.get("quiz_review"):
-        text = "התשובה שלכם לשאלה ממתינה למרצה. השלב הבא יופיע כשהמרצה יאשר לכם להמשיך."
+        text = _t("answer_waiting")
     elif st.get("waiting_teacher"):
-        text = f"שלב {st['current_label']} עוד לא נפתח. הוא יופיע כאן כשהמרצה יפתח אותו."
+        text = _t("not_open_yet", label=st["current_label"])
     else:
-        text = f"שלב {label} כבר הושלם. אתם עכשיו בשלב {st.get('current_label')}."
+        text = _t("already_done", label=label, current=st.get("current_label"))
     await _say(text)
 
 
@@ -867,10 +904,9 @@ async def _ask_pending_probes():
 
 
 def _probe_text(probe: dict) -> str:
-    head = (f"❓ **שאלת הבנה על שלב {probe.get('quiz_step')}:**" if probe.get("source") == "quiz"
-            else "🎓 **המרצה שואל/ת:**")
-    return (f"{head}\n\n> {probe['body']}\n\n"
-            "כתבו כאן את התשובה שלכם. יש לכם שאלה לפני שאתם עונים? אפשר לשאול אותה כאן.")
+    head = (_t("quiz_head", step=probe.get("quiz_step")) if probe.get("source") == "quiz"
+            else _t("lecturer_asks"))
+    return f"{head}\n\n> {probe['body']}\n\n{_t('answer_here')}"
 
 
 async def _probe_answer(text: str):
@@ -891,8 +927,8 @@ async def _probe_answer(text: str):
     if not d or d["kind"] in ("none", "step"):
         return None
     if d["kind"] == "maybe":
-        question = "🤔 זו התשובה שלכם לשאלה, או שאלה שלכם?"
-        options = [("answer", "✍️ זו התשובה שלי"), ("question", "❓ זו שאלה שלי")]
+        question = _t("maybe_answer_q")
+        options = [("answer", _t("opt_my_answer")), ("question", _t("opt_my_question"))]
         chosen = await _pick(question, options, about="probe")
         if chosen == _INTERRUPTED:
             return "answered"  # the question was withdrawn (or the student moved); nothing more to do
@@ -912,7 +948,7 @@ async def _remind_probe():
     """After answering the student's own question: the question of ours is still open."""
     probes = await _pending_probes()
     if probes and probes[0]["id"] == cl.user_session.get("probe_shown"):
-        await _say(f"✍️ כשתהיו מוכנים, כתבו כאן את התשובה לשאלה:\n\n> {probes[0]['body']}")
+        await _say(_t("remind", body=probes[0]["body"]))
 
 
 async def _answer_probe(probe: dict, answer: str):
@@ -926,22 +962,20 @@ async def _answer_probe(probe: dict, answer: str):
             )
     except httpx.HTTPError as e:
         log.warning("probe answer failed: %s", e)
-        await _say("⚠️ התשובה לא נשלחה. נסו שוב.", record=False)
+        await _say(_t("answer_not_sent"), record=False)
         return
     if r.status_code == 200:
         data = r.json()
-        grade = f" ציון: **{data['auto_grade']}/2**" if data.get("auto_grade") is not None else ""
+        grade = _t("grade", grade=data["auto_grade"]) if data.get("auto_grade") is not None else ""
         why = f" — {data['why']}" if data.get("why") else ""
         if data.get("review"):
             # Graded too low to move on by itself (exercise.yaml quiz_review): the
             # teacher lets them continue or asks again; the server's note says which.
             cl.user_session.set("quiz_held", True)
-            await _say(f"📝 התשובה נשמרה.{grade}{why}\n\n"
-                       "⏳ **התשובה ממתינה למרצה.** הוא יקרא אותה, ואז יאשר לכם להמשיך או יבקש שתענו "
-                       "שוב; ההמשך יופיע כאן לבד. בינתיים אפשר לשאול כאן שאלות.", kind="result")
+            await _say(_t("answer_saved_review", grade=grade, why=why), kind="result")
         else:
-            await _say(f"✅ התשובה נשמרה.{grade}{why}", kind="result")
+            await _say(_t("answer_saved", grade=grade, why=why), kind="result")
     elif r.status_code == 409:
-        await _say("השאלה הזו כבר לא פתוחה (כבר עניתם עליה, או שהמרצה ביטל אותה).", record=False)
+        await _say(_t("question_closed"), record=False)
     else:
-        await _say("⚠️ התשובה לא נשלחה. נסו שוב.", record=False)
+        await _say(_t("answer_not_sent"), record=False)
