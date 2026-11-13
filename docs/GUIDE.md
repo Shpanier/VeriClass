@@ -97,7 +97,7 @@ The switch at the top of the review queue on *Live class*, for all exercises. Wh
    waiting for approval; finished all the steps), and shows **the chat just
    before the question**: the last five entries (steps handed out, pasted
    outputs, check results, quiz questions, earlier questions and answers),
-   each cut to two lines (click one to see it whole), with a 💬 *Full chat*
+   each cut to two lines (click one to see it whole), with a *Full chat*
    button that opens the whole chat. An exercise that keeps no transcript
    shows the model turns instead (`backend/whereabouts.py`).
 2. The backend drafts **five answers**, one model call each, all at the same
@@ -107,7 +107,7 @@ The switch at the top of the review queue on *Live class*, for all exercises. Wh
    - **Normal + more** — same, with an extra explanation or analogy
    - **Direct** — not Socratic: the plain answer to what was asked, with a
      short example (never the whole step's solution)
-   - ✨ an extra answer by the **best model** (`CLAUDE_BEST_MODEL`, Opus 5.5;
+   - an extra answer by the **best model** (`CLAUDE_BEST_MODEL`, Opus 5.5;
      direct by default, the level is a setting of the queue, and it can be
      switched off)
 
@@ -124,14 +124,14 @@ The switch at the top of the review queue on *Live class*, for all exercises. Wh
 3. The instructor sends one row (edited or not). It is stored, then streamed
    to the student, so a dropped connection doesn't lose it. Two boxes go with
    every send:
-   - 📚 **save to the question bank** (ticked by default; the default is a
+   - **Save to the question bank** (ticked by default; the default is a
      setting of the queue): the question, its step, the level and the final
      text go into the exercise's `faq.yaml` (or its database row when it has
      no package folder), so the next student who asks something similar shows
      the instructor's own answer first. The bank's answer sent again for a
      reworded question goes back into the same entry, which learns the new
      wording as a paraphrase.
-   - 📣 **Send to all students**: for a question the whole class should hear
+   - **Send to all students**: for a question the whole class should hear
      (a conceptual one), the answer also goes to every student active on the
      exercise in the last 30 minutes (`BROADCAST_ACTIVE_MINUTES`; the same
      course as the student who asked, when they are in one), as a teacher's
@@ -161,10 +161,10 @@ server restarted. An answer to a question nobody waits for is not lost: it is
 stored and goes into the student's chat transcript, so the student chat shows it
 at once if it is open again, or after their next login (a client that can show
 it says so with `X-VeriClass-Transcript: 1`; for any other, such as the IDE
-plugin, a timeout still closes the question). **🗑️ Delete** removes a question
+plugin, a timeout still closes the question). **Delete** removes a question
 sent by mistake or no longer relevant; with *tell the student* (default, off for
 questions that look sent by mistake) a waiting student is told at once, and one
-who left finds the note when they are back. **🧹 Delete the questions nobody is
+who left finds the note when they are back. **Delete the questions nobody is
 waiting for** clears the leftovers in one click. A question the same student
 asks again replaces its older copy, and a student who logs in again sees which
 of their questions are still with the teacher. API: `POST /api/reviews/{id}/delete`
@@ -173,7 +173,7 @@ of their questions are still with the teacher. API: `POST /api/reviews/{id}/dele
 **Questions in other languages.** A question in neither Hebrew nor English (say,
 Arabic or Russian) arrives with a translation under it: the model call that
 drafts the nudge (the quickest) also names the question's language and
-translates it, so it costs no extra call. The queue's 🌐 setting picks the language (Hebrew by
+translates it, so it costs no extra call. The queue's *translate to* setting picks the language (Hebrew by
 default, English, or off); it applies to questions asked from then on. *Redo
 with* keeps the translation. Stored on `pending_reviews.question_lang`,
 `question_translation` and `translated_to`; the setting is `review_translate_to`
@@ -224,7 +224,7 @@ is a class-paced lab.
 
 - **Steps open from the start** (`open_steps`, e.g. the setup part) go at each
   student's own pace, until the lecturer sets the course's marker in the
-  dashboard (*Class pacing*: "▶ Open B4", or "Open up to…" any step, including
+  dashboard (*Class pacing*: "Open step B4", or *Change the last open step* to any step, including
   one of the steps open from the start, e.g. "up to A5" to stop everyone there). A student who
   finished every open step waits in the chat, and the next step appears there by
   itself when it opens.
@@ -264,15 +264,14 @@ is a class-paced lab.
   which grades wait (see the table below); an answer the grader couldn't grade
   never waits. The API is `POST /api/pacing/{exercise_id}/answer-review`
   (`{"probe_id": n, "action": "approve" | "return", "note": ..., "grade": 0..2}`).
-- **Moving a student to another step.** In *Class pacing*, "↕ Move to step…"
+- **Moving a student to another step.** In *Class pacing*, *Move to step…*
   on a student moves them back (their work from that step on, outputs and quiz
   answers, stays in the record with status `reset` but no longer counts, and
   the step's questions are asked again), forward (the steps between are marked
   `skipped`, not done, their questions aren't asked, and the steps up to the
   target are opened for that student even beyond what the class has open), or
   to the step they are on (it starts over). Their chat is interrupted: it stops
-  waiting for a paste or a button answer, says "⏸️ Your teacher stopped you
-  here" and why, and shows the step. "↺ Everyone back to step…" does the same
+  waiting for a paste or a button answer, says "Your lecturer paused you" and why, and shows the step. *Everyone back to step…* does the same
   backwards for the whole course. The API is `POST /api/sessions/{id}/move`
   (`{"step": n}`), and `POST /api/sessions/{id}/reset` / `POST
   /api/exercises/{id}/reset` (`{"step": n, "course_id": ...}`) for going back;
