@@ -6,6 +6,8 @@
 # another folder). Run the same line again later to update: your settings (.env),
 # your database (vericlass.db) and your exercises (data\) are kept.
 $ErrorActionPreference = "Stop"
+# Windows PowerShell 5.1 downloads many times slower while it draws a progress bar.
+$ProgressPreference = "SilentlyContinue"
 $repo = if ($env:VERICLASS_REPO) { $env:VERICLASS_REPO } else { "https://github.com/Shpanier/VeriClass" }
 $branch = if ($env:VERICLASS_BRANCH) { $env:VERICLASS_BRANCH } else { "main" }
 $dir = if ($env:VERICLASS_DIR) { $env:VERICLASS_DIR } else { Join-Path $HOME "VeriClass" }
@@ -17,7 +19,7 @@ if ((Test-Path (Join-Path $dir ".git")) -and (Get-Command git -ErrorAction Silen
     Write-Host "==> Downloading VeriClass to $dir"
     $zip = Join-Path $env:TEMP "vericlass-$branch.zip"
     $tmp = Join-Path $env:TEMP "vericlass-unpack"
-    Invoke-WebRequest "$repo/archive/refs/heads/$branch.zip" -OutFile $zip
+    Invoke-WebRequest "$repo/archive/refs/heads/$branch.zip" -OutFile $zip -UseBasicParsing
     if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
     Expand-Archive $zip -DestinationPath $tmp
     New-Item -ItemType Directory -Force -Path $dir | Out-Null

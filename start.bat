@@ -13,6 +13,11 @@ cd /d "%~dp0"
 rem Exercises are written in UTF-8 (Hebrew too); Windows defaults to an older encoding.
 set PYTHONUTF8=1
 set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+rem Windows on ARM (Snapdragon laptops, Windows on a Mac in Parallels): several packages
+rem VeriClass uses have no ARM build for Windows, so it runs the x64 Python, which
+rem Windows runs by emulation.
+if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "UV_PYTHON=cpython-3.12-windows-x86_64-none"
+if /i "%PROCESSOR_ARCHITEW6432%"=="ARM64" set "UV_PYTHON=cpython-3.12-windows-x86_64-none"
 
 where uv >nul 2>nul
 if errorlevel 1 (
