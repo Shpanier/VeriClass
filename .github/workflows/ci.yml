@@ -36,7 +36,11 @@ jobs:
           DB_PATH: ${{ runner.temp }}/ci.db
           VERICLASS_DATA_DIR: ${{ runner.temp }}/ci-data
         run: |
-          uv run --frozen python -m backend.cli --port 8099 --no-browser > server.log 2>&1 &
+          # The environment's own Python, not `uv run`: a uv process left running
+          # holds uv's cache lock, and the setup-uv cleanup step then fails.
+          py=.venv/bin/python; [ -f .venv/Scripts/python.exe ] && py=.venv/Scripts/python.exe
+          "$py" -m backend.cli --port 8099 --no-browser > server.log 2>&1 &
+          server=$!
           for i in $(seq 1 90); do
             curl -sf -o /dev/null http://127.0.0.1:8099/healthz && break
             sleep 2
@@ -46,6 +50,7 @@ jobs:
           curl -sf -o /dev/null http://127.0.0.1:8099/
           curl -sf -o /dev/null http://127.0.0.1:8099/chat/
           curl -sf http://127.0.0.1:8099/api/setup/status | grep -q '"needs_teacher":true'
+          kill $server || true
 
   dashboard:
     name: Dashboard
