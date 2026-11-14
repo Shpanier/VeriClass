@@ -22,7 +22,14 @@ jobs:
       - name: Install (as the start scripts do)
         run: uv sync --frozen
       - name: Tests
-        run: uv run --frozen pytest -q
+        run: |
+          set +e
+          uv run --frozen pytest -q -rfE --tb=short > pytest.log 2>&1
+          status=$?
+          cat pytest.log
+          # Each failing test as an annotation, so it shows on the run's summary page.
+          grep -E '^(FAILED|ERROR) ' pytest.log | head -30 | sed 's/^/::error title=Test::/'
+          exit $status
       - name: Starts and serves the dashboard and the chat
         env:
           VERICLASS_ENV_FILE: ${{ runner.temp }}/ci.env

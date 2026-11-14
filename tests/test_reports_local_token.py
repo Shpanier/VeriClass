@@ -25,8 +25,10 @@ def client():
 
 def test_local_key_is_private_and_works_only_locally(client):
     path = deps.LOCAL_TOKEN_FILE
-    assert path.is_file() and stat.S_IMODE(path.stat().st_mode) == 0o600
-    key = path.read_text().strip()
+    assert path.is_file()
+    if os.name != "nt":  # Windows has no Unix permission bits
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    key = path.read_text(encoding="utf-8").strip()
     assert client.get("/api/exercises", headers={"X-VeriClass-Local-Token": key}).status_code == 200
     assert client.get("/api/exercises", headers={"X-VeriClass-Local-Token": "wrong"}).status_code == 401
     # Through a tunnel (forwarding headers) the key is refused.
@@ -50,7 +52,7 @@ def test_session_report_is_anonymized(client):
             "session_id": s["session_id"], "line": "vim x" if i == 0 else "ls", "allowed": i != 0,
             "commands": ["vim" if i == 0 else "ls"], "reason": "'vim' isn't allowed" if i == 0 else None,
             "exit_code": None if i == 0 else 0})
-    key = deps.LOCAL_TOKEN_FILE.read_text().strip()
+    key = deps.LOCAL_TOKEN_FILE.read_text(encoding="utf-8").strip()
     r = client.get("/api/reports/session?exercise_id=ex3-mcalc", headers={"X-VeriClass-Local-Token": key})
     rep = r.json()
     assert rep["found"] and rep["students"] >= 3

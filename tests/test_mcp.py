@@ -78,7 +78,9 @@ def test_import_students_never_returns_names_or_codes(tools):
     done = tools.import_students(str(csv), course_id="mcp-course", dry_run=False)
     assert "Hidden Person" not in str(done)
     codes = Path(done["codes_file"])
-    assert codes.parent == packages.DATA_DIR / "codes" and stat.S_IMODE(codes.stat().st_mode) == 0o600
+    assert codes.parent == packages.DATA_DIR / "codes"
+    if os.name != "nt":  # Windows has no Unix permission bits
+        assert stat.S_IMODE(codes.stat().st_mode) == 0o600
     assert "Hidden Person" in codes.read_text(encoding="utf-8-sig")
 
 
