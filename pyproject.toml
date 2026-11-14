@@ -238,6 +238,9 @@ constraint-dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The project folder on the import path, so `uv run pytest` finds backend/ as
+# `python -m pytest` does (the project isn't installed as a package).
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 120
