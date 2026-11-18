@@ -202,10 +202,22 @@ Everything here is in the dashboard's **Courses & students** tab.
   `uv run python scripts/set_password.py <username>` (`--reset` goes back to the
   username).
 - **Courses.** A course offers some exercises (one of them the default) to some
-  students. A student in several courses picks one, then an exercise; with one
-  course offering one exercise there is nothing to pick. A student who is in no
-  course gets the exercise marked *for students without a course* on the
-  Exercises tab.
+  students. In the student chat, the menu at the top of the page lists every
+  exercise the student's courses offer now (read again on every page load, so
+  an exercise you add appears after a reload) and switches between them. Each
+  exercise keeps its own conversation and progress, so going back to one
+  continues where the student left it. The chat opens by itself the exercise
+  the student worked on in the last 3 hours, else today's meeting's, else the
+  course's default (`KEEP_LAST_HOURS` in `backend/courses.py`). To sign in as
+  someone else: the round button at the top right, then *Sign out*. A student
+  who is in no course gets the exercise marked *for students without a course*
+  on the Exercises tab.
+- **Finding an exercise.** The Exercises tab searches by title or id, sorts by
+  date added, date changed or name, and filters by date (today, the last 7 or
+  30 days, or dates you choose). The order you pick is kept in your browser and
+  used by every list of exercises in the dashboard. A package's dates come from
+  its folder (added) and its newest file (changed); a bundled sample has none
+  unless you edited it.
 - **Meetings.** A course can list its meetings (a date and an exercise): on
   that date its students open the meeting's exercise without choosing, and the
   meeting shows who came.

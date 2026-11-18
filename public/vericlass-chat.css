@@ -31,6 +31,12 @@
 [dir="rtl"] { text-align: start; }
 input[dir="rtl"]::placeholder, textarea[dir="rtl"]::placeholder { text-align: right; }
 
+/* The exercise menu at the top (Chainlit's chat profiles, student_app/app.py):
+   a long lab title is cut short rather than pushing the header's buttons away. */
+#chat-profiles { max-width: min(62vw, 34rem); }
+#chat-profiles > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[role="option"][dir="rtl"] { text-align: right; }
+
 /* A step's "Done" button and the answer choices are the main thing to click:
    give them room and a clear edge in both themes. */
 .message-content + div button, .step button[id^="action"] { font-weight: 600; }

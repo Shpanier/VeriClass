@@ -87,6 +87,62 @@ def for_user(user_id: int, role: str) -> list[dict[str, Any]]:
     return out
 
 
+# A student who worked on an exercise this recently gets it again when their
+# chat opens by itself (a reload, a new tab, the next login): about one class.
+KEEP_LAST_HOURS = 3
+
+
+def _utc(value: Optional[str]) -> Optional[datetime.datetime]:
+    """A database time ("2026-11-12 09:06:36", UTC)."""
+    try:
+        return datetime.datetime.fromisoformat(value).replace(tzinfo=datetime.timezone.utc) if value else None
+    except ValueError:
+        return None
+
+
+def choices(user: dict) -> dict[str, Any]:
+    """What this user may open right now, for a client that lets them switch
+    exercises (the student chat's exercise menu): their courses as at login,
+    but read now (an exercise the teacher added since is there), each exercise
+    with when they last worked on it (`last_active_at`, UTC, None = never), and
+    `suggested`, the (course, exercise) to open without asking:
+    the exercise they worked on in the last KEEP_LAST_HOURS hours, else today's
+    meeting's exercise, else the default of the course they last worked in.
+    `suggested` is None for a user in no course (they get the active exercise)."""
+    mine = for_user(user["id"], user["role"])
+    with db.conn() as c:
+        last = {r["exercise"]: r["at"] for r in c.execute(
+            "SELECT exercise, MAX(last_active_at) AS at FROM sessions WHERE user_id = ? GROUP BY exercise",
+            (user["id"],))}
+        latest = c.execute(
+            "SELECT course_id, exercise, last_active_at FROM sessions WHERE user_id = ? "
+            "ORDER BY last_active_at DESC, started_at DESC LIMIT 1", (user["id"],)).fetchone()
+    for course in mine:
+        course["exercises"] = [{**e, "last_active_at": last.get(e["exercise_id"])} for e in course["exercises"]]
+
+    def offering(exercise_id: str, course_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+        """The course (that one first) through which the user may open the exercise."""
+        found = [c for c in mine if any(e["exercise_id"] == exercise_id for e in c["exercises"])]
+        return next((c for c in found if c["course_id"] == course_id), found[0] if found else None)
+
+    suggested = None
+    if latest:
+        at = _utc(latest["last_active_at"])
+        recent = at and datetime.datetime.now(datetime.timezone.utc) - at <= datetime.timedelta(hours=KEEP_LAST_HOURS)
+        course = offering(latest["exercise"], latest["course_id"]) if recent else None
+        if course:
+            suggested = (course["course_id"], latest["exercise"])
+    if suggested is None:
+        today = next((c for c in mine if c.get("today_exercise")), None)
+        if today:
+            suggested = (today["course_id"], today["today_exercise"])
+    if suggested is None and mine:
+        course = next((c for c in mine if latest and c["course_id"] == latest["course_id"]), mine[0])
+        suggested = (course["course_id"], course["default_exercise"])
+    return {"courses": mine,
+            "suggested": {"course_id": suggested[0], "exercise_id": suggested[1]} if suggested else None}
+
+
 def resolve(user: dict, course_id: Optional[str], exercise_id: Optional[str]) -> tuple[Optional[str], dict]:
     """Which (course, exercise) a new session opens. Missing choices are filled
     in when there is only one possibility (or from the course's default), so a

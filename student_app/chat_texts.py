@@ -35,6 +35,9 @@ TEXTS: dict[str, tuple[str, str]] = {
     "no_choice": ("לא התקבלה בחירה. רעננו את הדף כדי לנסות שוב.",
                   "Nothing was chosen. Reload the page to try again."),
     "session_failed": ("⚠️ לא הצלחנו לפתוח את המפגש שלכם.", "⚠️ Your session couldn't be opened."),
+    "exercise_gone": ("⚠️ התרגיל הזה כבר לא פתוח בשבילכם. בחרו תרגיל אחר בתפריט שבראש הדף.",
+                      "⚠️ This exercise isn't open for you any more. Choose another one in the menu at the top of "
+                      "the page."),
     "hint_relogin": (" צאו והיכנסו שוב.", " Sign out and sign in again."),
     "hint_reload": (" רעננו את הדף כדי לנסות שוב.", " Reload the page to try again."),
     "stopped": ("_⏸️ הופסק._", "_⏸️ Stopped._"),
@@ -42,8 +45,21 @@ TEXTS: dict[str, tuple[str, str]] = {
 
     # --- coming back to a lab ---
     "older_hidden": ("_…הודעות ישנות יותר לא מוצגות._", "_…older messages aren't shown._"),
-    "resumed": ("↩️ **חזרתם למפגש.** כל מה שהיה עד עכשיו מופיע למעלה, וממשיכים מאותו מקום.",
-                "↩️ **Welcome back.** Everything so far is shown above, and you continue from the same place."),
+    "resumed": ("↩️ **חזרתם לתרגיל {title}.** כל מה שהיה בו עד עכשיו מופיע למעלה, וממשיכים מאותו מקום.",
+                "↩️ **Welcome back to {title}.** Everything you did in it is shown above, and you continue "
+                "from the same place."),
+
+    # --- the exercise menu at the top of the page (one entry per exercise) ---
+    "switch_hint": ("🔀 **לעבור לתרגיל אחר:** בחרו אותו בתפריט שבראש הדף. העבודה שלכם בכל תרגיל נשמרת, "
+                    "וכשחוזרים אליו ממשיכים מאותו מקום. כדי להתחבר כמשתמש אחר: העיגול עם האות "
+                    "בפינה הימנית העליונה ← **יציאה**.",
+                    "🔀 **To switch to another exercise,** choose it in the menu at the top of the page. Your "
+                    "work in each exercise is kept, and going back to one continues from the same place. To "
+                    "sign in as someone else: the circle with your initial at the top right → **Sign out**."),
+    "menu_course": ("קורס: **{course}**", "Course: **{course}**"),
+    "menu_pick": ("⭐ הבחירה של המרצה", "⭐ Your lecturer's pick"),
+    "menu_last": ("עבדתם עליו לאחרונה: {when}", "You last worked on it: {when}"),
+    "menu_new": ("עוד לא התחלתם אותו.", "You haven't started it yet."),
     "still_with_lecturer": ("⏳ **עדיין אצל המרצה:**\n{lines}\n\nהתשובה תופיע כאן כשהמרצה יענה.",
                             "⏳ **Still with your lecturer:**\n{lines}\n\nThe answer will appear here when your lecturer replies."),
 

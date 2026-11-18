@@ -1,9 +1,11 @@
 import asyncio
+import datetime
 import logging
 import os
 import re
 import sys
 import uuid
+import warnings
 
 import chainlit as cl
 import httpx
@@ -66,9 +68,77 @@ def _t(key: str, **values) -> str:
     return _text(key, _lang(), **values)
 
 
-def _title(item: dict) -> str:
-    """An exercise's title in the chat's language."""
-    return (item.get("title_he") or item["title_en"]) if _lang() == "he" else item["title_en"]
+def _title(item: dict, lang: str = None) -> str:
+    """An exercise's title in the chat's language (or in `lang`)."""
+    return (item.get("title_he") or item["title_en"]) if (lang or _lang()) == "he" else item["title_en"]
+
+
+# --- the exercise menu at the top of the page ------------------------------------------
+# With the sign-in page, the header holds a menu of the exercises the student may
+# open: one Chainlit chat profile per (course, exercise). It is read from the
+# server on every page load (GET /api/my-exercises), so an exercise the teacher
+# offered after the student signed in is there too. Choosing an entry starts the
+# chat again in that exercise. Each exercise keeps its own session on the server,
+# so going back to one continues from where the student was. The server also
+# says which entry opens by itself (backend/courses.py, choices()): the exercise
+# the student was just in, else today's meeting's, else the course's default.
+
+# Chainlit looks for per-profile settings by running the menu's callback outside
+# the event loop, which can't work inside the server; it ignores the failure, and
+# only a warning about the never-awaited coroutine is left. The menu sets none.
+warnings.filterwarnings("ignore", message=r"coroutine .*wrapper.* was never awaited", category=RuntimeWarning)
+
+
+async def _my_exercises(token: str):
+    """GET /api/my-exercises: {courses, suggested}; None when it can't be read
+    (no server, or a sign-in the server no longer knows)."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{BACKEND}/api/my-exercises", headers={"Authorization": f"Bearer {token}"})
+        if r.status_code == 200:
+            return r.json()
+        log.warning("my-exercises: HTTP %s", r.status_code)
+    except httpx.HTTPError as e:
+        log.warning("my-exercises failed: %s", e)
+    return None
+
+
+def _when(value: str) -> str:
+    """A server time (UTC) as the class's local date and time, 12.11.2026 14:05."""
+    try:
+        t = datetime.datetime.fromisoformat(value.replace("Z", "")).replace(tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return value
+    return t.astimezone().strftime("%d.%m.%Y %H:%M")
+
+
+def _menu(data: dict, lang: str) -> list:
+    """The menu's entries: one per exercise of each course, in the course's order.
+    An entry's name is "course_id/exercise_id" (what on_chat_start gets back);
+    the student sees the exercise's title (with the course when two titles are
+    the same), ⭐ on the lecturer's pick, and, beside it, the course and when
+    they last worked on it."""
+    suggested = data.get("suggested") or {}
+    entries = [(c, e) for c in data.get("courses") or [] for e in c["exercises"]]
+    titles = [_title(e, lang) for _, e in entries]
+    menu = []
+    for (course, ex), title in zip(entries, titles):
+        if titles.count(title) > 1:
+            title = f"{title} · {course['name']}"
+        pick = ex["exercise_id"] == course.get("default_exercise")
+        lines = [_text("menu_course", lang, course=course["name"])]
+        if pick:
+            lines.append(_text("menu_pick", lang))
+        lines.append(_text("menu_last", lang, when=_when(ex["last_active_at"])) if ex.get("last_active_at")
+                     else _text("menu_new", lang))
+        menu.append(cl.ChatProfile(
+            name=f"{course['course_id']}/{ex['exercise_id']}",
+            display_name=f"{title} ⭐" if pick else title,
+            markdown_description="\n\n".join(lines),
+            default=(suggested.get("course_id"), suggested.get("exercise_id"))
+            == (course["course_id"], ex["exercise_id"]),
+        ))
+    return menu
 
 
 # A short message that means "I finished this step" in a class-paced lab: the
@@ -97,6 +167,18 @@ if AUTH_PAGE:
         if r is None or r.status_code != 200:
             return None
         return cl.User(identifier=username.strip().lower(), metadata={"login": r.json()})
+
+    @cl.set_chat_profiles
+    async def exercise_menu(current_user: cl.User = None, language: str = None):
+        """The exercise menu for this student, read from the server now. None (no
+        menu) when they are in no course, or the server can't say."""
+        login = ((current_user.metadata or {}).get("login") or {}) if current_user else {}
+        data = await _my_exercises(login["token"]) if login.get("token") else None
+        if not data:
+            return None
+        forced = os.environ.get("CHAT_LANGUAGE", "auto").strip().lower()
+        lang = forced if forced in ("he", "en") else ("he" if (language or "").lower().startswith("he") else "en")
+        return _menu(data, lang) or None
 
 
 async def _prompt(text: str, timeout: int = 600, kind: str = "", step: int = None) -> str:
@@ -192,7 +274,7 @@ async def _replay() -> list[dict]:
             await cl.Message(content=e["content"], author="student", type="user_message").send()
         else:
             await cl.Message(content=e["content"]).send()
-    await cl.Message(content=_t("resumed")).send()
+    await cl.Message(content=_t("resumed", title=cl.user_session.get("title") or "")).send()
     return entries
 
 
@@ -240,6 +322,24 @@ async def _open_questions() -> None:
         await _say(_t("still_with_lecturer", lines=lines), record=False)
 
 
+def _since_reset(entries: list[dict]) -> list[dict]:
+    """The entries after the last time the teacher moved the student."""
+    since = entries
+    for i, e in enumerate(entries):
+        if e["kind"] == "reset":
+            since = entries[i + 1:]
+    return since
+
+
+async def _shown_probe(entries: list[dict]) -> None:
+    """After a new login: the open question the replayed conversation already
+    shows is not asked again. (It was, at every login, and piled up in the
+    transcript, one more copy each time.)"""
+    probes = await _pending_probes()
+    if probes and any(e["kind"] == "quiz" and probes[0]["body"] in e["content"] for e in _since_reset(entries)):
+        cl.user_session.set("probe_shown", probes[0]["id"])
+
+
 def _forget_shown() -> None:
     """After a reset: show the step the student is on again, as if new."""
     for key in ("shown_step", "waiting_for", "in_review", "awaiting_output"):
@@ -252,10 +352,7 @@ def _resume_marks(entries: list[dict], st: dict) -> None:
     """What the replayed conversation already shows, since the last reset: the
     current step's text, the note that the student waits for the teacher, the
     end of the lab. So a new login doesn't repeat them."""
-    since = entries
-    for i, e in enumerate(entries):
-        if e["kind"] == "reset":
-            since = entries[i + 1:]
+    since = _since_reset(entries)
     cur = st["current"]
     if st.get("open") and any(e["kind"] == "step" and e["step"] == cur for e in since):
         cl.user_session.set("shown_step", cur)
@@ -389,16 +486,32 @@ async def on_chat_start():
     token = login["token"]
     auth = {"Authorization": f"Bearer {token}"}
 
-    choice = await _choose(login.get("courses") or [])
-    if choice is False:
-        await cl.Message(content=_t("no_choice")).send()
-        return
-    course_id, exercise_id = choice
+    # The exercise: the one chosen in the menu at the top of the page; without a
+    # menu (the chat signs in by itself, or the student is in no course) the chat
+    # asks, from the list the server gives now (the sign-in page's list is as old
+    # as the sign-in, which lasts days).
+    profile = cl.user_session.get("chat_profile") if AUTH_PAGE else None
+    fresh = await _my_exercises(token) if AUTH_PAGE else None
+    courses = fresh["courses"] if fresh else login.get("courses") or []
+    if profile and "/" in profile:
+        course_id, exercise_id = profile.split("/", 1)
+    else:
+        choice = await _choose(courses)
+        if choice is False:
+            await cl.Message(content=_t("no_choice")).send()
+            return
+        course_id, exercise_id = choice
+    # More than one exercise in the menu: say how to switch.
+    switchable = bool(profile) and sum(len(c["exercises"]) for c in courses) > 1
     body = {k: v for k, v in (("course_id", course_id), ("exercise_id", exercise_id)) if v}
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             s = await client.post(f"{BACKEND}/api/sessions", json=body, headers=auth)
+            if s.status_code in (403, 404) and profile:
+                # Chosen in a menu read earlier: the teacher stopped offering it since.
+                await cl.Message(content=_t("exercise_gone")).send()
+                return
             s.raise_for_status()
             sess = s.json()
             # Students only ever get their own session's exercise and variant.
@@ -416,6 +529,7 @@ async def on_chat_start():
         return
 
     _follow_lab(exercise)
+    cl.user_session.set("title", _title(exercise))
     paced = exercise.get("pacing") == "class"
     cl.user_session.set("token", token)
     cl.user_session.set("session_id", sess["session_id"])
@@ -430,6 +544,9 @@ async def on_chat_start():
             await _send_briefing(exercise, sess["variant"], sess["mode"], paced)
         else:
             await _open_questions()
+            await _shown_probe(history)
+        if switchable:
+            await _say(_t("switch_hint"), record=False)
         if paced:
             st = await _get_state()
             if st and history:

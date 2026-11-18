@@ -39,6 +39,15 @@ def resume_minutes(exercise: dict) -> int:
     return 0 if pacing.is_paced(exercise) else 30
 
 
+@router.get("/my-exercises")
+def my_exercises(user: dict = Depends(deps.current_user)):
+    """The courses and exercises this user may open now, when they last worked
+    on each, and the one to open without asking (backend/courses.py choices()).
+    The student chat reads it on every page load, so its exercise menu shows
+    what the teacher offers now, not what was offered at login."""
+    return courses.choices(user)
+
+
 @router.post("/sessions")
 def start_session(req: StartSessionRequest, user: dict = Depends(deps.current_user)):
     user_id = user["id"]

@@ -9,9 +9,10 @@
   const IN_MESSAGES = [
     '[role="article"]', "li", "ul", "ol", "h1", "h2", "h3", "h4", "blockquote", "table",
   ].map((s) => ".message-content " + s).join(", ");
-  // Chainlit's own labels (sign-in page, buttons, dialogs, the line under the
-  // input): right to left only when they are in Hebrew.
-  const LABELS = 'h1, h2, label, button, [role="dialog"] p, [role="alertdialog"] p, .watermark, form p';
+  // Chainlit's own labels (sign-in page, buttons, dialogs, the exercise menu,
+  // the line under the input): right to left only when they are in Hebrew.
+  const LABELS = 'h1, h2, label, button, [role="option"], [role="dialog"] p, [role="alertdialog"] p, ' +
+    '.watermark, form p';
 
   const mark = (el) => {
     const dir = HE.test(el.textContent || "") ? "rtl" : "ltr";

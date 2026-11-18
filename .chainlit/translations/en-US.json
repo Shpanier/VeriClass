@@ -209,7 +209,7 @@
       "button": "Reload the chat",
       "dialog": {
         "title": "Reload the chat?",
-        "description": "The chat starts again and your lab continues from where you are. Nothing you did is lost.",
+        "description": "The chat starts again, in the exercise shown at the top of the page. Nothing you did is lost: each exercise continues from where you left it.",
         "tooltip": "Reload the chat"
       }
     },
