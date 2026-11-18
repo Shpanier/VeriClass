@@ -3,11 +3,13 @@ import { useId } from "react";
 import { Layers, ListOrdered, Users } from "lucide-react";
 import type { ExerciseSummary, FullExercise } from "../types";
 import { useLang } from "../i18n";
+import { sortExercises, useExerciseSort } from "../lib/exerciseOrder";
 import { Select } from "./ui";
 
 /** The class page's heading: which exercise the live view follows (one at a
  *  time, never mixed), with the exercises that have students right now listed
- *  first, and a line of facts about the chosen one. */
+ *  first (the rest in the order chosen in the Exercises tab), and a line of
+ *  facts about the chosen one. */
 export function ExerciseHeader({
   exercises,
   liveCounts,
@@ -24,6 +26,7 @@ export function ExerciseHeader({
   studentCount: number;
 }) {
   const { t, lang } = useLang();
+  const [sort] = useExerciseSort();
   const hintId = useId();
   const titleOf = (ex: { title_en: string; title_he?: string | null }) =>
     lang === "he" ? ex.title_he ?? ex.title_en : ex.title_en;
@@ -37,7 +40,7 @@ export function ExerciseHeader({
 
   const live = exercises.filter((ex) => count(ex.exercise_id) > 0)
     .sort((a, b) => count(b.exercise_id) - count(a.exercise_id));
-  const idle = exercises.filter((ex) => count(ex.exercise_id) === 0);
+  const idle = sortExercises(exercises.filter((ex) => count(ex.exercise_id) === 0), sort, lang);
   const versions = exercise?.variants.length ?? 0;
 
   return (

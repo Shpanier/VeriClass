@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import { CloudUpload, CopyPlus, Download, PackageOpen, Pencil, Plus, RefreshCw, Search, UserCheck, UserX, X } from "lucide-react";
+import { CloudUpload, CopyPlus, Download, FilterX, PackageOpen, Pencil, Plus, RefreshCw, Search, UserCheck, UserX, X }
+  from "lucide-react";
 import { api } from "../api";
 import type { ExerciseSummary, FullExercise, PackageResult } from "../types";
 import { useLang, type Translate } from "../i18n";
 import { useFeatures } from "../app/features";
 import { describeError } from "../lib/errors";
-import { Button, CopyButton, EmptyState, Input, Loading, Notice, useConfirm, useToast } from "./ui";
+import { DATE_RANGES, EXERCISE_SORTS, inDateRange, sortExercises, useExerciseSort, type DateRange,
+         type ExerciseSort } from "../lib/exerciseOrder";
+import { formatDate, formatDateTime, parseServerTime } from "../lib/time";
+import { Button, CopyButton, EmptyState, Input, Loading, Notice, Select, useConfirm, useToast } from "./ui";
 import { ExerciseFormModal, errorLines } from "./ExerciseFormModal";
 import "../styles/exercises.css";
 
@@ -39,6 +43,25 @@ function stepsText(n: number, t: Translate) {
   return n === 1 ? t("exOneStep") : t("exSteps", { n });
 }
 
+/** "Added 12 Nov 2026, changed 14 Nov 2026" (the change only on another day),
+ *  and the exact times for the tooltip. A bundled sample has no date, unless
+ *  the lecturer edited it. */
+function datesText(ex: ExerciseSummary, t: Translate, lang: "en" | "he") {
+  const added = parseServerTime(ex.added_at);
+  const changed = parseServerTime(ex.changed_at);
+  const day = (d: Date) => formatDate(d, lang);
+  if (!added) {
+    return changed
+      ? { line: t("exChangedOnly", { date: day(changed) }), exact: t("exChangedOnly", { date: formatDateTime(changed, lang) }) }
+      : null;
+  }
+  const line = [t("exAdded", { date: day(added) }),
+    changed && day(changed) !== day(added) ? t("exChanged", { date: day(changed) }) : ""].filter(Boolean).join(", ");
+  const exact = [t("exAdded", { date: formatDateTime(added, lang) }),
+    changed ? t("exChanged", { date: formatDateTime(changed, lang) }) : ""].filter(Boolean).join(", ");
+  return { line, exact };
+}
+
 // The "Exercises" tab: lists every exercise (built-in samples, ones written in
 // the form, and packages from the private data folder), lets the lecturer pick
 // the one students without a course get, create / edit / duplicate, upload a
@@ -61,6 +84,10 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
   const [dragOver, setDragOver] = useState(false);
   const [reloading, setReloading] = useState(false);
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useExerciseSort();
+  const [range, setRange] = useState<DateRange>("any");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [flashId, setFlashId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -128,7 +155,7 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
       }
       if (result.ok) {
         setUpload({ ok: true, name: file.name, result, replaced });
-        setQuery("");
+        clearFilters();
         setFlashId(result.summary.exercise_id ?? null);
       } else {
         setUpload({ ok: false, name: file.name, errors: result.errors, warnings: result.warnings });
@@ -222,20 +249,31 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
     }
   };
 
+  function clearFilters() {
+    setQuery("");
+    setRange("any");
+    setFrom("");
+    setTo("");
+  }
+
   const afterSave = (savedId?: string) => {
     setForm(null);
     toast.success(t("exSaved"));
     if (savedId) {
-      setQuery("");
+      clearFilters();
       setFlashId(savedId);
     }
     refresh();
     onActiveChanged(); // an edit may have touched the active exercise
   };
 
+  // The list as the lecturer asked for it: matching the search (title or id) and
+  // the date filter (added or changed in that period), in the chosen order.
   const q = query.trim().toLowerCase();
-  const shown = !exercises ? [] : !q ? exercises : exercises.filter((ex) =>
-    [ex.exercise_id, ex.title_en, ex.title_he ?? ""].some((s) => s.toLowerCase().includes(q)));
+  const filtering = !!q || range !== "any";
+  const shown = !exercises ? [] : sortExercises(exercises.filter((ex) =>
+    (!q || [ex.exercise_id, ex.title_en, ex.title_he ?? ""].some((s) => s.toLowerCase().includes(q)))
+    && inDateRange(ex, range, from, to)), sort, lang);
   const anyActive = !!exercises?.some((ex) => ex.is_active);
 
   const dropCls = ["vc-exercises-drop", dragOver && !uploading ? "vc-exercises-drop--over" : "",
@@ -323,18 +361,56 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
 
       {!!exercises?.length && (
         <>
-          <div className="u-row u-row--top u-wrap u-gap-12 u-mb-12">
-            <p className="u-grow u-sm u-muted">{t("exActiveHint")}</p>
-            {exercises.length > 6 && (
-              <div className="vc-exercises-search u-grow">
+          <p className="u-sm u-muted u-mb-12">{t("exActiveHint")}</p>
+          {exercises.length > 1 && (
+            <div className="vc-exercises-tools u-mb-12" role="group" aria-label={t("exSearch")}>
+              <div className="vc-exercises-search">
                 <Search aria-hidden="true" />
                 <Input type="search" small value={query} onChange={(e) => setQuery(e.target.value)}
                        placeholder={t("exSearchPlaceholder")} aria-label={t("exSearch")} />
               </div>
-            )}
-          </div>
+              <label className="vc-exercises-tool">
+                <span>{t("exSort")}</span>
+                <Select small value={sort} onChange={(e) => setSort(e.target.value as ExerciseSort)}>
+                  {EXERCISE_SORTS.map((s) => <option key={s} value={s}>{t(`exSort.${s}`)}</option>)}
+                </Select>
+              </label>
+              <label className="vc-exercises-tool" title={t("exDateTitle")}>
+                <span>{t("exDate")}</span>
+                <Select small value={range} onChange={(e) => setRange(e.target.value as DateRange)}>
+                  {DATE_RANGES.map((r) => <option key={r} value={r}>{t(`exDate.${r}`)}</option>)}
+                </Select>
+              </label>
+              {range === "custom" && (
+                <>
+                  <label className="vc-exercises-tool">
+                    <span>{t("exDateFrom")}</span>
+                    <Input type="date" small dir="ltr" value={from} max={to || undefined}
+                           onChange={(e) => setFrom(e.target.value)} />
+                  </label>
+                  <label className="vc-exercises-tool">
+                    <span>{t("exDateTo")}</span>
+                    <Input type="date" small dir="ltr" value={to} min={from || undefined}
+                           onChange={(e) => setTo(e.target.value)} />
+                  </label>
+                </>
+              )}
+              {filtering && (
+                <span className="vc-exercises-tools__count" aria-live="polite">
+                  {t("exShowing", { shown: shown.length, n: exercises.length })}
+                </span>
+              )}
+            </div>
+          )}
           {!anyActive && <Notice tone="warning" className="u-mb-12">{t("noActiveExercise")}</Notice>}
-          {shown.length === 0 && <p className="u-muted" dir="auto">{t("exNoMatch", { q: query.trim() })}</p>}
+          {shown.length === 0 && (
+            <div className="u-row u-wrap u-gap-8 u-mb-12">
+              <p className="u-muted" dir="auto">
+                {range === "any" ? t("exNoMatch", { q: query.trim() }) : t("exNoMatchFilters")}
+              </p>
+              <Button size="sm" variant="quiet" icon={<FilterX />} onClick={clearFilters}>{t("exClearFilters")}</Button>
+            </div>
+          )}
 
           <div className="vc-grid vc-grid--wide">
             {shown.map((ex) => {
@@ -346,6 +422,7 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
                 ex.bank_questions ? t("exBank", { n: ex.bank_questions }) : "",
                 t("exTutor", { mode: ex.default_mode === "coding_partner" ? t("codingPartner") : t("mentor") }),
               ].filter(Boolean);
+              const dates = datesText(ex, t, lang);
               return (
                 <article key={ex.exercise_id} id={cardId(ex.exercise_id)} className={cls}
                          aria-labelledby={`${cardId(ex.exercise_id)}-title`}>
@@ -368,6 +445,7 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
                     )}
                   </div>
                   <div className="vc-exercises-card__meta" dir="auto">{meta.join(" · ")}</div>
+                  {dates && <div className="vc-exercises-card__dates" title={dates.exact}>{dates.line}</div>}
                   <div className="vc-exercises-card__actions">
                     <Button variant="brand-soft" size="sm" icon={<Pencil />} busy={mine === "edit"} disabled={!!mine}
                             onClick={() => openWith(ex.exercise_id, "edit")}>

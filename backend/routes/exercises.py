@@ -106,7 +106,9 @@ def active_exercise(
 # --- teacher-only authoring --------------------------------------------------
 
 
-def _summary(ex: dict[str, Any], active_id: Optional[str]) -> dict[str, Any]:
+def _summary(ex: dict[str, Any], active_id: Optional[str],
+             dates: Optional[dict[str, Optional[str]]] = None) -> dict[str, Any]:
+    dates = dates or {}
     return {
         "exercise_id": ex["exercise_id"],
         "title_en": ex["title_en"],
@@ -123,6 +125,10 @@ def _summary(ex: dict[str, Any], active_id: Optional[str]) -> dict[str, Any]:
         "bank_questions": len(ex.get("faq") or []),
         # A package's folder in the private data folder (teacher only).
         "folder": ex.get("package_dir"),
+        # When it came to this server and when it last changed (UTC, ISO 8601):
+        # the dashboard sorts and filters by them (exercises.dates()).
+        "added_at": dates.get("added_at"),
+        "changed_at": dates.get("changed_at"),
     }
 
 
@@ -174,8 +180,17 @@ def _full(ex: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/exercises")
 def list_exercises(teacher: dict = Depends(deps.require_teacher)):
+    return _summaries()
+
+
+def _summaries() -> list[dict[str, Any]]:
     active_id = exercises.active_id()
-    return [_summary(ex, active_id) for ex in exercises.all()]
+    dates = exercises.dates()
+    return [_summary(ex, active_id, dates.get(ex["exercise_id"])) for ex in exercises.all()]
+
+
+def _one(ex: dict[str, Any]) -> dict[str, Any]:
+    return _summary(ex, exercises.active_id(), exercises.dates().get(ex["exercise_id"]))
 
 
 # --- packages: the private data folder (backend/packages.py) ----------------------
@@ -214,7 +229,7 @@ def _installed(result: dict[str, Any]) -> dict[str, Any]:
         except ValueError as e:
             result.update(ok=False, errors=[str(e)])
             return result
-        result["exercise"] = _summary(ex, exercises.active_id())
+        result["exercise"] = _one(ex)
     return result
 
 
@@ -246,8 +261,7 @@ def validate_package(req: FolderRequest, teacher: dict = Depends(deps.require_te
 def reload_exercises(teacher: dict = Depends(deps.require_teacher)):
     """Read every exercise from disk again (after editing a package by hand)."""
     exercises.reload_all()
-    active_id = exercises.active_id()
-    return {"exercises": [_summary(ex, active_id) for ex in exercises.all()],
+    return {"exercises": _summaries(),
             "load_errors": exercises.load_errors()}
 
 
@@ -344,7 +358,7 @@ def create_exercise(payload: ExercisePayload, teacher: dict = Depends(deps.requi
         raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return _summary(stored, exercises.active_id())
+    return _one(stored)
 
 
 @router.put("/exercises/{exercise_id}")
@@ -360,7 +374,7 @@ def update_exercise(
         raise HTTPException(404, f"Unknown exercise '{exercise_id}'")
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return _summary(stored, exercises.active_id())
+    return _one(stored)
 
 
 class SetActiveRequest(BaseModel):

@@ -22,6 +22,11 @@ export function formatDateTime(d: Date, lang: Lang): string {
   });
 }
 
+/** "12 Nov 2026" (the day only). */
+export function formatDate(d: Date, lang: Lang): string {
+  return d.toLocaleDateString(locale(lang), { day: "numeric", month: "short", year: "numeric" });
+}
+
 /** "just now", "3 min ago", "2 hours ago"; older than a day: the date and time. */
 export function relativeTime(d: Date, lang: Lang, now: Date = new Date()): string {
   const sec = Math.round((now.getTime() - d.getTime()) / 1000);

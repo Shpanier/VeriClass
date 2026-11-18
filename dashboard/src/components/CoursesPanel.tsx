@@ -4,6 +4,7 @@ import { api } from "../api";
 import type { Course, ExerciseSummary, UserAccount } from "../types";
 import { useLang } from "../i18n";
 import { describeError } from "../lib/errors";
+import { sortExercises, useExerciseSort } from "../lib/exerciseOrder";
 import { Button, EmptyState, FormField, Input, Loading, Notice, Switch, useConfirm, useToast } from "./ui";
 import { ImportStudentsModal, MaskedUsername } from "./ImportStudentsModal";
 import { MeetingsSection } from "./MeetingsSection";
@@ -331,6 +332,7 @@ function CourseCard({
   onImport: () => void;
 }) {
   const { t, lang } = useLang();
+  const [exSort] = useExerciseSort();
   const toast = useToast();
   const confirm = useConfirm();
   const card = useRef<HTMLElement>(null);
@@ -377,11 +379,12 @@ function CourseCard({
     update({ ...d, memOn, memOff });
   };
 
-  // The filters show only when the lists are long.
+  // The filters show only when the lists are long. Exercises in the order
+  // chosen in the Exercises tab (newest first unless changed there).
   const exQ = exercises.length > 8 ? exFilter.trim().toLowerCase() : "";
-  const shownEx = exercises.filter(
+  const shownEx = sortExercises(exercises.filter(
     (ex) => !exQ || title(ex).toLowerCase().includes(exQ) || ex.exercise_id.toLowerCase().includes(exQ),
-  );
+  ), exSort, lang);
   const q = students.length > 12 ? filter.trim().toLowerCase() : "";
 
   // Members (as saved) first, so they are visible without scrolling; ordered by

@@ -219,6 +219,9 @@ export interface ExerciseSummary {
   steps?: number;
   bank_questions?: number;
   folder?: string | null;
+  /** When it came to this server and when it last changed (UTC, ISO 8601). */
+  added_at?: string | null;
+  changed_at?: string | null;
 }
 
 /** A check a pasted output must pass: a regular expression, searched line by line. */

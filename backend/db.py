@@ -423,6 +423,8 @@ def init_schema() -> None:
             "cached": "INTEGER NOT NULL DEFAULT 0",  # 1: served from answer_cache, no LLM call
         })
         _add_missing_columns(c, "pending_reviews", {"closed_at": "TEXT"})
+        # When a dashboard-made exercise (or the edit of a bundled one) last changed.
+        _add_missing_columns(c, "exercises", {"updated_at": "TEXT"})
         # A question the teacher can't read (neither Hebrew nor English): its
         # language and its translation into the language review_translate_to set.
         _add_missing_columns(c, "pending_reviews", {

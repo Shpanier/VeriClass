@@ -4,6 +4,7 @@ import { api } from "../api";
 import type { Attendance, ExerciseSummary, Lang, Meeting } from "../types";
 import { useLang } from "../i18n";
 import { describeError } from "../lib/errors";
+import { sortExercises, useExerciseSort } from "../lib/exerciseOrder";
 import { Button, FormField, Input, Modal, Notice, Select, Spinner, Time, useConfirm, useToast } from "./ui";
 
 // YYYY-MM-DD, local. Not toLocaleDateString: it builds an Intl formatter on every
@@ -42,10 +43,13 @@ export function MeetingsSection({ courseId, exercises, onChanged }: {
   const toast = useToast();
   const confirm = useConfirm();
   const headId = useId();
+  // The exercises in the order chosen in the Exercises tab; the first is preselected.
+  const [exSort] = useExerciseSort();
+  const ordered = sortExercises(exercises, exSort, lang);
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [date, setDate] = useState(today);
-  const [exerciseId, setExerciseId] = useState(exercises[0]?.exercise_id ?? "");
+  const [exerciseId, setExerciseId] = useState(ordered[0]?.exercise_id ?? "");
   const [title, setTitle] = useState("");
   const [adding, setAdding] = useState(false);
   const [opening, setOpening] = useState<number | null>(null);
@@ -162,7 +166,7 @@ export function MeetingsSection({ courseId, exercises, onChanged }: {
         </FormField>
         <FormField label={t("coMeetingExercise")}>
           <Select value={exerciseId} onChange={(e) => setExerciseId(e.target.value)}>
-            {exercises.map((ex) => (
+            {ordered.map((ex) => (
               <option key={ex.exercise_id} value={ex.exercise_id}>
                 {repeated(ex) ? `${titleOf(ex)} (${ex.exercise_id})` : titleOf(ex)}
               </option>

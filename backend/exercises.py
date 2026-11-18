@@ -1,5 +1,7 @@
+import datetime
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -292,7 +294,7 @@ def _upsert(payload: dict[str, Any]) -> dict[str, Any]:
             "ON CONFLICT(exercise_id) DO UPDATE SET "
             "  title_en = excluded.title_en, title_he = excluded.title_he, "
             "  default_mode = excluded.default_mode, brief_md = excluded.brief_md, "
-            "  data = excluded.data",
+            "  data = excluded.data, updated_at = CURRENT_TIMESTAMP",
             (
                 exercise_id,
                 payload["title_en"],
@@ -344,6 +346,77 @@ def set_faq(exercise_id: str, entries: list[dict[str, Any]]) -> None:
         ex["faq"] = entries
         return
     _upsert({**ex, "faq": entries})
+
+
+# --- dates: when an exercise came to this server, and when it last changed ----------
+
+
+def _iso(ts: Optional[float]) -> Optional[str]:
+    """A file time as UTC ISO 8601 ("2026-11-12T09:06:36Z")."""
+    if ts is None:
+        return None
+    return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _db_iso(value: Optional[str]) -> Optional[str]:
+    """A database time (UTC, "2026-11-12 09:06:36") in the same form."""
+    return f"{value.replace(' ', 'T')}Z" if value else None
+
+
+def _born(path: Path) -> Optional[float]:
+    """When the file or folder was created, where the system keeps it (macOS,
+    Windows); None elsewhere (Linux)."""
+    try:
+        return getattr(path.stat(), "st_birthtime", None)
+    except OSError:
+        return None
+
+
+def _file_times(root: Path) -> tuple[Optional[float], Optional[float]]:
+    """(oldest, newest) modification time of the files under root, hidden ones
+    (.previous/, .DS_Store) left out."""
+    times = []
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for name in files:
+            if not name.startswith("."):
+                try:
+                    times.append(os.stat(os.path.join(folder, name)).st_mtime)
+                except OSError:
+                    pass
+    return (min(times), max(times)) if times else (None, None)
+
+
+def dates() -> dict[str, dict[str, Optional[str]]]:
+    """Every loaded exercise's {added_at, changed_at} (UTC ISO 8601, or None),
+    for the dashboard's sorting and date filter. A package: added = when its
+    folder was made (installed; its oldest file where the system doesn't keep
+    that), changed = its newest file. One made in the dashboard: its database
+    row's times. A bundled sample: no date of its own (its file time is only
+    when VeriClass was installed or updated); changed = the lecturer's last
+    edit of it, or of its question bank, if any."""
+    with db.conn() as c:
+        rows = {r["exercise_id"]: r for r in c.execute(
+            "SELECT exercise_id, created_at, updated_at FROM exercises")}
+        banks = {r["exercise_id"]: r["updated_at"] for r in c.execute(
+            "SELECT exercise_id, updated_at FROM exercise_faq")}
+    out = {}
+    for eid, ex in _LOADED.items():
+        added = changed = None
+        row = rows.get(eid)
+        if eid in _PACKAGE_IDS and ex.get("package_dir"):
+            folder = Path(ex["package_dir"])
+            oldest, newest = _file_times(folder)
+            added, changed = _iso(_born(folder) or oldest), _iso(newest)
+            if added and changed and added > changed:
+                added = changed  # a folder copied (or synced) after its files were written
+        elif eid in _YAML_IDS:
+            edit = (row["updated_at"] or row["created_at"]) if row and ex.get("edited") else banks.get(eid)
+            changed = _db_iso(edit)
+        elif row:
+            added, changed = _db_iso(row["created_at"]), _db_iso(row["updated_at"] or row["created_at"])
+        out[eid] = {"added_at": added, "changed_at": changed or added}
+    return out
 
 
 def set_active(exercise_id: Optional[str]) -> None:
