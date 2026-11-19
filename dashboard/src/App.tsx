@@ -94,6 +94,8 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   const [submissionsSessionId, setSubmissionsSessionId] = useState<string | null>(null);
   const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
+  // The bottom of the class page: the pacing panel draws its questions after steps there.
+  const [quizSlot, setQuizSlot] = useState<HTMLDivElement | null>(null);
 
   const plugin = settings?.plugin_ui ?? false;
   const features = useMemo(() => ({ plugin }), [plugin]);
@@ -257,7 +259,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
               />
               {plugin && <ProctorBanner students={visible} onInspect={setProctorSessionId} />}
               {liveId && liveExercise?.exercise_id === liveId && liveExercise.pacing === "class"
-                ? <PacingPanel exerciseId={liveId} />
+                ? <PacingPanel exerciseId={liveId} quizSlot={quizSlot} />
                 : <StepChecks exerciseId={liveId} />}
               <ReviewQueue exerciseId={liveId} onViewChat={viewReviewChat} />
               <StudentGrid
@@ -278,6 +280,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
                 onViewSubmissions={(id) => setSubmissionsSessionId(id)}
                 onTerminalLog={(id) => setTerminalSessionId(id)}
               />
+              <div ref={setQuizSlot} />
             </ErrorBoundary>
           </div>
 

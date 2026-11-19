@@ -1,7 +1,7 @@
 import "../styles/students.css";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  AppWindow, Ban, CircleHelp, ClipboardPaste, FileUp, Hourglass, MessagesSquare, Minimize2, MonitorCheck,
+  AppWindow, Ban, ChevronDown, CircleHelp, ClipboardPaste, FileUp, Hourglass, MessagesSquare, Minimize2, MonitorCheck,
   MonitorOff, MonitorX, Search, SquareTerminal, TriangleAlert, Users, Video, WifiOff,
 } from "lucide-react";
 import type { ExamState, ParamLabel, Student } from "../types";
@@ -110,6 +110,13 @@ export function bandBadge(band?: string | null): string {
 
 type Sort = "active" | "name" | "attention";
 
+// Open or closed, remembered in this browser (closed at first: one line).
+const OPEN_KEY = "vc.students.open";
+
+function savedOpen(): boolean {
+  try { return localStorage.getItem(OPEN_KEY) === "1"; } catch { return false; }
+}
+
 /** One card per student connected to the followed exercise in the last 30
  *  minutes. With more than 8, a search box and a sort order appear above. */
 export function StudentGrid({ students, loaded = true, paramLabels, onModeChange, onAskThem, onViewChat, onProctorLog, onViewSubmissions, onTerminalLog }: Props) {
@@ -117,6 +124,11 @@ export function StudentGrid({ students, loaded = true, paramLabels, onModeChange
   const { plugin } = useFeatures();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("active");
+  const [open, setOpen] = useState(savedOpen);
+  const toggle = () => setOpen((was) => {
+    try { localStorage.setItem(OPEN_KEY, was ? "0" : "1"); } catch { /* ignore */ }
+    return !was;
+  });
 
   // The toolbar stays while a search or another order is in use, so the
   // lecturer can always see why the list looks the way it does.
@@ -140,14 +152,19 @@ export function StudentGrid({ students, loaded = true, paramLabels, onModeChange
   const versions = useMemo(() => new Set(students.map((s) => s.variant)).size, [students]);
 
   return (
-    <section className="vc-section" aria-labelledby="vc-students-title">
+    <section className="vc-section vc-students-section" data-open={open} aria-labelledby="vc-students-title">
       <div className="vc-section__head">
         <h2 className="vc-section__title" id="vc-students-title">
-          <Users aria-hidden="true" /> {t("sgTitle")}
-          {students.length > 0 && <span className="vc-badge vc-badge--count">{students.length}</span>}
+          <button type="button" className="vc-section__toggle" aria-expanded={open} aria-controls="vc-students-body"
+                  title={open ? t("sgCollapse") : t("sgExpand")} onClick={toggle}>
+            <ChevronDown className="vc-section__chev" aria-hidden="true" />
+            <Users aria-hidden="true" /> {t("sgTitle")}
+            <span className="vc-badge vc-badge--count">{students.length}</span>
+          </button>
         </h2>
-        {students.length > 0 && <span className="vc-section__hint">{t("sgModeLegend")}</span>}
-        {tools && (
+        {open && students.length > 0 && <span className="vc-section__hint">{t("sgModeLegend")}</span>}
+        {!open && <span className="vc-section__hint">{students.length > 0 ? t("sgClosedHint") : t("sgClosedEmpty")}</span>}
+        {open && tools && (
           <div className="vc-section__actions vc-students-toolbar">
             <label className="vc-students-toolbar__search">
               <span className="u-sr">{t("sgSearch")}</span>
@@ -167,7 +184,8 @@ export function StudentGrid({ students, loaded = true, paramLabels, onModeChange
         )}
       </div>
 
-      {students.length === 0 && !loaded ? (
+      <div id="vc-students-body" hidden={!open}>
+      {!open ? null : students.length === 0 && !loaded ? (
         <div className="vc-card vc-card--flat"><Loading /></div>
       ) : students.length === 0 ? (
         <div className="vc-card vc-card--flat">
@@ -197,6 +215,7 @@ export function StudentGrid({ students, loaded = true, paramLabels, onModeChange
           ))}
         </div>
       )}
+      </div>
     </section>
   );
 }

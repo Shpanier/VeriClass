@@ -492,6 +492,62 @@ def test_an_answer_sent_to_the_whole_class(client, drafts, monkeypatch):
     assert client.post("/api/broadcast", json={"exercise_id": "ex3-mcalc", "text": "x"}, headers=h).status_code == 403
 
 
+def test_an_answered_question_is_sent_to_the_class_later(client, drafts, monkeypatch):
+    """"Answered recently": an answer already sent to one student goes to the
+    rest of the class afterwards, as given or edited for the class."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    h, sid = _student(client)
+    th = _teacher(client)
+    mate_h, mate_sid = _student(client)
+    other_h, other_sid = _student(client, "pkg-demo")
+
+    t, box = _ask_in_background(client, h, sid, "Why does my loop never end?")
+    item = _wait_answers(client, th, _wait_pending(client, th, sid)["id"], 4)
+    # Not answered yet: not in the list, and it can't go to the class.
+    assert all(a["id"] != item["id"] for a in client.get("/api/reviews/answered", headers=th).json())
+    assert client.post(f"/api/reviews/{item['id']}/send-to-class", json={}, headers=th).status_code == 409
+    r = client.post(f"/api/reviews/{item['id']}/select",
+                    json={"chosen": "own", "lang": "en", "text": "Dana, the counter never changes."}, headers=th)
+    assert r.status_code == 200 and r.json()["sent_to_class"] == 0
+    t.join(10)
+
+    listed = client.get("/api/reviews/answered", headers=th, params={"exercise_id": "ex3-mcalc"}).json()
+    mine = next(a for a in listed if a["id"] == item["id"])
+    assert mine["text"] == "Dana, the counter never changes." and mine["sent_to_class"] == 0
+    assert mine["question"] == "Why does my loop never end?" and mine["username"].startswith("REV-")
+    assert all(a["exercise_id"] == "ex3-mcalc" for a in listed)
+    assert all(a["id"] != item["id"] for a in client.get(
+        "/api/reviews/answered", headers=th, params={"exercise_id": "pkg-demo"}).json())
+
+    # Who it would reach: everyone active on the exercise but the asker.
+    everyone = client.get("/api/broadcast/recipients", headers=th, params={"exercise_id": "ex3-mcalc"}).json()["count"]
+    others = client.get("/api/broadcast/recipients", headers=th,
+                        params={"exercise_id": "ex3-mcalc", "exclude_session": sid}).json()["count"]
+    assert others == everyone - 1 and others >= 1
+
+    # Edited for the class (no name in it).
+    r = client.post(f"/api/reviews/{item['id']}/send-to-class",
+                    json={"text": "The loop's counter never changes."}, headers=th)
+    assert r.status_code == 200, r.text
+    assert r.json()["sent_to_class"] == others
+    notes = _notes(client, mate_h, mate_sid)
+    assert len(notes) == 1 and "answered a question asked in class" in notes[0]["content"]
+    assert "loop never end" in notes[0]["content"] and "The loop's counter never changes." in notes[0]["content"]
+    assert "Dana" not in notes[0]["content"]
+    assert _notes(client, h, sid) == []              # the asker has it already
+    assert _notes(client, other_h, other_sid) == []  # another exercise
+    # Again, as the student got it: the count adds up.
+    r = client.post(f"/api/reviews/{item['id']}/send-to-class", json={}, headers=th)
+    assert r.status_code == 200
+    assert "Dana, the counter never changes." in _notes(client, mate_h, mate_sid)[-1]["content"]
+    mine = next(a for a in client.get("/api/reviews/answered", headers=th).json() if a["id"] == item["id"])
+    assert mine["sent_to_class"] == 2 * others
+
+    assert client.post("/api/reviews/999999/send-to-class", json={}, headers=th).status_code == 404
+    assert client.post(f"/api/reviews/{item['id']}/send-to-class", json={}, headers=h).status_code == 403
+    assert client.get("/api/reviews/answered", headers=h).status_code == 403
+
+
 def test_a_class_note_is_kept_in_messages_when_the_exercise_keeps_no_transcript(client, monkeypatch):
     import copy
     quiet = copy.deepcopy(exercises.get("ex3-mcalc"))

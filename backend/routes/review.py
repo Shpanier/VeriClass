@@ -53,7 +53,7 @@ import threading
 import time
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from backend import (bank, broadcast, claude_student, db, deps, exercises, prompting, steps, student_llm, textutil,
@@ -644,6 +644,58 @@ def select_variant(review_id: int, req: SelectRequest, teacher: dict = Depends(d
             log.warning("review %s: sending to the class failed: %s", review_id, e)
             out["class_error"] = str(e)
     return out
+
+
+# --- answered questions: sending one to the class later ---------------------
+
+@router.get("/reviews/answered")
+def answered_reviews(exercise_id: Optional[str] = None, hours: int = Query(12, ge=1, le=24 * 14),
+                     limit: int = Query(30, ge=1, le=200), teacher: dict = Depends(deps.require_teacher)):
+    """The questions answered in the last `hours` (newest first), with the text the
+    student got and how many other students it was also sent to: the review
+    queue's "Answered recently", where an answer can still go to the whole class."""
+    where = ["r.status = 'answered'", "r.final_text IS NOT NULL",
+             "COALESCE(r.answered_at, r.created_at) >= datetime('now', ?)"]
+    args: list[Any] = [f"-{hours} hours"]
+    if exercise_id:
+        where.append("s.exercise = ?")
+        args.append(exercise_id)
+    with db.conn() as c:
+        rows = c.execute(
+            _ITEM_SQL + " WHERE " + " AND ".join(where)
+            + " ORDER BY COALESCE(r.answered_at, r.created_at) DESC, r.id DESC LIMIT ?", (*args, limit)).fetchall()
+    return [{
+        "id": r["id"], "session_id": r["session_id"], "username": r["username"],
+        "exercise_id": r["exercise_id"], "course_id": r["course_id"], "question": r["question"],
+        "text": r["final_text"], "lang": r["chosen_lang"], "slot": r["chosen_slot"], "level": r["chosen_level"],
+        "created_at": r["created_at"], "answered_at": r["answered_at"],
+        "sent_to_class": r["sent_to_class"] or 0, "saved_to_bank": bool(r["saved_to_bank"]),
+    } for r in rows]
+
+
+class SendToClassRequest(BaseModel):
+    # The text to send; omitted: the answer the student got.
+    text: Optional[str] = Field(default=None, max_length=20_000)
+
+
+@router.post("/reviews/{review_id}/send-to-class")
+def send_answered_to_class(review_id: int, req: SendToClassRequest, teacher: dict = Depends(deps.require_teacher)):
+    """Send an answer already given to one student to every other student active
+    on the exercise (the same class note as "send to all students" when answering)."""
+    r = _row(review_id)
+    if not r:
+        raise HTTPException(404, "Unknown review")
+    if r["status"] != "answered":
+        raise HTTPException(409, "Only an answered question can be sent to the class")
+    text = (req.text or "").strip() or (r["final_text"] or "").strip()
+    if not text:
+        raise HTTPException(422, "Nothing to send (empty answer)")
+    sent = broadcast.send(r["exercise"], class_note(r["question"], text, r["exercise"]),
+                          r["course_id"], exclude_session=r["session_id"])
+    with db.conn() as c:
+        c.execute("UPDATE pending_reviews SET sent_to_class = ? WHERE id = ?",
+                  ((r["sent_to_class"] or 0) + sent["sent"], review_id))
+    return {"ok": True, "sent_to_class": sent["sent"], "class_skipped": sent["skipped"]}
 
 
 # --- deleting questions ------------------------------------------------------

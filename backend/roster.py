@@ -108,6 +108,11 @@ def parse(text: str) -> tuple[list[dict[str, Any]], list[str]]:
 def plan(text: str, default_course: Optional[str] = None) -> dict[str, Any]:
     """What an import would do, without changing anything."""
     rows, columns = parse(text)
+    return _plan_rows(rows, columns, default_course)
+
+
+def _plan_rows(rows: list[dict[str, Any]], columns: list[str],
+               default_course: Optional[str] = None) -> dict[str, Any]:
     with db.conn() as c:
         courses = {r["course_id"] for r in c.execute("SELECT course_id FROM courses")}
         users = [dict(r) for r in c.execute("SELECT id, username, login_code, role, email, student_id FROM users")]
@@ -133,7 +138,8 @@ def plan(text: str, default_course: Optional[str] = None) -> dict[str, Any]:
         if user is None and r["name"] in by_name:
             other = by_name[r["name"]]
             # Same name, different person (their email or ID differs): keep both apart.
-            if other["email"] or other["student_id"]:
+            # A row with a name only can't tell them apart: it is that student.
+            if (other["email"] or other["student_id"]) and (r.get("email") or r.get("student_id")):
                 r["username"] = f"{r['name']} ({r.get('student_id') or r.get('email', '').split('@')[0]})"
             else:
                 user = other
@@ -152,7 +158,35 @@ def plan(text: str, default_course: Optional[str] = None) -> dict[str, Any]:
 def apply(text: str, default_course: Optional[str] = None) -> dict[str, Any]:
     """Create the new accounts, update emails/IDs/groups, add everyone to their
     course. Returns the plan with each row's login code."""
-    result = plan(text, default_course)
+    return _apply_plan(plan(text, default_course))
+
+
+def add_one(name: str, email: Optional[str] = None, student_id: Optional[str] = None,
+            group: Optional[str] = None, course: Optional[str] = None) -> dict[str, Any]:
+    """One student, typed in the dashboard (a late joiner after the class list
+    was imported): the same rules as a one-row file. A student who already has
+    an account (same email or ID number, or the same name with neither) keeps it
+    and is only added to the course. Returns the row: status new|existing, code,
+    and `password_set` (they chose their own password: it isn't the code)."""
+    rec: dict[str, Any] = {"line": 1, "name": re.sub(r"\s+", " ", name or "").strip()[:_NAME_MAX]}
+    for key, value in (("email", (email or "").strip().lower()), ("student_id", (student_id or "").strip()),
+                       ("group", (group or "").strip())):
+        if value:
+            rec[key] = value
+    if not rec["name"]:
+        rec["error"] = "no name"
+    result = _apply_plan(_plan_rows([rec], sorted(k for k in rec if k != "line"), course))
+    row = result["rows"][0]
+    row["password_set"] = False
+    if row.get("code") and not row.get("error"):
+        with db.conn() as c:
+            u = c.execute("SELECT password_hash IS NOT NULL AS set_ FROM users WHERE login_code = ?",
+                          (row["code"],)).fetchone()
+        row["password_set"] = bool(u and u["set_"])
+    return row
+
+
+def _apply_plan(result: dict[str, Any]) -> dict[str, Any]:
     with db.conn() as c:
         for r in result["rows"]:
             if r.get("error"):

@@ -69,6 +69,7 @@ export const pacingStrings = defineStrings(
     pcMoveFailed: "Couldn't move {who}",
     pcDecideFailed: "Couldn't send your decision",
     pcQuizFailed: "Couldn't save the question",
+    pcGoToQuiz: "Show the questions (at the bottom of the page)",
 
     // ---- step chips
     pcStepsAria: "The lab's steps",
@@ -221,6 +222,7 @@ export const pacingStrings = defineStrings(
     pcMoveFailed: "לא הצלחנו להעביר את {who}",
     pcDecideFailed: "לא הצלחנו לשלוח את ההחלטה",
     pcQuizFailed: "לא הצלחנו לשמור את השאלה",
+    pcGoToQuiz: "להציג את השאלות (בתחתית הדף)",
 
     // ---- step chips
     pcStepsAria: "שלבי המעבדה",

@@ -105,3 +105,57 @@ def test_import_needs_a_teacher_and_a_real_course(client):
     assert client.post("/api/students/import", json={"content_base64": data, "course_id": "missing"},
                        headers=th).status_code == 404
     assert client.post("/api/students/import", json={"content_base64": "not base64!"}, headers=th).status_code == 400
+
+
+def test_a_name_only_row_is_the_student_with_that_name(client):
+    """A list of names after a list with emails: the same students, not "Name ()" copies."""
+    th = _th(client)
+    for text in ("name,email\nRon Late,ron@x.ac.il\n", "Ron Late\n"):
+        r = client.post("/api/students/import", headers=th, json={
+            "content_base64": base64.b64encode(text.encode()).decode(), "dry_run": False})
+        assert r.status_code == 200, r.text
+    assert r.json()["counts"] == {"new": 0, "existing": 1, "errors": 0}
+    with db.conn() as c:
+        assert [x["username"] for x in c.execute("SELECT username FROM users WHERE username LIKE 'Ron Late%'")] == [
+            "Ron Late"]
+
+
+def test_add_one_student(client):
+    th = _th(client)
+    r = client.post("/api/students", headers=th, json={
+        "name": "  Tal   Late ", "student_id": "123456782", "email": "Tal@X.ac.il", "group": "B", "course_id": "ros-dl"})
+    assert r.status_code == 200, r.text
+    row = r.json()
+    assert row["status"] == "new" and row["name"] == "Tal Late" and row["course"] == "ros-dl"
+    assert row["code"] and row["password_set"] is False
+    with db.conn() as c:
+        u = c.execute("SELECT * FROM users WHERE id = ?", (row["user_id"],)).fetchone()
+        assert (u["username"], u["login_code"], u["email"], u["student_id"], u["group_name"]) == (
+            "Tal Late", row["code"], "tal@x.ac.il", "123456782", "B")
+        assert c.execute("SELECT 1 FROM course_members WHERE course_id = 'ros-dl' AND user_id = ?",
+                         (row["user_id"],)).fetchone()
+    # The student signs in with the code as username and password.
+    login = client.post("/api/login", json={"code": row["code"], "password": row["code"]})
+    assert login.status_code == 200
+    as_student = {"Authorization": f"Bearer {login.json()['token']}"}
+
+    # Again, by ID number, into another course: the same account, now in both courses.
+    again = client.post("/api/students", headers=th, json={
+        "name": "Tal Late", "student_id": "123456782", "course_id": "ros-os"}).json()
+    assert again["status"] == "existing" and again["code"] == row["code"] and again["user_id"] == row["user_id"]
+    with db.conn() as c:
+        assert {x["course_id"] for x in c.execute(
+            "SELECT course_id FROM course_members WHERE user_id = ?", (row["user_id"],))} == {"ros-dl", "ros-os"}
+        c.execute("UPDATE users SET password_hash = 'x' WHERE id = ?", (row["user_id"],))
+    assert client.post("/api/students", headers=th, json={"name": "Tal Late"}).json()["password_set"] is True
+
+    # Same name, another ID: another person.
+    other = client.post("/api/students", headers=th, json={"name": "Tal Late", "student_id": "987654321"}).json()
+    assert other["status"] == "new" and other["user_id"] != row["user_id"]
+    assert other["username"] == "Tal Late (987654321)"
+
+    assert client.post("/api/students", headers=th, json={"name": "   "}).status_code == 422
+    assert client.post("/api/students", headers=th, json={"name": "X Y", "email": "not-an-email"}).status_code == 422
+    assert client.post("/api/students", headers=th, json={"name": "X Y", "course_id": "missing"}).status_code == 404
+    assert client.post("/api/students", json={"name": "X Y"}).status_code == 401
+    assert client.post("/api/students", headers=as_student, json={"name": "X Y"}).status_code == 403

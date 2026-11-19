@@ -4,13 +4,23 @@ import { api } from "../api";
 import type { Course, RosterResult } from "../types";
 import { useLang } from "../i18n";
 import { describeError } from "../lib/errors";
-import { Button, FormField, Modal, Notice, Select, Switch } from "./ui";
+import { Button, FormField, Modal, Notice, Select, Switch, Textarea } from "./ui";
 import "../styles/courses.css";
 import { textDir } from "../lib/textDir";
 
 /** The file's bytes as base64, so a Hebrew CSV saved by Excel keeps its encoding. */
 async function fileBase64(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
+/** Pasted text as base64 (UTF-8), the same way a file is sent. */
+function textBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) {
     bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -81,6 +91,9 @@ export function ImportStudentsModal({
 }) {
   const { t } = useLang();
   const [file, setFile] = useState<File | null>(null);
+  // A file, or rows pasted from Excel, Moodle or a list.
+  const [mode, setMode] = useState<"file" | "paste">("file");
+  const [pasted, setPasted] = useState("");
   const [courseId, setCourseId] = useState<string>(courses.length === 1 ? courses[0].course_id : "");
   const [result, setResult] = useState<RosterResult | null>(null);
   const [done, setDone] = useState(false);
@@ -101,12 +114,15 @@ export function ImportStudentsModal({
     setError(null);
   };
 
+  const ready = mode === "file" ? !!file : pasted.trim() !== "";
+
   const run = async (dryRun: boolean) => {
-    if (!file) return;
+    if (!ready) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await api.importStudents(await fileBase64(file), courseId || null, dryRun);
+      const data = mode === "file" && file ? await fileBase64(file) : textBase64(pasted);
+      const r = await api.importStudents(data, courseId || null, dryRun);
       setResult(r);
       if (!dryRun) {
         setDone(true);
@@ -133,11 +149,13 @@ export function ImportStudentsModal({
       <>
         <span className="u-push" />
         <Button onClick={onClose}>{t("cancel")}</Button>
-        <Button variant="primary" busy={busy} disabled={!file} onClick={() => run(true)}>{t("importPreview")}</Button>
+        <Button variant="primary" busy={busy} disabled={!ready} onClick={() => run(true)}>{t("importPreview")}</Button>
       </>
     ) : stage === 2 ? (
       <>
-        <Button variant="quiet" disabled={busy} onClick={() => { setResult(null); setError(null); }}>{t("coImpBack")}</Button>
+        <Button variant="quiet" disabled={busy} onClick={() => { setResult(null); setError(null); }}>
+          {mode === "paste" ? t("coImpBackPaste") : t("coImpBack")}
+        </Button>
         <span className="u-push" />
         <Button onClick={onClose}>{t("cancel")}</Button>
         <Button variant="primary" icon={<UserPlus />} busy={busy} disabled={importable === 0} onClick={() => run(false)}>
@@ -161,7 +179,7 @@ export function ImportStudentsModal({
 
   return (
     <Modal
-      title={t("importStudentsTitle")}
+      title={mode === "paste" ? t("coImpPasteTitle") : t("importStudentsTitle")}
       subtitle={stage === 1 ? t("coImpSubChoose") : stage === 2 ? t("coImpSubPreview") : t("coImpSubDone")}
       size="lg" onClose={onClose} footer={footer}
     >
@@ -169,7 +187,7 @@ export function ImportStudentsModal({
       <div
         className="vc-courses-import"
         onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => { e.preventDefault(); if (!done) choose(e.dataTransfer.files?.[0]); }}
+        onDrop={(e) => { e.preventDefault(); if (!done) { setMode("file"); choose(e.dataTransfer.files?.[0]); } }}
       >
         <Steps stage={stage} />
         {error && <Notice tone="danger" title={t("coImpFailed")} className="u-mb-12">{error}</Notice>}
@@ -185,26 +203,42 @@ export function ImportStudentsModal({
               </ul>
             </div>
 
-            <h3 className="vc-courses-sub u-mb-4">{t("coImpFileTitle")}</h3>
+            <div className="u-row u-wrap u-gap-8 u-mb-4">
+              <h3 className="vc-courses-sub">{t("coImpFileTitle")}</h3>
+              <div className="vc-segmented u-push" role="group" aria-label={t("coImpFileTitle")}>
+                {(["file", "paste"] as const).map((m) => (
+                  <button key={m} type="button" aria-pressed={mode === m} onClick={() => { setMode(m); setResult(null); }}>
+                    {m === "file" ? t("coImpModeFile") : t("coImpModePaste")}
+                  </button>
+                ))}
+              </div>
+            </div>
             <p className="u-soft u-sm u-mb-8">{t("importStudentsIntro")}</p>
             <pre className="vc-pre vc-pre--light u-mb-12" dir="ltr">
               name,email,student_id,course,group{"\n"}Israel Israeli,israel@example.ac.il,012345678,dl-2026,A
             </pre>
 
-            <label
-              className="vc-courses-drop u-mb-16" data-over={over} data-file={!!file}
-              onDragOver={(e) => { e.preventDefault(); setOver(true); }}
-              onDragLeave={onDragLeave}
-              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setOver(false); choose(e.dataTransfer.files?.[0]); }}
-            >
-              <input
-                type="file" className="u-sr" accept=".csv,.txt,text/csv"
-                onChange={(e) => { choose(e.target.files?.[0]); e.target.value = ""; }}
-              />
-              <span className="vc-courses-drop__icon">{file ? <FileSpreadsheet /> : <Upload />}</span>
-              <span className="vc-courses-drop__title" dir={textDir(file?.name)}>{file ? file.name : t("coImpDrop")}</span>
-              <span className="vc-courses-drop__note">{file ? t("coImpReplace") : t("coImpDropNote")}</span>
-            </label>
+            {mode === "paste" ? (
+              <FormField label={t("coImpPasteLabel")} hint={t("coImpPasteHint")} className="u-mb-16">
+                <Textarea className="vc-courses-paste" value={pasted} rows={8} spellCheck={false} autoFocus
+                          onChange={(e) => { setPasted(e.target.value); setResult(null); }} />
+              </FormField>
+            ) : (
+              <label
+                className="vc-courses-drop u-mb-16" data-over={over} data-file={!!file}
+                onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+                onDragLeave={onDragLeave}
+                onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setOver(false); choose(e.dataTransfer.files?.[0]); }}
+              >
+                <input
+                  type="file" className="u-sr" accept=".csv,.txt,text/csv"
+                  onChange={(e) => { choose(e.target.files?.[0]); e.target.value = ""; }}
+                />
+                <span className="vc-courses-drop__icon">{file ? <FileSpreadsheet /> : <Upload />}</span>
+                <span className="vc-courses-drop__title" dir={textDir(file?.name)}>{file ? file.name : t("coImpDrop")}</span>
+                <span className="vc-courses-drop__note">{file ? t("coImpReplace") : t("coImpDropNote")}</span>
+              </label>
+            )}
 
             <FormField label={t("coImpCourseLabel")} hint={t("coImpCourseHint")}>
               <Select value={courseId} onChange={(e) => { setCourseId(e.target.value); setResult(null); }}>
@@ -221,7 +255,9 @@ export function ImportStudentsModal({
           <>
             <div className="u-row u-wrap u-gap-8 u-mb-12 u-sm">
               <FileSpreadsheet size={16} aria-hidden="true" />
-              <span className="u-bold" dir={textDir(file?.name)}>{file?.name}</span>
+              {mode === "paste"
+                ? <span className="u-bold">{t("coImpPasted")}</span>
+                : <span className="u-bold" dir={textDir(file?.name)}>{file?.name}</span>}
               <span className="u-muted">·</span>
               <span className="u-soft">
                 {t("importCourse")}: <span dir={textDir(course?.name)}>{course ? course.name : t("importNoCourse")}</span>

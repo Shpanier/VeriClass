@@ -21,6 +21,10 @@ export const studentsStrings = defineStrings(
 
     // ---- the student cards ----
     sgTitle: "Students",
+    sgExpand: "Show the students' cards",
+    sgCollapse: "Hide the students' cards",
+    sgClosedHint: "One card per student signed in now: their chat, “ask them” and the tutor's mode. Click to open.",
+    sgClosedEmpty: "Nobody is signed in to this exercise yet.",
     sgModeLegend: "Mentor guides with questions · Coding partner gives more direct help",
     sgMode: "Tutor mode",
     sgMentor: "Mentor",
@@ -167,6 +171,10 @@ export const studentsStrings = defineStrings(
     ehVersionsTitle: "הסטודנטים מקבלים גרסאות שונות של התרגיל.",
 
     sgTitle: "סטודנטים",
+    sgExpand: "להציג את הכרטיסים של הסטודנטים",
+    sgCollapse: "להסתיר את הכרטיסים של הסטודנטים",
+    sgClosedHint: "כרטיס לכל סטודנט שמחובר עכשיו: הצ'אט שלו, \"לשאול אותם\" ומצב העוזר. לחצו כדי לפתוח.",
+    sgClosedEmpty: "עוד אף אחד לא נכנס לתרגיל הזה.",
     sgModeLegend: "מנטור מכוון בעזרת שאלות · שותף קוד עוזר באופן ישיר יותר",
     sgMode: "מצב העוזר",
     sgMentor: "מנטור",

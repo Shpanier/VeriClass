@@ -1,5 +1,6 @@
 import "../styles/pacing.css";
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle, Check, CheckCircle2, ChevronDown, FastForward, Gauge, HelpCircle, Hourglass, Info, Lock, LockOpen,
   PenLine, Undo2, User, Users,
@@ -37,7 +38,11 @@ function busiest(courses: PacingCourse[]): PacingCourse {
 /** Class-paced labs (pacing: class): how far the class got, the button that
  *  opens the next step for everyone, and what waits for the lecturer: outputs
  *  that didn't match, quiz answers graded too low, questions to approve. */
-export function PacingPanel({ exerciseId }: { exerciseId: string }) {
+export function PacingPanel({ exerciseId, quizSlot }: {
+  exerciseId: string;
+  /** Where the questions after steps are drawn: the bottom of the page (App.tsx). Without it, here. */
+  quizSlot?: HTMLElement | null;
+}) {
   const { t, dir } = useLang();
   const toast = useToast();
   const confirm = useConfirm();
@@ -48,6 +53,8 @@ export function PacingPanel({ exerciseId }: { exerciseId: string }) {
   // so a poll never switches it under the lecturer's hand.
   const [courseId, setCourseId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // "Questions wait for approval" opens the questions at the bottom of the page and scrolls to them.
+  const [quizOpenReq, setQuizOpenReq] = useState(0);
   const idRef = useRef(exerciseId);
   idRef.current = exerciseId;
 
@@ -182,6 +189,11 @@ export function PacingPanel({ exerciseId }: { exerciseId: string }) {
   const outputsWaiting = course.students.reduce((n, s) => n + s.waiting.length, 0);
   const resetUpTo = Math.min(total, Math.max(0, ...course.students.map((s) => s.current)));
 
+  const quiz = (
+    <Quiz exerciseId={exerciseId} items={view.quiz} course={course} pending={pendingQuiz} onChange={load}
+          openReq={quizOpenReq} />
+  );
+
   const statusMain = rel >= total ? t("pacingAllOpen", { n: total })
     : rel === 0 ? t("pacingNoneOpen")
     : rel === 1 ? t("pcStatusOne", { label: label(1) })
@@ -239,7 +251,10 @@ export function PacingPanel({ exerciseId }: { exerciseId: string }) {
                 <span className="vc-badge vc-badge--warning"><Hourglass aria-hidden="true" />{t("pcNeedOutputs", { n: outputsWaiting })}</span>
               )}
               {pendingQuiz > 0 && (
-                <span className="vc-badge vc-badge--warning"><HelpCircle aria-hidden="true" />{t("pcNeedQuiz", { n: pendingQuiz })}</span>
+                <button type="button" className="vc-badge vc-badge--warning vc-badge--button"
+                        title={t("pcGoToQuiz")} onClick={() => setQuizOpenReq((n) => n + 1)}>
+                  <HelpCircle aria-hidden="true" />{t("pcNeedQuiz", { n: pendingQuiz })}
+                </button>
               )}
             </div>
           )}
@@ -330,7 +345,10 @@ export function PacingPanel({ exerciseId }: { exerciseId: string }) {
       )}
       <Review exerciseId={exerciseId} course={course} steps={view.steps} onChange={load} />
       <Students course={course} total={total} steps={view.steps} onChange={load} />
-      <Quiz exerciseId={exerciseId} items={view.quiz} course={course} pending={pendingQuiz} onChange={load} />
+      {quizSlot === undefined && quiz}
+      {quizSlot && createPortal(
+        <section className="vc-card vc-pacing vc-pacing--quiz" aria-label={t("pacingQuiz")}>{quiz}</section>, quizSlot,
+      )}
     </section>
   );
 }
@@ -695,8 +713,10 @@ function Students({ course, total, steps, onChange }: {
 }
 
 /** The quiz questions: edit the wording, approve, and see the class's answers. */
-function Quiz({ exerciseId, items, course, pending, onChange }: {
+function Quiz({ exerciseId, items, course, pending, onChange, openReq = 0 }: {
   exerciseId: string; items: PacingQuizItem[]; course: PacingCourse; pending: number; onChange: () => void;
+  /** Goes up each time the lecturer asks to see the questions: open them and scroll to them. */
+  openReq?: number;
 }) {
   const { t } = useLang();
   const toast = useToast();
@@ -713,6 +733,15 @@ function Quiz({ exerciseId, items, course, pending, onChange }: {
   // Open or closed is the lecturer's choice: open at first when a question waits
   // for approval, and opened again only when a question starts waiting.
   const [open, setOpen] = useState(pending > 0);
+  const box = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (openReq === 0) return;
+    // Open first, so the page is long enough to bring the questions to the top.
+    if (box.current) box.current.open = true;
+    setOpen(true);
+    const id = window.requestAnimationFrame(() => box.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    return () => window.cancelAnimationFrame(id);
+  }, [openReq]);
   const pendingKeys = items.filter((q) => !q.approved).map((q) => q.key).join("\n");
   const seenPending = useRef(pendingKeys);
   useEffect(() => {
@@ -751,7 +780,7 @@ function Quiz({ exerciseId, items, course, pending, onChange }: {
   };
 
   return (
-    <details className="vc-pacing-block" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+    <details ref={box} className="vc-pacing-block" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>
         <ChevronDown className="vc-pacing-chev" aria-hidden="true" />
         <span>{t("pacingQuiz")}</span>

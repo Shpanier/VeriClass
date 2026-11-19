@@ -144,3 +144,13 @@
 .vc-courses-import__table th { position: sticky; top: 0; z-index: 1; }
 .vc-courses-problem { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .vc-courses-problem__text { color: var(--c-danger); font-size: var(--fs-xs); }
+
+/* "Add a student": the form, and the sign-in details to hand out. */
+.vc-courses-addform { display: grid; gap: 14px; }
+.vc-courses-addform .vc-field { margin-bottom: 0; }
+.vc-courses-addform > .vc-hint { margin: -8px 0 0; }
+.vc-courses-addform__pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.vc-courses-signin { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0 0 12px; align-items: center; }
+.vc-courses-signin dt { color: var(--c-text-3); font-size: var(--fs-sm); font-weight: 600; }
+.vc-courses-signin dd { margin: 0; }
+.vc-courses-paste { width: 100%; min-height: 160px; }

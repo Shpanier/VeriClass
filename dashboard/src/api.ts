@@ -1,5 +1,7 @@
 import type {
   ActiveExercise,
+  AddedStudent,
+  AnsweredReview,
   AnswerLevel,
   AnswerSlot,
   Attendance,
@@ -329,10 +331,11 @@ export const api = {
       body: JSON.stringify({ model: model ?? null, slots: slots ?? null }),
     }),
   /** How many students a class note reaches now. */
-  broadcastRecipients: (exerciseId: string, courseId?: string | null) =>
+  broadcastRecipients: (exerciseId: string, courseId?: string | null, excludeSession?: string) =>
     j<{ count: number; minutes: number }>(
       `/api/broadcast/recipients?exercise_id=${encodeURIComponent(exerciseId)}`
-      + (courseId ? `&course_id=${encodeURIComponent(courseId)}` : "")),
+      + (courseId ? `&course_id=${encodeURIComponent(courseId)}` : "")
+      + (excludeSession ? `&exclude_session=${encodeURIComponent(excludeSession)}` : "")),
   /** A note from the teacher to every student active on the exercise. */
   broadcast: (exerciseId: string, text: string, courseId?: string | null) =>
     j<{ sent: number; skipped: number }>("/api/broadcast", {
@@ -421,6 +424,10 @@ export const api = {
     }),
   deleteMeeting: (id: number) => j<{ ok: boolean }>(`/api/meetings/${id}`, { method: "DELETE" }),
   attendance: (id: number) => j<Attendance>(`/api/meetings/${id}/attendance`),
+  /** One student by hand: a new account (or the one they have), added to the course. */
+  addStudent: (s: { name: string; student_id?: string | null; email?: string | null; group?: string | null;
+                    course_id?: string | null }) =>
+    j<AddedStudent>("/api/students", { method: "POST", body: JSON.stringify(s) }),
   importStudents: (contentBase64: string, courseId: string | null, dryRun: boolean) =>
     j<RosterResult>("/api/students/import", {
       method: "POST",
@@ -441,6 +448,16 @@ export const api = {
     j<{ deleted: number }>("/api/reviews/delete-stale", {
       method: "POST",
       body: JSON.stringify({ notify }),
+    }),
+  /** The questions answered in the last hours, newest first (one exercise, or all). */
+  answeredReviews: (exerciseId?: string | null) =>
+    j<AnsweredReview[]>("/api/reviews/answered"
+      + (exerciseId ? `?exercise_id=${encodeURIComponent(exerciseId)}` : "")),
+  /** Send an answer already given to one student to the rest of the class (text: edited for the class). */
+  sendAnsweredToClass: (id: number, text?: string) =>
+    j<{ ok: boolean; sent_to_class: number; class_skipped: number }>(`/api/reviews/${id}/send-to-class`, {
+      method: "POST",
+      body: JSON.stringify(text === undefined ? {} : { text }),
     }),
   /** Send an answer: a drafted one (its slot), the bank's or the teacher's own text;
    *  optionally saved into the question bank and sent to the whole class too. */

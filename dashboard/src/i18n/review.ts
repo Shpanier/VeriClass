@@ -93,7 +93,7 @@ export const reviewStrings = defineStrings(
     reviewAnswerText: "Text of the answer: {label}",
     edited: "Edited",
     send: "Send",
-    reviewSendAll: "Send to all students",
+    reviewSendAll: "Send to the asker + whole class",
     reviewSendAllTitle: "Send this answer to all students?",
     reviewSendAllConfirm: "It goes to the student who asked and to everyone active on this exercise: {n} students right now.",
     reviewSendAllUnknown:
@@ -112,6 +112,22 @@ export const reviewStrings = defineStrings(
     reviewSendFailed: "Couldn't send the answer",
     reviewBankFailed: "Sent, but saving to the question bank failed.",
     reviewClassFailed: "Sent, but sending it to the other students failed.",
+
+    // ---- "Answered recently": an answer can still go to the whole class
+    answeredTitle: "Answered recently",
+    answeredHint: "Answers you sent in the last 12 hours. One that suits everyone can still go to the whole class.",
+    answeredSendAll: "Send to all students",
+    answeredSendN: "Send to {n:one student|# students}",
+    answeredEditHint: "{name} already has this answer. Edit it for the class if you like, then send.",
+    answeredNobody: "Nobody else is active on this exercise right now (in the last {m} minutes).",
+    answeredSentBadge: "Sent to the class ({n})",
+    answeredToast: "Sent to {n:one more student|# more students}.",
+    answeredToastNone: "Nobody else was active on this exercise, so it reached no one.",
+    answeredFailed: "Couldn't send it to the class",
+    answeredShowAll: "Show all ({n})",
+    answeredShowFewer: "Show fewer",
+    answeredAnswerLabel: "Answer sent",
+    answeredTextAria: "The answer to send to the class",
 
     // ---- "Ask them": the lecturer's questions to one student
     askTitle: "Questions for {name}",
@@ -247,7 +263,7 @@ export const reviewStrings = defineStrings(
     reviewAnswerText: "נוסח התשובה: {label}",
     edited: "נערכה",
     send: "לשלוח",
-    reviewSendAll: "לשלוח לכל הסטודנטים",
+    reviewSendAll: "לשלוח לשואל ולכל הכיתה",
     reviewSendAllTitle: "לשלוח את התשובה לכל הסטודנטים?",
     reviewSendAllConfirm: "התשובה תגיע למי ששאל ולכל מי שפעיל בתרגיל: {n} סטודנטים כרגע.",
     reviewSendAllUnknown: "היא תגיע למי ששאל ולכל הסטודנטים שפעילים בתרגיל; כרגע לא הצלחנו לבדוק כמה הם.",
@@ -265,6 +281,22 @@ export const reviewStrings = defineStrings(
     reviewSendFailed: "לא הצלחנו לשלוח את התשובה",
     reviewBankFailed: "התשובה נשלחה, אבל השמירה בבנק השאלות נכשלה.",
     reviewClassFailed: "התשובה נשלחה, אבל השליחה לשאר הסטודנטים נכשלה.",
+
+    // ---- "Answered recently": an answer can still go to the whole class
+    answeredTitle: "נענו לאחרונה",
+    answeredHint: "תשובות ששלחתם ב־12 השעות האחרונות. תשובה שמתאימה לכולם אפשר עדיין לשלוח לכל הכיתה.",
+    answeredSendAll: "לשלוח לכל הסטודנטים",
+    answeredSendN: "לשלוח ל{n:סטודנט אחד|־# סטודנטים}",
+    answeredEditHint: "התשובה כבר אצל {name}. אפשר לערוך אותה בשביל הכיתה ואז לשלוח.",
+    answeredNobody: "אף אחד אחר לא פעיל בתרגיל כרגע (ב־{m} הדקות האחרונות).",
+    answeredSentBadge: "נשלחה לכיתה ({n})",
+    answeredToast: "נשלחה ל{n:סטודנט נוסף|־# סטודנטים נוספים}.",
+    answeredToastNone: "אף אחד אחר לא היה פעיל בתרגיל, כך שהיא לא הגיעה לאף אחד.",
+    answeredFailed: "לא הצלחנו לשלוח לכיתה",
+    answeredShowAll: "להציג הכול ({n})",
+    answeredShowFewer: "להציג פחות",
+    answeredAnswerLabel: "התשובה שנשלחה",
+    answeredTextAria: "התשובה שתישלח לכיתה",
 
     // ---- "Ask them": the lecturer's questions to one student
     askTitle: "שאלות אל {name}",

@@ -163,3 +163,11 @@
 .vc-pacing-attach > summary { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 600; color: var(--c-brand); }
 .vc-pacing-attach > summary > svg { width: 14px; height: 14px; }
 .vc-pacing-attach .vc-pre { margin-top: 6px; max-height: 360px; }
+
+/* The questions after steps, in their own card at the bottom of the page. */
+.vc-pacing--quiz { margin-top: 4px; }
+.vc-pacing--quiz > .vc-pacing-block { margin-top: 0; padding-top: 0; border-top: 0; }
+.vc-pacing--quiz > .vc-pacing-block > summary { font-size: var(--fs-lg); cursor: pointer; }
+.vc-pacing--quiz > .vc-pacing-block { scroll-margin-top: 72px; }
+.vc-badge--button { border: 0; font: inherit; cursor: pointer; }
+.vc-badge--button:hover { filter: brightness(0.96); }

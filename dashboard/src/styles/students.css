@@ -144,3 +144,15 @@
 .vc-students-trace th { position: sticky; top: 0; z-index: 1; }
 .vc-students-trace td { vertical-align: top; }
 .vc-students-trace tr[data-bad="true"] td { background: var(--c-danger-soft); }
+
+/* The Students section opens and closes from its title (closed: one line). */
+.vc-section__toggle {
+  display: inline-flex; align-items: center; gap: 8px; padding: 2px 4px; margin-inline-start: -4px;
+  border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.vc-section__toggle:hover { background: var(--c-surface-2); }
+.vc-section__toggle > svg { width: 18px; height: 18px; color: var(--c-text-3); flex: none; }
+.vc-section__chev { transition: transform 0.12s; }
+.vc-students-section[data-open="false"] .vc-section__chev { transform: rotate(-90deg); }
+[dir="rtl"] .vc-students-section[data-open="false"] .vc-section__chev { transform: rotate(90deg); }
+.vc-students-section[data-open="false"] .vc-section__head { margin-bottom: 0; }

@@ -19,9 +19,10 @@ class BroadcastRequest(BaseModel):
 
 @router.get("/broadcast/recipients")
 def who(exercise_id: str, course_id: Optional[str] = None, minutes: Optional[int] = None,
-        teacher: dict = Depends(deps.require_teacher)):
-    """How many students a note would reach now."""
-    return {"count": len(broadcast.recipients(exercise_id, course_id, minutes=minutes)),
+        exclude_session: Optional[str] = None, teacher: dict = Depends(deps.require_teacher)):
+    """How many students a note would reach now (`exclude_session`: not that
+    session's student, e.g. the one who asked and already has the answer)."""
+    return {"count": len(broadcast.recipients(exercise_id, course_id, exclude_session, minutes=minutes)),
             "minutes": minutes or broadcast.active_minutes()}
 
 

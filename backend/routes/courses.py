@@ -151,6 +151,30 @@ def import_students(req: ImportRequest, teacher: dict = Depends(deps.require_tea
     return result
 
 
+class NewStudent(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    email: Optional[str] = Field(default=None, max_length=200)
+    student_id: Optional[str] = Field(default=None, max_length=30)
+    group: Optional[str] = Field(default=None, max_length=60)
+    course_id: Optional[str] = None
+
+
+@router.post("/students")
+def add_student(req: NewStudent, teacher: dict = Depends(deps.require_teacher)):
+    """One student added by hand (backend/roster.add_one): a new account with its
+    login code, or the account they already have; added to the course if given."""
+    if not req.name.strip():
+        raise HTTPException(422, "The student needs a name.")
+    if req.email and "@" not in req.email:
+        raise HTTPException(422, "That email address doesn't look right.")
+    if req.course_id and courses.get(req.course_id) is None:
+        raise HTTPException(404, f"Unknown course '{req.course_id}'.")
+    row = roster.add_one(req.name, req.email, req.student_id, req.group, req.course_id or None)
+    if row.get("error"):
+        raise HTTPException(409, row["error"])
+    return row
+
+
 class PasswordRequest(BaseModel):
     # None (or omitted): back to the default, the login code.
     password: Optional[str] = None

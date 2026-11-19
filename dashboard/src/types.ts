@@ -487,6 +487,26 @@ export interface ReviewConfig {
 }
 
 /** What a send did (POST /api/reviews/{id}/select). */
+/** A question already answered (GET /api/reviews/answered): the "Answered recently" list. */
+export interface AnsweredReview {
+  id: number;
+  session_id: string;
+  username: string;
+  exercise_id: string;
+  course_id: string | null;
+  question: string;
+  /** The text the student got. */
+  text: string;
+  lang: Lang | null;
+  slot: string | null;
+  level: string | null;
+  created_at: string;
+  answered_at: string | null;
+  /** How many other students it was also sent to (0: only the asker). */
+  sent_to_class: number;
+  saved_to_bank: boolean;
+}
+
 export interface SelectResult {
   ok: boolean;
   delivered?: "now" | "later";
@@ -637,6 +657,12 @@ export interface RosterRow {
   error?: string;
   code?: string;
   user_id?: number;
+}
+
+/** POST /api/students: one student added by hand. `password_set`: they chose
+ *  their own password (it is no longer the username). */
+export interface AddedStudent extends RosterRow {
+  password_set: boolean;
 }
 
 export interface RosterResult {

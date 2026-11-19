@@ -131,7 +131,7 @@ The switch at the top of the review queue on *Live class*, for all exercises. Wh
      the instructor's own answer first. The bank's answer sent again for a
      reworded question goes back into the same entry, which learns the new
      wording as a paraphrase.
-   - **Send to all students**: for a question the whole class should hear
+   - **Send to the asker + whole class**: for a question the whole class should hear
      (a conceptual one), the answer also goes to every student active on the
      exercise in the last 30 minutes (`BROADCAST_ACTIVE_MINUTES`; the same
      course as the student who asked, when they are in one), as a teacher's
@@ -139,6 +139,11 @@ The switch at the top of the review queue on *Live class*, for all exercises. Wh
      is in their chat at once if it is open, or after their next login, and
      the tutor remembers it as part of the conversation. The dashboard asks
      first and says how many students it reaches.
+   - **Answered recently**, under the queue, lists the answers sent in the
+     last 12 hours. *Send to all students* on one of them sends it to the rest
+     of the class afterwards (everyone active on the exercise except the
+     student who asked), edited for the class if needed (a name taken out);
+     the button says how many it reaches, and the row then says how many got it.
 4. The chosen level and model are logged on `messages.answer_level` and
    `messages.model` for later correlation with the student's grade.
 
@@ -150,7 +155,9 @@ the order they finished, and `drafting`), `POST /api/reviews/{id}/select`
 for the failed ones), `GET/POST /api/reviews/config` (`best_answer`,
 `best_level`, `save_to_bank`, `translate_to`), `POST /api/broadcast`
 (`{"exercise_id", "text", "course_id"}`: a free note to the class) and
-`GET /api/broadcast/recipients`. Tables: `review_answers` (one row per
+`GET /api/broadcast/recipients` (`exclude_session`: not counting the asker),
+`GET /api/reviews/answered` (`exercise_id`, `hours` default 12) and
+`POST /api/reviews/{id}/send-to-class` (`{"text"}`, optional). Tables: `review_answers` (one row per
 drafted answer), `pending_reviews.chosen_slot`, `saved_to_bank`,
 `sent_to_class`.
 
@@ -195,7 +202,13 @@ Everything here is in the dashboard's **Courses & students** tab.
   columns, in English or Hebrew. A Moodle participants export and a Hebrew CSV
   saved from Excel work as they are. Preview first, then import; the result is
   a file with every student's **username** and **password** to hand out.
-  Importing the same list again creates nobody twice.
+  Importing the same list again creates nobody twice. Instead of a file you
+  can **paste rows** (copied from Excel, Moodle or a list of names).
+- **A student who joins later**: *Add a student* (at the top of the tab, or in
+  a course's student list) takes a name and, optionally, an ID number, email,
+  group and course. It shows the new username and password to hand out; a
+  student who already has an account (same ID number or email) keeps it and is
+  only added to the course. API: `POST /api/students`.
 - **Passwords.** Until you set one, a student's password is their username
   (typed in any case). A password you set is stored only as a salted hash. Set
   or reset passwords in the *Passwords* table, or from a terminal:
@@ -260,7 +273,9 @@ is a class-paced lab.
   A question marked `always: true` is approved by the package's author and is
   asked without the dashboard, for example "what does the code you just pasted
   do?" after every step that pastes code. The dashboard can still switch it
-  off. Questions are asked in the order they are listed.
+  off. Questions are asked in the order they are listed. They are at the
+  bottom of the *Live class* page; the badge "questions to approve" at the top
+  of *Class pacing* opens them there.
 - **Only a 2/2 answer moves on by itself.** An answer graded 0/2 or 1/2
   doesn't open the next step: the student's chat says the answer is with the
   lecturer, and the top of *Class pacing* shows it under *Answers waiting for

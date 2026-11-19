@@ -147,3 +147,32 @@
   border-radius: var(--radius); background: var(--c-info-soft); font-size: var(--fs-sm); line-height: 1.5;
 }
 .vc-review-probe__answer { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--c-info-border); }
+
+/* ---------- "Answered recently": send an answer to the whole class later ---------- */
+.vc-answered { display: grid; gap: 8px; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--c-border); }
+.vc-answered__title { margin: 0; font-size: var(--fs-md); font-weight: 700; }
+.vc-answered__toggle {
+  display: inline-flex; align-items: center; gap: 8px; padding: 2px 4px; margin-inline-start: -4px;
+  border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.vc-answered__toggle:hover { background: var(--c-surface-2); }
+.vc-answered__chev { width: 16px; height: 16px; color: var(--c-text-3); flex: none; transition: transform 0.12s; }
+.vc-answered[data-open="false"] .vc-answered__chev { transform: rotate(-90deg); }
+[dir="rtl"] .vc-answered[data-open="false"] .vc-answered__chev { transform: rotate(90deg); }
+.vc-answered__hint { margin: 0; color: var(--c-text-3); font-size: var(--fs-xs); }
+.vc-answered__list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.vc-answered__item {
+  display: grid; gap: 6px; padding: 10px 12px; min-width: 0;
+  border: 1px solid var(--c-border); border-inline-start: 3px solid var(--c-success); border-radius: var(--radius);
+  background: var(--c-surface);
+}
+.vc-answered__item[data-editing="true"] { border-color: var(--c-brand-border); border-inline-start-color: var(--c-brand); }
+.vc-answered__head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 28px; }
+.vc-answered__name { font-weight: 700; font-size: var(--fs-sm); }
+.vc-answered__question {
+  color: var(--c-text); font-size: var(--fs-sm); white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.vc-answered__compose { display: grid; gap: 6px; }
+.vc-answered__compose .vc-textarea { min-height: 0; line-height: 1.5; }
+.vc-answered__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }

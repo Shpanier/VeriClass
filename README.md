@@ -77,9 +77,9 @@ The dashboard then shows a short checklist for your first class.
 
 1. **Add your students.** *Courses & students → Import students*: a CSV file
    (a Moodle participants export or a list saved from Excel, in English or
-   Hebrew). You get back a file with each student's **username** and
-   **password** to hand out. Until you set one, a student's password is their
-   username.
+   Hebrew), or rows pasted from Excel. You get back a file with each student's
+   **username** and **password** to hand out. Until you set one, a student's
+   password is their username. A student who joins later: *Add a student*.
 2. **Create a course** and tick the exercises its students may open (three
    sample exercises are included).
 3. **Share with students** (the button at the top): one click creates a public

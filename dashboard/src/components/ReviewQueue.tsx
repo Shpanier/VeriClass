@@ -15,6 +15,7 @@ import {
   Button, Check, EmptyState, Loading, Notice, Select, Spinner, Switch, Textarea, Time, useConfirm, useToast,
 } from "./ui";
 import { textDir } from "../lib/textDir";
+import { AnsweredRecently } from "./AnsweredRecently";
 
 const LEVELS: AnswerLevel[] = ["nudge", "normal", "more", "direct"];
 
@@ -197,6 +198,8 @@ export function ReviewQueue({ exerciseId, onViewChat }: {
   // we answered or deleted stay off the list until the server stops listing them (handled).
   const actionSeq = useRef(0);
   const handled = useRef(new Set<number>());
+  // Goes up after each answer sent: "Answered recently" loads again at once.
+  const [answeredTick, setAnsweredTick] = useState(0);
 
   const markBusy = (id: number, what: string | null) =>
     setBusy((b) => {
@@ -342,6 +345,7 @@ export function ReviewQueue({ exerciseId, onViewChat }: {
       });
       settle(r.id);
       report(r, res);
+      setAnsweredTick((n) => n + 1);
     } catch (e) {
       toast.error(t("reviewSendFailed"), e);
     } finally {
@@ -409,7 +413,8 @@ export function ReviewQueue({ exerciseId, onViewChat }: {
                   onClick={() => pick(r, row.k, row.chosen, row.l, value, false, row.level)}>
             {doing === row.k ? t("sending") : t("send")}
           </Button>
-          <Button size="sm" variant="quiet" icon={<Megaphone />} busy={doing === `${row.k}:all`} disabled={!!doing || empty}
+          <Button size="sm" icon={<Megaphone />} busy={doing === `${row.k}:all`} disabled={!!doing || empty}
+                  title={t("reviewSendAllTitle")}
                   onClick={() => askAll(r, row.k, row.chosen, row.l, value, row.level)}>
             {t("reviewSendAll")}
           </Button>
@@ -736,6 +741,7 @@ export function ReviewQueue({ exerciseId, onViewChat }: {
               {pending.map(card)}
             </>
           )}
+          <AnsweredRecently exerciseId={exerciseId} refresh={answeredTick} plain={plain} />
         </div>
       )}
     </section>

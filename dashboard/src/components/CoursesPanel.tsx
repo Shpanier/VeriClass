@@ -1,5 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
-import { BookOpen, Check, KeyRound, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, Upload, Users, X } from "lucide-react";
+import {
+  BookOpen, Check, KeyRound, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, Upload, UserPlus, Users, X,
+} from "lucide-react";
 import { api } from "../api";
 import type { Course, ExerciseSummary, UserAccount } from "../types";
 import { useLang } from "../i18n";
@@ -7,6 +9,7 @@ import { describeError } from "../lib/errors";
 import { sortExercises, useExerciseSort } from "../lib/exerciseOrder";
 import { Button, EmptyState, FormField, Input, Loading, Notice, Switch, useConfirm, useToast } from "./ui";
 import { ImportStudentsModal, MaskedUsername } from "./ImportStudentsModal";
+import { AddStudentModal } from "./AddStudentModal";
 import { MeetingsSection } from "./MeetingsSection";
 import "../styles/courses.css";
 import { textDir } from "../lib/textDir";
@@ -86,6 +89,8 @@ export function CoursesPanel() {
   const [creating, setCreating] = useState(false);
   const [justCreated, setJustCreated] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  // "Add a student": open, with the course it was opened from (null: none chosen).
+  const [adding, setAdding] = useState<{ courseId: string | null } | null>(null);
   const [showCodes, setShowCodes] = useState(false);
   const loaded = useRef(false);
   const nameInput = useRef<HTMLInputElement>(null);
@@ -163,6 +168,9 @@ export function CoursesPanel() {
           <Button variant={importFirst ? "primary" : "secondary"} icon={<Upload />} onClick={() => setImporting(true)}>
             {t("importStudents")}
           </Button>
+          <Button icon={<UserPlus />} disabled={courses === null} onClick={() => setAdding({ courseId: null })}>
+            {t("addStudent")}
+          </Button>
           <Button variant={importFirst || creating ? "secondary" : "primary"} icon={<Plus />} disabled={courses === null} onClick={openCreate}>
             {t("newCourse")}
           </Button>
@@ -238,6 +246,7 @@ export function CoursesPanel() {
                   onDeleted={() => { setDraft(c.course_id, undefined); load(); }}
                   onChanged={load}
                   onImport={() => setImporting(true)}
+                  onAddStudent={() => setAdding({ courseId: c.course_id })}
                 />
               ))}
             </div>
@@ -256,6 +265,9 @@ export function CoursesPanel() {
 
       {importing && (
         <ImportStudentsModal courses={courses ?? []} onClose={() => setImporting(false)} onImported={load} />
+      )}
+      {adding && (
+        <AddStudentModal courses={courses ?? []} courseId={adding.courseId} onClose={() => setAdding(null)} onAdded={load} />
       )}
     </div>
   );
@@ -316,7 +328,7 @@ function CreateCourse({ nameRef, onCancel, onCreated }: {
 
 function CourseCard({
   course, draft, onDraft, exercises, students, courseNames, showCodes, isNew, onDismissNew, onSaved, onDeleted,
-  onChanged, onImport,
+  onChanged, onImport, onAddStudent,
 }: {
   course: Course;
   draft: Draft | undefined;
@@ -331,6 +343,8 @@ function CourseCard({
   onDeleted: () => void;
   onChanged: () => void;
   onImport: () => void;
+  /** "Add a student", with this course chosen. */
+  onAddStudent: () => void;
 }) {
   const { t, lang } = useLang();
   const [exSort] = useExerciseSort();
@@ -505,7 +519,12 @@ function CourseCard({
             </h3>
             <p className="vc-hint">{t("coStudentsHint")}</p>
             {students.length === 0 ? (
-              <Notice action={<Button size="sm" icon={<Upload />} onClick={onImport}>{t("importStudents")}</Button>}>
+              <Notice action={
+                <span className="u-row u-wrap u-gap-6">
+                  <Button size="sm" icon={<Upload />} onClick={onImport}>{t("importStudents")}</Button>
+                  <Button size="sm" icon={<UserPlus />} onClick={onAddStudent}>{t("addStudent")}</Button>
+                </span>
+              }>
                 {t("coNoStudentsCard")}
               </Notice>
             ) : (
@@ -514,6 +533,7 @@ function CourseCard({
                   {students.length > 12 && <SearchBox value={filter} onChange={setFilter} label={t("searchStudents")} />}
                   <Button size="sm" onClick={() => setShown(true)}>{q ? t("selectShown") : t("coSelectAll")}</Button>
                   <Button size="sm" variant="quiet" onClick={() => setShown(false)}>{q ? t("clearShown") : t("coClearAll")}</Button>
+                  <Button size="sm" icon={<UserPlus />} className="u-push" onClick={onAddStudent}>{t("addStudent")}</Button>
                 </div>
                 <div className="vc-courses-pick">
                   {shown.length === 0 && <div className="vc-courses-pick__empty">{t("noStudentsFound")}</div>}
