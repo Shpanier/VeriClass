@@ -6,6 +6,7 @@ import { useLang } from "../i18n";
 import { describeError } from "../lib/errors";
 import { Button, FormField, Modal, Notice, Select, Switch } from "./ui";
 import "../styles/courses.css";
+import { textDir } from "../lib/textDir";
 
 /** The file's bytes as base64, so a Hebrew CSV saved by Excel keeps its encoding. */
 async function fileBase64(file: File): Promise<string> {
@@ -201,7 +202,7 @@ export function ImportStudentsModal({
                 onChange={(e) => { choose(e.target.files?.[0]); e.target.value = ""; }}
               />
               <span className="vc-courses-drop__icon">{file ? <FileSpreadsheet /> : <Upload />}</span>
-              <span className="vc-courses-drop__title" dir="auto">{file ? file.name : t("coImpDrop")}</span>
+              <span className="vc-courses-drop__title" dir={textDir(file?.name)}>{file ? file.name : t("coImpDrop")}</span>
               <span className="vc-courses-drop__note">{file ? t("coImpReplace") : t("coImpDropNote")}</span>
             </label>
 
@@ -220,10 +221,10 @@ export function ImportStudentsModal({
           <>
             <div className="u-row u-wrap u-gap-8 u-mb-12 u-sm">
               <FileSpreadsheet size={16} aria-hidden="true" />
-              <span className="u-bold" dir="auto">{file?.name}</span>
+              <span className="u-bold" dir={textDir(file?.name)}>{file?.name}</span>
               <span className="u-muted">·</span>
               <span className="u-soft">
-                {t("importCourse")}: <span dir="auto">{course ? course.name : t("importNoCourse")}</span>
+                {t("importCourse")}: <span dir={textDir(course?.name)}>{course ? course.name : t("importNoCourse")}</span>
               </span>
             </div>
             <div className="u-row u-wrap u-gap-6 u-mb-12">
@@ -281,14 +282,14 @@ function RowsTable({ result, done, showCodes }: { result: RosterResult; done: bo
           {result.rows.map((r) => (
             <tr key={r.line}>
               <td className="u-muted">{r.line}</td>
-              <td><span dir="auto">{r.username ?? r.name}</span></td>
+              <td><span dir={textDir(r.username ?? r.name)}>{r.username ?? r.name}</span></td>
               <td className="u-soft"><span dir="ltr">{r.email ?? ""}</span></td>
               <td><span dir="ltr">{r.course ?? ""}</span></td>
               <td>
                 {r.error ? (
                   <span className="vc-courses-problem">
                     <span className="vc-badge vc-badge--danger">{t("coImpProblem")}</span>
-                    <span className="vc-courses-problem__text" dir="auto">{r.error}</span>
+                    <span className="vc-courses-problem__text" dir={textDir(r.error)}>{r.error}</span>
                   </span>
                 ) : r.status === "new" ? (
                   <span className="vc-badge vc-badge--success">{t("importNew")}</span>

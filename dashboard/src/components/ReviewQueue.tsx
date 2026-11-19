@@ -14,6 +14,7 @@ import { describeError } from "../lib/errors";
 import {
   Button, Check, EmptyState, Loading, Notice, Select, Spinner, Switch, Textarea, Time, useConfirm, useToast,
 } from "./ui";
+import { textDir } from "../lib/textDir";
 
 const LEVELS: AnswerLevel[] = ["nudge", "normal", "more", "direct"];
 
@@ -124,7 +125,7 @@ function DraftError({ what, error }: { what: ReactNode; error: string | null | u
       {error && (
         <details className="vc-review-details">
           <summary>{t("reviewErrorDetails")}</summary>
-          <div className="u-prewrap" dir="auto">{error}</div>
+          <div className="u-prewrap" dir={textDir(error)}>{error}</div>
         </details>
       )}
     </div>
@@ -436,7 +437,7 @@ export function ReviewQueue({ exerciseId, onViewChat }: {
         {/* Who asked, when, and whether they are still waiting; deleting the question. */}
         <header className="vc-review-card__head">
           <div className="vc-review-card__who">
-            <span className="vc-review-card__name" dir="auto">{r.username}</span>
+            <span className="vc-review-card__name" dir={textDir(r.username)}>{r.username}</span>
             <span className="u-muted u-sm"><Time value={r.created_at} /></span>
             {r.waiting ? (
               <span className="vc-badge vc-badge--success"><span className="vc-dot vc-dot--success" /> {t("reviewWaitingNow")}</span>
@@ -459,14 +460,14 @@ export function ReviewQueue({ exerciseId, onViewChat }: {
         </header>
 
         {/* The question itself. */}
-        <div className="vc-review-card__question" dir="auto">{r.question}</div>
+        <div className="vc-review-card__question" dir={textDir(r.question)}>{r.question}</div>
         {r.question_translation && (
           <div className="vc-review-card__translation">
             <div className="vc-review-card__translation-head">
               <Languages aria-hidden="true" />
               {t("reviewTranslated", { from: langName(r.question_lang, lang), to: langName(r.translated_to, lang) })}
             </div>
-            <div className="u-prewrap" dir="auto">{r.question_translation}</div>
+            <div className="u-prewrap" dir={textDir(r.question_translation)}>{r.question_translation}</div>
           </div>
         )}
 
@@ -476,7 +477,7 @@ export function ReviewQueue({ exerciseId, onViewChat }: {
             <MapPin aria-hidden="true" />
             {r.step && status ? (
               <>
-                <span className="vc-review-where__step" dir="auto">
+                <span className="vc-review-where__step">
                   {t("reviewStep", { label: r.step.label, total: r.step.total, title: r.step.title })}
                 </span>
                 <span className="vc-review-status" data-tone={status.tone}>{t(status.key)}</span>
@@ -505,7 +506,7 @@ export function ReviewQueue({ exerciseId, onViewChat }: {
                     <span className="vc-review-entry__kind" data-author={e.author}>
                       {t(entryLabel(e))}{e.step != null && e.kind === "step" ? ` ${e.step}` : ""}
                     </span>
-                    <span className="vc-review-entry__text" data-open={open} dir="auto">{plain(e.content)}</span>
+                    <span className="vc-review-entry__text" data-open={open} dir={textDir(plain(e.content))}>{plain(e.content)}</span>
                   </button>
                 );
               })}
@@ -567,7 +568,7 @@ export function ReviewQueue({ exerciseId, onViewChat }: {
               </>
             ),
             sub: (
-              <div className="vc-review-row__sub" dir="auto">
+              <div className="vc-review-row__sub" dir={textDir(bank.question)}>
                 <span className="vc-review-row__sub-label">{t("bankQuestion")}:</span> {bank.question}
               </div>
             ),

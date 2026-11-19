@@ -51,7 +51,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             </Button>
           </>}
         >
-          {open.body && <div className="u-soft" dir="auto">{open.body}</div>}
+          {open.body && <div className="u-soft">{open.body}</div>}
         </Modal>
       )}
     </Ctx.Provider>

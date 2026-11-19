@@ -12,6 +12,7 @@ import { formatDate, formatDateTime, parseServerTime } from "../lib/time";
 import { Button, CopyButton, EmptyState, Input, Loading, Notice, Select, useConfirm, useToast } from "./ui";
 import { ExerciseFormModal, errorLines } from "./ExerciseFormModal";
 import "../styles/exercises.css";
+import { textDir } from "../lib/textDir";
 
 type FormState =
   | { mode: "create"; initial?: undefined }
@@ -309,7 +310,7 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
             {uploading ? <span className="vc-spinner" /> : <CloudUpload />}
           </span>
           <span className="u-grow">
-            <span className="vc-exercises-drop__title" dir="auto">
+            <span className="vc-exercises-drop__title">
               {uploading ? t("exUpBusy", { name: uploading }) : (
                 <>{t("exUpDrop")} <span className="vc-exercises-drop__choose">{t("exUpChoose")}</span></>
               )}
@@ -338,7 +339,7 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
             {loadErrors.map((e) => (
               <li key={e.folder}>
                 <code dir="ltr">{e.folder}</code>
-                <div dir="auto">{e.error}</div>
+                <div dir={textDir(e.error)}>{e.error}</div>
               </li>
             ))}
           </ul>
@@ -405,7 +406,7 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
           {!anyActive && <Notice tone="warning" className="u-mb-12">{t("noActiveExercise")}</Notice>}
           {shown.length === 0 && (
             <div className="u-row u-wrap u-gap-8 u-mb-12">
-              <p className="u-muted" dir="auto">
+              <p className="u-muted">
                 {range === "any" ? t("exNoMatch", { q: query.trim() }) : t("exNoMatchFilters")}
               </p>
               <Button size="sm" variant="quiet" icon={<FilterX />} onClick={clearFilters}>{t("exClearFilters")}</Button>
@@ -427,7 +428,7 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
                 <article key={ex.exercise_id} id={cardId(ex.exercise_id)} className={cls}
                          aria-labelledby={`${cardId(ex.exercise_id)}-title`}>
                   <div>
-                    <h3 className="vc-exercises-card__title" id={`${cardId(ex.exercise_id)}-title`} dir="auto">
+                    <h3 className="vc-exercises-card__title" id={`${cardId(ex.exercise_id)}-title`} dir={textDir(titleOf(ex))}>
                       {titleOf(ex)}
                     </h3>
                     <div className="vc-exercises-card__id" dir="ltr">{ex.exercise_id}</div>
@@ -444,7 +445,7 @@ export function ExercisesPanel({ onActiveChanged }: { onActiveChanged: () => voi
                       <span className="vc-badge vc-badge--warning">{t("osErrorsBadge", { n: ex.os_errors })}</span>
                     )}
                   </div>
-                  <div className="vc-exercises-card__meta" dir="auto">{meta.join(" · ")}</div>
+                  <div className="vc-exercises-card__meta" dir={textDir(meta.join(" · "))}>{meta.join(" · ")}</div>
                   {dates && <div className="vc-exercises-card__dates" title={dates.exact}>{dates.line}</div>}
                   <div className="vc-exercises-card__actions">
                     <Button variant="brand-soft" size="sm" icon={<Pencil />} busy={mine === "edit"} disabled={!!mine}
@@ -511,7 +512,7 @@ function UploadResult({ upload, titleOf, onDismiss }: {
     <details className="u-mt-8">
       <summary className="u-bold">{t("exUpNotes", { n: warnings.length })}</summary>
       <ul className="vc-exercises-list u-mt-4">
-        {warnings.map((w, i) => <li key={i} dir="auto">{w}</li>)}
+        {warnings.map((w, i) => <li key={i} dir={textDir(w)}>{w}</li>)}
       </ul>
     </details>
   );
@@ -519,9 +520,9 @@ function UploadResult({ upload, titleOf, onDismiss }: {
   if (!upload.ok) {
     return (
       <Notice tone="danger" className="u-mb-16" action={dismiss}
-              title={<span dir="auto">{t("exUpFailed", { name: upload.name })}</span>}>
+              title={<span>{t("exUpFailed", { name: upload.name })}</span>}>
         <ul className="vc-exercises-list">
-          {upload.errors.map((e, i) => <li key={i} dir="auto">{e}</li>)}
+          {upload.errors.map((e, i) => <li key={i} dir={textDir(e)}>{e}</li>)}
         </ul>
         {notes}
       </Notice>
@@ -533,7 +534,7 @@ function UploadResult({ upload, titleOf, onDismiss }: {
   const counts = [stepsText(s.steps ?? 0, t), t("exBank", { n: s.bank_questions ?? 0 })].join(" · ");
   return (
     <Notice tone="success" className="u-mb-16" action={dismiss}
-            title={<span dir="auto">{t(upload.replaced ? "exUpReplaced" : "exUpInstalled", { title: titleOf(s) })}</span>}>
+            title={<span>{t(upload.replaced ? "exUpReplaced" : "exUpInstalled", { title: titleOf(s) })}</span>}>
       <div className="u-row u-wrap u-gap-8">
         {s.exercise_id && <code dir="ltr">{s.exercise_id}</code>}
         <span>{counts}</span>

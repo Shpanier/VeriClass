@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { CheckCircle2, Info, X, XCircle } from "lucide-react";
 import { useLang } from "../../i18n";
 import { describeError } from "../../lib/errors";
+import { textDir } from "../../lib/textDir";
 
 type Kind = "success" | "error" | "info";
 interface ToastItem { id: number; kind: Kind; text: ReactNode; details?: string }
@@ -63,8 +64,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div key={i.id} className={`vc-toast vc-toast--${i.kind}`} role={i.kind === "error" ? "alert" : "status"}>
             {i.kind === "success" ? <CheckCircle2 /> : i.kind === "error" ? <XCircle /> : <Info />}
             <div className="vc-toast__body">
-              <div dir="auto">{i.text}</div>
-              {i.details && <div className="vc-toast__details" dir="auto">{i.details}</div>}
+              <div>{i.text}</div>
+              {i.details && <div className="vc-toast__details" dir={textDir(i.details)}>{i.details}</div>}
             </div>
             <button className="vc-toast__close" aria-label={t("close")} onClick={() => dismiss(i.id)}><X size={16} /></button>
           </div>

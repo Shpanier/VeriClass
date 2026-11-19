@@ -6,6 +6,7 @@ import { renderParams } from "../params";
 import { useLang } from "../i18n";
 import { Button, Check, Loading, Modal, Time } from "./ui";
 import { entryLabel, modelLabel } from "./ReviewQueue";
+import { textDir } from "../lib/textDir";
 
 /** A message's text: what is inside ``` fences looks like code, the rest is
  *  ordinary text in its own direction (Hebrew or English). */
@@ -20,7 +21,7 @@ function RichText({ text }: { text: string }) {
           return <pre key={i} className="vc-pre vc-pre--light" dir="ltr">{code.replace(/\n$/, "")}</pre>;
         }
         const prose = part.replace(/^\n+/, "").replace(/\n+$/, "");
-        return prose ? <div key={i} className="u-prewrap" dir="auto">{prose}</div> : null;
+        return prose ? <div key={i} className="u-prewrap" dir={textDir(prose)}>{prose}</div> : null;
       })}
     </div>
   );
@@ -130,7 +131,7 @@ export function ChatViewModal({
             <div className="vc-review-chat__params">
               {params.map((p, i) => (
                 <span key={i} className="vc-badge" title={p.note ?? undefined}>
-                  {p.label}: <strong dir="auto">{p.value}</strong>
+                  {p.label}: <strong dir={textDir(p.value)}>{p.value}</strong>
                 </span>
               ))}
             </div>

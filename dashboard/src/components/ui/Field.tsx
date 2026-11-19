@@ -1,15 +1,22 @@
 import { forwardRef, useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes,
          type TextareaHTMLAttributes } from "react";
+import { textDir } from "../../lib/textDir";
 
 function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
 }
 
-/** Plain controls with the dashboard's look. Free text uses dir="auto", so
- *  Hebrew content orients itself whatever the dashboard's language is. */
+/** What a text box holds, or shows while it is empty, for its direction. */
+function shown(rest: { value?: unknown; defaultValue?: unknown; placeholder?: unknown }): unknown {
+  return rest.value !== undefined && rest.value !== "" ? rest.value : rest.defaultValue || rest.placeholder;
+}
+
+/** Plain controls with the dashboard's look. Free text takes its direction from
+ *  what it holds (textDir): with Hebrew in it, right to left whatever the
+ *  dashboard's language is. A dir passed in (dir="ltr" for code) wins. */
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { small?: boolean; inline?: boolean; mono?: boolean }>(
-  function Input({ className, small, inline, mono, dir = "auto", ...rest }, ref) {
-    return <input ref={ref} dir={dir} className={cx("vc-input", small && "vc-input--sm", inline && "vc-input--inline", mono && "vc-mono", className)} {...rest} />;
+  function Input({ className, small, inline, mono, dir, ...rest }, ref) {
+    return <input ref={ref} dir={dir ?? textDir(shown(rest))} className={cx("vc-input", small && "vc-input--sm", inline && "vc-input--inline", mono && "vc-mono", className)} {...rest} />;
   });
 
 export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement> & { small?: boolean; inline?: boolean }>(
@@ -18,8 +25,8 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
   });
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement> & { mono?: boolean }>(
-  function Textarea({ className, mono, dir = "auto", ...rest }, ref) {
-    return <textarea ref={ref} dir={dir} className={cx("vc-textarea", mono && "vc-mono", className)} {...rest} />;
+  function Textarea({ className, mono, dir, ...rest }, ref) {
+    return <textarea ref={ref} dir={dir ?? textDir(shown(rest))} className={cx("vc-textarea", mono && "vc-mono", className)} {...rest} />;
   });
 
 /** A label, a control, and what goes under it (a hint, or the error instead). */

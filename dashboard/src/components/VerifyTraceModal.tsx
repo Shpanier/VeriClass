@@ -4,6 +4,7 @@ import type { TraceVerifyResult } from "../types";
 import { useLang, type StringKey } from "../i18n";
 import { describeError } from "../lib/errors";
 import { Button, Loading, Modal, Notice, Time } from "./ui";
+import { textDir } from "../lib/textDir";
 
 /**
  * A student's "Export my log" CSV (IDE plugin), checked by the server: was any
@@ -86,7 +87,7 @@ export function VerifyTraceModal({ onClose }: { onClose: () => void }) {
             </Notice>
           ) : (
             <Notice tone="danger" title={t("vtBadTitle")}>
-              <span dir="auto">{result.error ?? ""}</span>
+              <span dir={textDir(result.error)}>{result.error ?? ""}</span>
               {result.student && <> · <bdi>{result.student}</bdi></>}
             </Notice>
           )}
@@ -117,7 +118,7 @@ export function VerifyTraceModal({ onClose }: { onClose: () => void }) {
                       <td>{r.seq ?? "?"}</td>
                       <td className="u-nowrap"><Time value={r.at_utc} mode="clock" /></td>
                       <td>{TRACE_KINDS.has(r.kind) ? t(`traceKind_${r.kind}` as StringKey) : r.kind}</td>
-                      <td className="vc-mono" dir="auto">{r.summary}</td>
+                      <td className="vc-mono" dir={textDir(r.summary)}>{r.summary}</td>
                       <td>
                         {r.valid
                           ? <span className="vc-badge vc-badge--success">{t("vtYes")}</span>

@@ -6,6 +6,7 @@ import { useLang } from "../i18n";
 import { describeError } from "../lib/errors";
 import { sortExercises, useExerciseSort } from "../lib/exerciseOrder";
 import { Button, FormField, Input, Modal, Notice, Select, Spinner, Time, useConfirm, useToast } from "./ui";
+import { textDir } from "../lib/textDir";
 
 // YYYY-MM-DD, local. Not toLocaleDateString: it builds an Intl formatter on every
 // call, and this runs on every render of every course card.
@@ -139,12 +140,12 @@ export function MeetingsSection({ courseId, exercises, onChanged }: {
             return (
               <div key={m.id} className="vc-courses-meeting" data-past={m.meeting_date < now}>
                 <span className="vc-courses-meeting__date">
-                  <span dir="auto">{day}</span>
+                  <span>{day}</span>
                   {m.meeting_date === now && <span className="vc-badge vc-badge--success">{t("todayLabel")}</span>}
                 </span>
                 <span className="vc-courses-meeting__what">
-                  {m.title && <><span className="u-bold" dir="auto">{m.title}</span><span className="u-muted"> · </span></>}
-                  <span dir="auto">{ex.name}</span>
+                  {m.title && <><span className="u-bold" dir={textDir(m.title)}>{m.title}</span><span className="u-muted"> · </span></>}
+                  <span dir={textDir(ex.name)}>{ex.name}</span>
                   {ex.showId && <> <span className="u-muted u-xs vc-mono" dir="ltr">({m.exercise_id})</span></>}
                 </span>
                 <Button size="sm" icon={<UserCheck />} busy={opening === m.id} onClick={() => openAttendance(m.id)}>
@@ -207,8 +208,8 @@ export function MeetingsSection({ courseId, exercises, onChanged }: {
                   {attendance.rows.map((r) => (
                     <tr key={r.user_id}>
                       <td>
-                        <span dir="auto">{r.username}</span>
-                        {r.group && <span className="u-muted"> · <span dir="auto">{r.group}</span></span>}
+                        <span dir={textDir(r.username)}>{r.username}</span>
+                        {r.group && <span className="u-muted"> · <span dir={textDir(r.group)}>{r.group}</span></span>}
                       </td>
                       <td>
                         {r.attended

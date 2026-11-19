@@ -5,6 +5,7 @@ import { api } from "../api";
 import type { StepCheck } from "../types";
 import { useLang } from "../i18n";
 import { Button, EmptyState, Input, Notice, Time, useToast } from "./ui";
+import { textDir } from "../lib/textDir";
 
 /** Step-by-step labs: each student's "Done with step N" answer, next to the
  *  expected values. Approve releases the next step into their chat. Shown only
@@ -79,7 +80,7 @@ export function StepChecks({ exerciseId }: { exerciseId: string | null }) {
           <article key={c.id} className="vc-pacing-item">
             <div className="vc-pacing-item__head">
               <span className="vc-pacing-item__who">{c.username}</span>
-              <span className="vc-pacing-item__step" dir="auto">{t("stepOf", { n: c.step, total: c.total })}: {c.title}</span>
+              <span className="vc-pacing-item__step">{t("stepOf", { n: c.step, total: c.total })}: {c.title}</span>
               <span className="vc-pacing-item__meta">{t("pcSent")} <Time value={c.created_at} /></span>
               {c.questions != null && c.answered != null && (
                 <span className={`vc-badge ${complete ? "vc-badge--success" : "vc-badge--danger"}`} title={t("answeredHint")}>
@@ -90,11 +91,11 @@ export function StepChecks({ exerciseId }: { exerciseId: string | null }) {
             <div className="vc-pacing-compare">
               <div>
                 <span className="vc-pacing-compare__label">{t("studentAnswer")}</span>
-                <div className="vc-pacing-text" dir="auto">{c.answer}</div>
+                <div className="vc-pacing-text" dir={textDir(c.answer)}>{c.answer}</div>
               </div>
               <div>
                 <span className="vc-pacing-compare__label">{t("expectedAnswer")}</span>
-                <div className="vc-pacing-text vc-pacing-text--private" dir="ltr">{c.expected}</div>
+                <div className="vc-pacing-text vc-pacing-text--private" dir={textDir(c.expected)}>{c.expected}</div>
               </div>
             </div>
             <Evidence c={c} />
@@ -134,7 +135,7 @@ function Evidence({ c }: { c: StepCheck }) {
           <div key={i} className="vc-pacing-term__rule">
             <span className={`vc-pacing-term__name${tone}`} title={word}>
               {r.ok === false ? <XCircle aria-hidden="true" /> : r.ok ? <CheckCircle2 aria-hidden="true" /> : <Circle aria-hidden="true" />}
-              <span dir="auto">{r.label}</span>
+              <span dir={textDir(r.label)}>{r.label}</span>
               <span className="u-sr"> ({word})</span>
             </span>
             {r.found ? (

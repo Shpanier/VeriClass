@@ -21,5 +21,5 @@ export function Time({ value, mode = "relative" }: {
   if (!date) return <span>{value ?? ""}</span>;
   const full = formatDateTime(date, lang);
   const text = mode === "clock" ? formatClock(date, lang) : mode === "full" ? full : relativeTime(date, lang);
-  return <time dateTime={date.toISOString()} title={full} dir="auto">{text}</time>;
+  return <time dateTime={date.toISOString()} title={full}>{text}</time>;
 }

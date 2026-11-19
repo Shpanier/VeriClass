@@ -5,6 +5,7 @@ import type { GradeRecommendation, Student, Submission } from "../types";
 import { useLang, type StringKey } from "../i18n";
 import { Button, EmptyState, Input, Loading, Modal, Notice, Time, useToast } from "./ui";
 import { bandBadge } from "./StudentGrid";
+import { textDir } from "../lib/textDir";
 
 /**
  * Every "Send to teacher" submission for one student (IDE plugin), newest
@@ -41,7 +42,7 @@ export function SubmissionsModal({ student, onClose }: { student: Student; onClo
         <>
           {subs && (count === 1 ? t("subOne") : t("submissionsFooter", { n: count }))}
           {subs && student.variant && " · "}
-          {student.variant && <span dir="auto">{t("sgVersion", { v: student.variant })}</span>}
+          {student.variant && <span>{t("sgVersion", { v: student.variant })}</span>}
         </>
       )}
       footer={<><span className="u-push" /><Button onClick={onClose}>{t("close")}</Button></>}
@@ -149,7 +150,7 @@ function GradePanel({ sessionId, canGrade }: { sessionId: string; canGrade: bool
           {grade.rationale && (
             <p className="u-mt-8 u-sm u-soft">
               <span className="u-muted">{t("gradeWhy")}: </span>
-              <span dir="auto">{grade.rationale}</span>
+              <span dir={textDir(grade.rationale)}>{grade.rationale}</span>
             </p>
           )}
 
@@ -160,7 +161,7 @@ function GradePanel({ sessionId, canGrade }: { sessionId: string; canGrade: bool
                 return (
                   <li key={i} className={against ? "u-danger" : "u-success"}>
                     {against ? <Minus aria-hidden="true" /> : <Plus aria-hidden="true" />}
-                    <span dir="auto">{sig.replace(/^\s*[+-]\s*/, "")}</span>
+                    <span dir={textDir(sig)}>{sig.replace(/^\s*[+-]\s*/, "")}</span>
                   </li>
                 );
               })}

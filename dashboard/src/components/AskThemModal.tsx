@@ -5,6 +5,7 @@ import { api } from "../api";
 import type { Lang, ProbeSuggestion, Student } from "../types";
 import { useLang, type StringKey } from "../i18n";
 import { Button, FormField, Loading, Modal, Notice, Textarea, useToast } from "./ui";
+import { textDir } from "../lib/textDir";
 
 interface Props {
   student: Student;
@@ -151,14 +152,14 @@ export function AskThemModal({ student, onClose, onSent }: Props) {
               <input type="checkbox" checked={picked.has(i)} aria-label={t("askPick", { n: i + 1 })}
                      onChange={(e) => togglePick(i, e.target.checked)} />
               <div className="u-grow u-col u-gap-6">
-                <div><span className="vc-badge vc-badge--brand" dir="auto">{kindName(s.kind)}</span></div>
+                <div><span className="vc-badge vc-badge--brand">{kindName(s.kind)}</span></div>
                 <Textarea
                   value={edited[i] ?? s.body}
                   rows={3}
                   aria-label={t("askEditLabel", { n: i + 1 })}
                   onChange={(e) => setEdited({ ...edited, [i]: e.target.value })}
                 />
-                {s.rationale && <div className="vc-hint" dir="auto">{s.rationale}</div>}
+                {s.rationale && <div className="vc-hint" dir={textDir(s.rationale)}>{s.rationale}</div>}
               </div>
             </div>
           ))}

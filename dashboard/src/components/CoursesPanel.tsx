@@ -9,6 +9,7 @@ import { Button, EmptyState, FormField, Input, Loading, Notice, Switch, useConfi
 import { ImportStudentsModal, MaskedUsername } from "./ImportStudentsModal";
 import { MeetingsSection } from "./MeetingsSection";
 import "../styles/courses.css";
+import { textDir } from "../lib/textDir";
 
 // The "Courses & students" tab: which students are in which course, which
 // exercises each course offers, and the one preselected after login
@@ -481,7 +482,7 @@ function CourseCard({
                   <div key={ex.exercise_id} className="vc-courses-pick__row" data-on={on}>
                     <label className="vc-courses-pick__main">
                       <input type="checkbox" checked={on} onChange={() => toggleExercise(ex.exercise_id)} />
-                      <span className="vc-courses-pick__title" dir="auto" title={title(ex)}>{title(ex)}</span>
+                      <span className="vc-courses-pick__title" dir={textDir(title(ex))} title={title(ex)}>{title(ex)}</span>
                       <span className="vc-courses-pick__id" dir="ltr">{ex.exercise_id}</span>
                     </label>
                     <label className="vc-courses-default" data-off={!on} data-default={isDefault} title={t("coDefaultTitle")}>
@@ -522,7 +523,7 @@ function CourseCard({
                     return (
                       <label key={s.id} className="vc-courses-pick__row vc-courses-pick__main" data-on={on}>
                         <input type="checkbox" checked={on} onChange={() => toggleMember(s.id)} />
-                        <span className="vc-courses-pick__title u-grow" dir="auto">{s.username}</span>
+                        <span className="vc-courses-pick__title u-grow" dir={textDir(s.username)}>{s.username}</span>
                         <MaskedUsername code={s.login_code} show={showCodes} />
                         {others.length > 0 && (
                           <span className="vc-courses-pick__badges">
@@ -646,7 +647,7 @@ function PasswordsSection({ users, hasStudents, showCodes, onShowCodes, onChange
                 {shown.map((u) => (
                   <tr key={u.id}>
                     {/* Name: the person (data: username). Username: what they sign in with (data: login_code). */}
-                    <td><span dir="auto">{u.username}</span></td>
+                    <td><span dir={textDir(u.username)}>{u.username}</span></td>
                     <td><MaskedUsername code={u.login_code} show={showCodes} /></td>
                     <td>{u.role === "teacher" ? t("roleTeacher") : t("roleStudent")}</td>
                     <td>

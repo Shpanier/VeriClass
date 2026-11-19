@@ -10,6 +10,7 @@ import { alertTotal, needsAttention } from "../proctor";
 import { useLang, type StringKey, type Translate } from "../i18n";
 import { useFeatures } from "../app/features";
 import { Button, EmptyState, Input, Loading, Select, Time } from "./ui";
+import { textDir } from "../lib/textDir";
 
 type Mode = Student["mode"];
 
@@ -278,7 +279,7 @@ function StudentCard({
         <span className={avatarCls} aria-hidden="true">{initials}</span>
         <div className="vc-students-card__who">
           <h3 className="vc-students-card__name u-truncate" id={`vc-student-${s.session_id}`} title={s.username}>
-            <span dir="auto">{s.username}</span>
+            <span dir={textDir(s.username)}>{s.username}</span>
           </h3>
           <div className="vc-students-card__meta">{t("lastActive")} <Time value={s.last_active_at} /></div>
         </div>
@@ -288,7 +289,7 @@ function StudentCard({
       {plugin && s.exam_state === "other_window" && s.exam_state_detail && (
         <div className="vc-students-note u-warning u-bold">
           <AppWindow aria-hidden="true" />
-          <span className="vc-students-note__text" dir="auto">{s.exam_state_detail}</span>
+          <span className="vc-students-note__text" dir={textDir(s.exam_state_detail)}>{s.exam_state_detail}</span>
         </div>
       )}
       {plugin && s.live && <LiveLine s={s} />}
@@ -306,7 +307,7 @@ function StudentCard({
       {badges && (
         <div className="vc-students-badges">
           {showVersion && s.variant && (
-            <span className="vc-badge"><span dir="auto">{t("sgVersion", { v: s.variant })}</span></span>
+            <span className="vc-badge"><span>{t("sgVersion", { v: s.variant })}</span></span>
           )}
           {s.probe_count > 0 && (
             <span className="vc-badge vc-badge--info" title={t("sgQuestionsTitle")}>
@@ -335,7 +336,7 @@ function StudentCard({
             <span key={i}>
               {i > 0 && <span className="u-muted"> · </span>}
               <span className="vc-students-params__label">{p.label}:</span>{" "}
-              <span className="vc-students-params__value" dir="auto">{p.value}</span>
+              <span className="vc-students-params__value" dir={textDir(p.value)}>{p.value}</span>
             </span>
           ))}
         </div>

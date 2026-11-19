@@ -8,6 +8,7 @@ import { useFeatures } from "../app/features";
 import { ApiError, describeError } from "../lib/errors";
 import { Button, Field, FormField, Input, Modal, Notice, Select, Switch, Textarea, useConfirm } from "./ui";
 import "../styles/exercises.css";
+import { textDir } from "../lib/textDir";
 
 // Local editing shape. `paramsText` is the raw JSON the lecturer types; it's
 // parsed (and validated) only on save so intermediate keystrokes are allowed.
@@ -461,9 +462,9 @@ export function ExerciseFormModal({
         {serverError && (
           <div ref={serverNotice} className="u-mb-12">
             <Notice tone="danger" title={t("exfNotSaved")}>
-              {serverError.length === 1 ? <span dir="auto">{serverError[0]}</span> : (
+              {serverError.length === 1 ? <span dir={textDir(serverError[0])}>{serverError[0]}</span> : (
                 <ul className="vc-exercises-list">
-                  {serverError.map((line, i) => <li key={i} dir="auto">{line}</li>)}
+                  {serverError.map((line, i) => <li key={i} dir={textDir(line)}>{line}</li>)}
                 </ul>
               )}
             </Notice>
@@ -508,7 +509,7 @@ export function ExerciseFormModal({
                     <li key={r.ref} className={r.ok ? "u-success" : "u-danger"}>
                       {r.ok ? <CheckCircle2 aria-hidden="true" /> : <XCircle aria-hidden="true" />}
                       <code dir="ltr">@{r.ref}</code>
-                      <span className="u-soft" dir="auto">{r.ok ? r.label : t("applyUnknownRef")}</span>
+                      <span className="u-soft" dir={textDir(r.ok ? r.label : "")}>{r.ok ? r.label : t("applyUnknownRef")}</span>
                     </li>
                   ))}
                 </ul>
@@ -517,7 +518,7 @@ export function ExerciseFormModal({
                 {sameForAll ? t("exfPreviewAsWritten")
                   : briefCheck.sampleId ? t("applyPreviewFor", { id: briefCheck.sampleId }) : t("applyPreviewNoVariant")}
               </div>
-              <div className="vc-exercises-preview__text" dir="auto">{briefCheck.preview}</div>
+              <div className="vc-exercises-preview__text" dir={textDir(briefCheck.preview)}>{briefCheck.preview}</div>
             </div>
           )}
         </Section>
@@ -564,7 +565,7 @@ export function ExerciseFormModal({
                   </button>
                 ))}
               </div>
-              <div className="vc-exercises-preview__text" dir="auto">
+              <div className="vc-exercises-preview__text" dir={textDir(steps[shownStep].title, steps[shownStep].text)}>
                 <strong>{t("exfStepOf", { n: shownStep + 1, total: steps.length, title: steps[shownStep].title })}</strong>
                 {"\n\n"}{steps[shownStep].text}
               </div>

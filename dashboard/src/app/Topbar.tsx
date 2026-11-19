@@ -5,6 +5,7 @@ import { LanguageToggle, useLang } from "../i18n";
 import { connection } from "../lib/connection";
 import { Button } from "../components/ui";
 import { Brand } from "./FirstRun";
+import { textDir } from "../lib/textDir";
 
 export type Tab = "monitor" | "exercises" | "courses";
 
@@ -60,7 +61,7 @@ function AccountMenu({ settings, plugin, onSettings, onVerify, onSignOut }: {
       {open && (
         <div className="vc-menu__list" role="menu">
           {settings && (
-            <div className="vc-menu__label">{t("menuSignedIn")}<strong dir="auto">{settings.user.name}</strong></div>
+            <div className="vc-menu__label">{t("menuSignedIn")}<strong dir={textDir(settings.user.name)}>{settings.user.name}</strong></div>
           )}
           <button role="menuitem" className="vc-menu__item" onClick={pick(onSettings)}><SettingsIcon /> {t("menuSettings")}</button>
           {plugin && <button role="menuitem" className="vc-menu__item" onClick={pick(onVerify)}><FileCheck2 /> {t("menuVerify")}</button>}

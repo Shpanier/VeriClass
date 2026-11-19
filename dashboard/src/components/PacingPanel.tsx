@@ -12,6 +12,7 @@ import {
   Button, Check as Checkbox, EmptyState, Input, Loading, Notice, Select, Textarea, Time, useConfirm, useToast,
   type ConfirmOptions,
 } from "./ui";
+import { textDir } from "../lib/textDir";
 
 /** A step's name as the lecturer reads it: its label (A1, B2…), else its number. */
 function stepLabel(steps: PacingStep[], n: number): string {
@@ -392,7 +393,7 @@ function Review({ exerciseId, course, steps, onChange }: {
               </div>
             </div>
             {w.missing.length > 0 && (
-              <div className="vc-pacing-missing" dir="auto">
+              <div className="vc-pacing-missing">
                 <AlertTriangle aria-hidden="true" />
                 <span>{t("pacingMissing")}: {w.missing.map((m, i) => (
                   <span key={i}>{i > 0 && " · "}<bdi dir="ltr" className="vc-mono">{m}</bdi></span>
@@ -423,9 +424,6 @@ function Review({ exerciseId, course, steps, onChange }: {
     </section>
   );
 }
-
-/** Hebrew text that opens with a Latin word or `code` would be laid out left to right by dir="auto". */
-const dirOf = (text: string | null | undefined): "rtl" | "ltr" => (/[֐-׿]/.test(text ?? "") ? "rtl" : "ltr");
 
 /** Where the text for the student comes from: nothing, the grader's reason,
  *  the model answer, or the lecturer's own words. */
@@ -505,19 +503,19 @@ function AnswerReview({ exerciseId, courses, items, steps, onChange }: {
             </div>
             <div className="u-mt-8">
               <span className="vc-pacing-compare__label">{t("pcQuestion")}</span>
-              <div className="vc-pacing-text" dir={dirOf(a.body)}>{a.body}</div>
+              <div className="vc-pacing-text" dir={textDir(a.body)}>{a.body}</div>
             </div>
             <div className="vc-pacing-compare">
               <div>
                 <span className="vc-pacing-compare__label">{t("pacingTheirAnswer")}</span>
-                <div className="vc-pacing-text" dir={dirOf(a.answer)}>{a.answer || "—"}</div>
+                <div className="vc-pacing-text" dir={textDir(a.answer)}>{a.answer || "—"}</div>
               </div>
               <div>
                 <span className="vc-pacing-compare__label">{t("pacingModelAnswer")}</span>
-                <div className="vc-pacing-text vc-pacing-text--private" dir={dirOf(item?.answer)}>{item?.answer || "—"}</div>
+                <div className="vc-pacing-text vc-pacing-text--private" dir={textDir(item?.answer)}>{item?.answer || "—"}</div>
               </div>
             </div>
-            <p className="u-xs u-warning u-mt-8" dir={dirOf(a.why)}>
+            <p className="u-xs u-warning u-mt-8" dir={textDir(a.why)}>
               {t("pacingGraderSays", { g: a.grade ?? 0 })}{a.why ? ` — ${a.why}` : ""}
             </p>
             <div className="vc-pacing-tell">
@@ -536,7 +534,7 @@ function AnswerReview({ exerciseId, courses, items, steps, onChange }: {
               </div>
               {source !== "" && (
                 <Textarea
-                  className="u-mt-8" value={notes[a.id] ?? ""} dir={dirOf(notes[a.id] || item?.answer)} rows={3} disabled={working}
+                  className="u-mt-8" value={notes[a.id] ?? ""} dir={textDir(notes[a.id] || item?.answer)} rows={3} disabled={working}
                   aria-label={t("pacingAnswerNote")} placeholder={t("pacingAnswerNote")}
                   onChange={(e) => setNotes((m) => ({ ...m, [a.id]: e.target.value }))}
                 />
@@ -796,7 +794,7 @@ function Quiz({ exerciseId, items, course, pending, onChange }: {
             {q.answer && (
               <div className="u-mt-8">
                 <span className="vc-pacing-compare__label">{t("pacingModelAnswer")}</span>
-                <div className="vc-pacing-text vc-pacing-text--private" dir="auto">{q.answer}</div>
+                <div className="vc-pacing-text vc-pacing-text--private" dir={textDir(q.answer)}>{q.answer}</div>
               </div>
             )}
             <div className="vc-pacing-actions">
@@ -835,7 +833,7 @@ function Quiz({ exerciseId, items, course, pending, onChange }: {
                 <summary>{t("pacingAnswers", { n: answers.length, avg })}</summary>
                 <ul>
                   {answers.map((a) => (
-                    <li key={a.id} dir="auto">
+                    <li key={a.id} dir={textDir(a.user, a.answer)}>
                       <span className="u-bold">{a.user}</span>
                       {a.grade != null && <span className="u-muted"> ({a.grade}/2)</span>}
                       {a.review === "waiting" && <span className="u-danger u-bold"> · {t("pacingAnswerWaitingTag")}</span>}
