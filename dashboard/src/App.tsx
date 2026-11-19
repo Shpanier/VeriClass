@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, auth, setUnauthorizedHandler, setupStatus, type Settings } from "./api";
 import type { ExerciseSummary, FullExercise, PendingReview, Student } from "./types";
 import { ExerciseHeader } from "./components/ExerciseHeader";
-import { StudentGrid } from "./components/StudentGrid";
+import { StudentGrid, type StudentHandlers } from "./components/StudentGrid";
 import { AskThemModal } from "./components/AskThemModal";
 import { ChatViewModal } from "./components/ChatViewModal";
 import { ProctorBanner } from "./components/ProctorBanner";
@@ -221,6 +221,29 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     });
     setViewingSessionId(r.session_id);
   };
+  // What a student's buttons do, on a student card and on a row of the class-pacing list.
+  // A student idle for over 30 minutes isn't in the live list: the row's data stands in.
+  const openFor = (set: (id: string) => void) => (s: Student) => {
+    if (!known.current.has(s.session_id)) known.current.set(s.session_id, s);
+    set(s.session_id);
+  };
+  const handlers: StudentHandlers = {
+    onModeChange: async (id, mode) => {
+      try {
+        await api.setMode(id, mode);
+      } catch (e) {
+        toast.error(e);
+      }
+      refreshStudents();
+    },
+    onAskThem: openFor(setAskingSessionId),
+    onViewChat: openFor(setViewingSessionId),
+    onProctorLog: openFor(setProctorSessionId),
+    onViewSubmissions: openFor(setSubmissionsSessionId),
+    onTerminalLog: openFor(setTerminalSessionId),
+  };
+  const classPaced = !!liveId && liveExercise?.exercise_id === liveId && liveExercise.pacing === "class";
+
   const proctorTarget = find(proctorSessionId);
   const submissionsTarget = find(submissionsSessionId);
   const terminalTarget = find(terminalSessionId);
@@ -258,28 +281,21 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
                 studentCount={visible.length}
               />
               {plugin && <ProctorBanner students={visible} onInspect={setProctorSessionId} />}
-              {liveId && liveExercise?.exercise_id === liveId && liveExercise.pacing === "class"
-                ? <PacingPanel exerciseId={liveId} quizSlot={quizSlot} />
+              {/* A class-paced lab lists its students once, in the pacing panel, with
+                  everything the student cards show; other labs have the cards. */}
+              {classPaced && liveId
+                ? <PacingPanel exerciseId={liveId} quizSlot={quizSlot} live={visible} handlers={handlers}
+                               paramLabels={liveExercise?.param_labels} />
                 : <StepChecks exerciseId={liveId} />}
               <ReviewQueue exerciseId={liveId} onViewChat={viewReviewChat} />
-              <StudentGrid
-                students={visible}
-                loaded={studentsLoaded}
-                paramLabels={liveExercise?.param_labels}
-                onModeChange={async (id, mode) => {
-                  try {
-                    await api.setMode(id, mode);
-                  } catch (e) {
-                    toast.error(e);
-                  }
-                  refreshStudents();
-                }}
-                onAskThem={(id) => setAskingSessionId(id)}
-                onViewChat={(id) => setViewingSessionId(id)}
-                onProctorLog={(id) => setProctorSessionId(id)}
-                onViewSubmissions={(id) => setSubmissionsSessionId(id)}
-                onTerminalLog={(id) => setTerminalSessionId(id)}
-              />
+              {!classPaced && (
+                <StudentGrid
+                  students={visible}
+                  loaded={studentsLoaded}
+                  paramLabels={liveExercise?.param_labels}
+                  handlers={handlers}
+                />
+              )}
               <div ref={setQuizSlot} />
             </ErrorBoundary>
           </div>

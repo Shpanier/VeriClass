@@ -72,7 +72,8 @@ and is the lightest-touch intervention: the model answers the student
 directly, you just shape its style.
 
 ### 2. Questions to students ("Ask them")
-At any time, the instructor opens *Ask Them* on a student card and either:
+At any time, the instructor opens *Ask Them* on a student's card (in a class-paced
+lab, on the student's row under *Class pacing → Students*) and either:
 - Writes a question manually, or
 - Clicks **Suggest** — the cloud LLM reads the student's recent transcript
   and proposes 2–3 probe questions targeted at apparent gaps.
@@ -291,6 +292,14 @@ is a class-paced lab.
   which grades wait (see the table below); an answer the grader couldn't grade
   never waits. The API is `POST /api/pacing/{exercise_id}/answer-review`
   (`{"probe_id": n, "action": "approve" | "return", "note": ..., "grade": 0..2}`).
+- **One list of students.** A class-paced lab shows its students once, under
+  *Class pacing → Students*: each row has the student's step and *Move to step…*
+  together with everything the student cards of other labs show (last active,
+  *View chat*, *Ask them*, the tutor's mode, questions asked, and with the IDE
+  plugin the submissions, exam log and terminal). The tutor's mode shows for
+  students active in the last 30 minutes; anyone signed in to the lab who has no
+  row in its progress (an earlier session, someone who isn't a student in the
+  course) is listed last as *Not in the class's progress*.
 - **Moving a student to another step.** In *Class pacing*, *Move to step…*
   on a student moves them back (their work from that step on, outputs and quiz
   answers, stays in the record with status `reset` but no longer counts, and

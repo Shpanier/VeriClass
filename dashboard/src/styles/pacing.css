@@ -116,19 +116,35 @@
 [dir="rtl"] .vc-pacing-block:not([open]) > summary .vc-pacing-chev { transform: rotate(90deg); }
 
 .vc-pacing-students {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 8px;
   margin: 10px 0 0; padding: 0; list-style: none;
 }
-.vc-pacing-student { padding: 8px 10px; border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface); font-size: var(--fs-sm); }
+.vc-pacing-students__tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+/* One student: name and step, what they did, then the buttons (chat, ask them, tutor mode, move). */
+.vc-pacing-student {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px 12px;
+  border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-surface); font-size: var(--fs-sm);
+}
+.vc-pacing-student[data-tone="danger"] { border: 2px solid var(--c-danger-border); background: var(--c-danger-soft); }
+.vc-pacing-student[data-tone="warning"] { border: 2px solid var(--c-warning-border); background: var(--c-warning-soft); }
+.vc-pacing-student[data-tone="neutral"] { border-width: 2px; background: var(--c-surface-2); }
 .vc-pacing-student__row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.vc-pacing-student__who { display: grid; flex: 1 1 140px; min-width: 0; }
 .vc-pacing-student__name { font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
+.vc-pacing-student__meta { font-size: var(--fs-xs); color: var(--c-text-3); }
 .vc-pacing-student__marks { display: inline-flex; align-items: center; gap: 4px; }
-.vc-pacing-student__marks > svg { width: 15px; height: 15px; flex: none; }
-.vc-pacing-student .vc-select { width: auto; max-width: 160px; margin-inline-start: auto; }
-.vc-pacing-student__more { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; font-size: var(--fs-xs); color: var(--c-text-3); }
+.vc-pacing-student__marks > svg, .vc-pacing-student__marks svg { width: 15px; height: 15px; flex: none; }
+.vc-pacing-student__foot {
+  display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--c-border);
+}
+.vc-pacing-student__controls { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; }
+.vc-pacing-student .vc-select { width: auto; max-width: 180px; }
+.vc-pacing-student__buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.vc-pacing-student__buttons .vc-students-tools { margin-inline-start: 0; }
+.vc-pacing-student__more { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: var(--fs-xs); color: var(--c-text-3); }
 .vc-pacing-student__more > span { display: inline-flex; align-items: center; gap: 4px; }
 .vc-pacing-student__more svg { width: 12px; height: 12px; flex: none; }
-.vc-pacing-flag { margin-top: 4px; }
+.vc-pacing-flag { margin: 0; }
 .vc-pacing-flag > summary { font-size: var(--fs-xs); color: var(--c-warning); }
 .vc-pacing-flag .vc-pre { margin-top: 4px; max-height: 220px; }
 

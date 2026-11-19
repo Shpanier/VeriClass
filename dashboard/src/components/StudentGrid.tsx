@@ -14,17 +14,23 @@ import { textDir } from "../lib/textDir";
 
 type Mode = Student["mode"];
 
+/** What the page does for one student: the same buttons on a student card and
+ *  on a student's row in the class-pacing panel (App.tsx opens the dialogs). */
+export interface StudentHandlers {
+  onModeChange: (sessionId: string, mode: "mentor" | "coding_partner") => void | Promise<void>;
+  onAskThem: (s: Student) => void;
+  onViewChat: (s: Student) => void;
+  onProctorLog: (s: Student) => void;
+  onViewSubmissions: (s: Student) => void;
+  onTerminalLog: (s: Student) => void;
+}
+
 interface Props {
   students: Student[];
   /** False until the first list of students arrived: shows "loading" instead of "nobody here". */
   loaded?: boolean;
   paramLabels?: ParamLabel[];
-  onModeChange: (sessionId: string, mode: "mentor" | "coding_partner") => void;
-  onAskThem: (sessionId: string) => void;
-  onViewChat: (sessionId: string) => void;
-  onProctorLog: (sessionId: string) => void;
-  onViewSubmissions: (sessionId: string) => void;
-  onTerminalLog: (sessionId: string) => void;
+  handlers: StudentHandlers;
 }
 
 // ---- exam helpers, shared with the alert bar and the exam log (IDE plugin) ----
@@ -119,7 +125,7 @@ function savedOpen(): boolean {
 
 /** One card per student connected to the followed exercise in the last 30
  *  minutes. With more than 8, a search box and a sort order appear above. */
-export function StudentGrid({ students, loaded = true, paramLabels, onModeChange, onAskThem, onViewChat, onProctorLog, onViewSubmissions, onTerminalLog }: Props) {
+export function StudentGrid({ students, loaded = true, paramLabels, handlers }: Props) {
   const { t } = useLang();
   const { plugin } = useFeatures();
   const [query, setQuery] = useState("");
@@ -205,12 +211,7 @@ export function StudentGrid({ students, loaded = true, paramLabels, onModeChange
               plugin={plugin}
               showVersion={versions > 1}
               paramLabels={paramLabels}
-              onModeChange={onModeChange}
-              onAskThem={onAskThem}
-              onViewChat={onViewChat}
-              onProctorLog={onProctorLog}
-              onViewSubmissions={onViewSubmissions}
-              onTerminalLog={onTerminalLog}
+              handlers={handlers}
             />
           ))}
         </div>
@@ -220,68 +221,27 @@ export function StudentGrid({ students, loaded = true, paramLabels, onModeChange
   );
 }
 
-function StudentCard({
-  s,
-  plugin,
-  showVersion,
-  paramLabels,
-  onModeChange,
-  onAskThem,
-  onViewChat,
-  onProctorLog,
-  onViewSubmissions,
-  onTerminalLog,
-}: {
+/** How urgently a student's exam state needs the lecturer (IDE plugin), or null. */
+export function attentionTone(s: Student, plugin: boolean): Tone | null {
+  const state = plugin ? s.exam_state ?? null : null;
+  return plugin && needsAttention(s) && state ? examStateTone(state) : null;
+}
+
+function initialsOf(name: string): string {
+  return name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
+}
+
+function StudentCard({ s, plugin, showVersion, paramLabels, handlers }: {
   s: Student;
   plugin: boolean;
   showVersion: boolean;
   paramLabels?: ParamLabel[];
-  onModeChange: Props["onModeChange"];
-  onAskThem: Props["onAskThem"];
-  onViewChat: Props["onViewChat"];
-  onProctorLog: Props["onProctorLog"];
-  onViewSubmissions: Props["onViewSubmissions"];
-  onTerminalLog: Props["onTerminalLog"];
+  handlers: StudentHandlers;
 }) {
   const { t } = useLang();
-  const params = renderParams(s.variant_params, paramLabels);
-  const initials = s.username
-    .split(" ")
-    .map((p) => p[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
-  // The tutor mode the lecturer just picked, shown until the server's next
-  // list says what it really is (the page shows a message if the change failed).
-  const [pending, setPending] = useState<{ mode: Mode; settled: boolean } | null>(null);
-  useEffect(() => { setPending((p) => (p?.settled ? null : p)); }, [s]);
-  const saving = pending != null && !pending.settled;
-  const changeMode = async (mode: Mode) => {
-    setPending({ mode, settled: false });
-    try {
-      // The page's handler is async: wait for it, so the control stays busy until it answers.
-      const done: unknown = onModeChange(s.session_id, mode);
-      await done;
-    } catch {
-      // The page reports a failed change itself.
-    } finally {
-      setPending({ mode, settled: true });
-    }
-  };
-
-  // The IDE plugin's exam signals. Running the exam client at all means at
-  // least an `exam_started` event exists.
-  const examClient = plugin && (s.exam_state != null || s.focus_alerts > 0);
-  const terminalAlerts = plugin ? s.terminal_alerts ?? 0 : 0;
-  const usesTerminal = plugin && ((s.terminal_count ?? 0) > 0 || terminalAlerts > 0);
-  const alerts = plugin ? alertTotal(s) : 0;
-  const pastes = plugin ? s.paste_count ?? 0 : 0;
-  const grade = plugin && s.recommended_grade != null ? Math.round(s.grade_override ?? s.recommended_grade) : null;
   const state = plugin ? s.exam_state ?? null : null;
   const attention = plugin && needsAttention(s);
-  const tone: Tone | null = attention && state ? examStateTone(state) : null;
-  const submissions = s.submission_count ?? 0;
+  const tone = attentionTone(s, plugin);
 
   const cardCls = [
     "vc-card", "vc-students-card",
@@ -290,12 +250,11 @@ function StudentCard({
   ].filter(Boolean).join(" ");
   const avatarCls = ["vc-students-avatar", tone ? `vc-students-avatar--${tone === "neutral" ? "muted" : tone}` : ""]
     .filter(Boolean).join(" ");
-  const badges = (showVersion && !!s.variant) || s.probe_count > 0 || terminalAlerts > 0 || pastes > 0 || grade != null;
 
   return (
     <article className={cardCls} aria-labelledby={`vc-student-${s.session_id}`}>
       <div className="vc-students-card__head">
-        <span className={avatarCls} aria-hidden="true">{initials}</span>
+        <span className={avatarCls} aria-hidden="true">{initialsOf(s.username)}</span>
         <div className="vc-students-card__who">
           <h3 className="vc-students-card__name u-truncate" id={`vc-student-${s.session_id}`} title={s.username}>
             <span dir={textDir(s.username)}>{s.username}</span>
@@ -305,6 +264,34 @@ function StudentCard({
         {state && <ExamStatePill state={state} detail={s.exam_state_detail} flash={attention} className="vc-students-pill" />}
       </div>
 
+      <StudentSignals s={s} plugin={plugin} showVersion={showVersion} paramLabels={paramLabels} />
+
+      <div className="vc-students-card__foot">
+        <TutorMode s={s} onModeChange={handlers.onModeChange} />
+        <StudentActions s={s} handlers={handlers} />
+        <StudentTools s={s} plugin={plugin} handlers={handlers} />
+      </div>
+    </article>
+  );
+}
+
+/** What the lecturer should know about a student at a glance: the IDE plugin's
+ *  exam notes, the questions asked, pastes, the grade, the version's parameters. */
+export function StudentSignals({ s, plugin, showVersion, paramLabels }: {
+  s: Student;
+  plugin: boolean;
+  showVersion: boolean;
+  paramLabels?: ParamLabel[];
+}) {
+  const { t } = useLang();
+  const params = renderParams(s.variant_params, paramLabels);
+  const terminalAlerts = plugin ? s.terminal_alerts ?? 0 : 0;
+  const pastes = plugin ? s.paste_count ?? 0 : 0;
+  const grade = plugin && s.recommended_grade != null ? Math.round(s.grade_override ?? s.recommended_grade) : null;
+  const badges = (showVersion && !!s.variant) || s.probe_count > 0 || terminalAlerts > 0 || pastes > 0 || grade != null;
+
+  return (
+    <>
       {plugin && s.exam_state === "other_window" && s.exam_state_detail && (
         <div className="vc-students-note u-warning u-bold">
           <AppWindow aria-hidden="true" />
@@ -360,47 +347,86 @@ function StudentCard({
           ))}
         </div>
       )}
+    </>
+  );
+}
 
-      <div className="vc-students-card__foot">
-        <label className="vc-students-mode" title={t("sgModeLegend")}>
-          {t("sgMode")}
-          <Select small inline value={pending?.mode ?? s.mode} disabled={saving} aria-busy={saving || undefined}
-                  onChange={(e) => void changeMode(e.target.value as Mode)}>
-            <option value="mentor">{t("sgMentor")}</option>
-            <option value="coding_partner">{t("sgCodingPartner")}</option>
-          </Select>
-          {saving && <><span className="vc-spinner" aria-hidden="true" /><span className="u-sr">{t("sgSaving")}</span></>}
-        </label>
-        <div className="vc-students-actions">
-          <Button variant="primary" size="sm" icon={<MessagesSquare />} onClick={() => onViewChat(s.session_id)}>
-            {t("viewChat")}
-          </Button>
-          <Button size="sm" icon={<CircleHelp />} title={t("sgAskTitle")} onClick={() => onAskThem(s.session_id)}>
-            {t("askThem")}
-          </Button>
-        </div>
-        {plugin && (
-          <div className="vc-students-tools">
-            <Button variant="quiet" size="sm" icon={<FileUp />} title={t("openSubmissionsTitle")}
-                    onClick={() => onViewSubmissions(s.session_id)}>
-              {submissions > 0 ? t("submissionsN", { n: submissions }) : t("submissions")}
-            </Button>
-            {examClient && (
-              <Button variant={alerts > 0 ? "danger-soft" : "quiet"} size="sm" icon={<Video />}
-                      title={t("openProctorLogTitle")} onClick={() => onProctorLog(s.session_id)}>
-                {alerts > 0 ? t("alerts", { n: alerts }) : t("proctorLog")}
-              </Button>
-            )}
-            {usesTerminal && (
-              <Button variant={terminalAlerts > 0 ? "danger-soft" : "quiet"} size="sm" icon={<SquareTerminal />}
-                      title={t("openTerminalLogTitle")} onClick={() => onTerminalLog(s.session_id)}>
-                {t("terminalN", { n: s.terminal_count ?? 0 })}
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-    </article>
+/** The tutor's mode for this student (mentor / coding partner). */
+export function TutorMode({ s, onModeChange }: { s: Student; onModeChange: StudentHandlers["onModeChange"] }) {
+  const { t } = useLang();
+  // The tutor mode the lecturer just picked, shown until the server's next
+  // list says what it really is (the page shows a message if the change failed).
+  const [pending, setPending] = useState<{ mode: Mode; settled: boolean } | null>(null);
+  useEffect(() => { setPending((p) => (p?.settled ? null : p)); }, [s]);
+  const saving = pending != null && !pending.settled;
+  const changeMode = async (mode: Mode) => {
+    setPending({ mode, settled: false });
+    try {
+      // The page's handler is async: wait for it, so the control stays busy until it answers.
+      await onModeChange(s.session_id, mode);
+    } catch {
+      // The page reports a failed change itself.
+    } finally {
+      setPending({ mode, settled: true });
+    }
+  };
+  return (
+    <label className="vc-students-mode" title={t("sgModeLegend")}>
+      {t("sgMode")}
+      <Select small inline value={pending?.mode ?? s.mode} disabled={saving} aria-busy={saving || undefined}
+              onChange={(e) => void changeMode(e.target.value as Mode)}>
+        <option value="mentor">{t("sgMentor")}</option>
+        <option value="coding_partner">{t("sgCodingPartner")}</option>
+      </Select>
+      {saving && <><span className="vc-spinner" aria-hidden="true" /><span className="u-sr">{t("sgSaving")}</span></>}
+    </label>
+  );
+}
+
+/** "View chat" and "Ask them". */
+export function StudentActions({ s, handlers }: { s: Student; handlers: StudentHandlers }) {
+  const { t } = useLang();
+  return (
+    <div className="vc-students-actions">
+      <Button variant="primary" size="sm" icon={<MessagesSquare />} onClick={() => handlers.onViewChat(s)}>
+        {t("viewChat")}
+      </Button>
+      <Button size="sm" icon={<CircleHelp />} title={t("sgAskTitle")} onClick={() => handlers.onAskThem(s)}>
+        {t("askThem")}
+      </Button>
+    </div>
+  );
+}
+
+/** The IDE plugin's records of a student: submissions, the exam log, the terminal. */
+export function StudentTools({ s, plugin, handlers }: { s: Student; plugin: boolean; handlers: StudentHandlers }) {
+  const { t } = useLang();
+  if (!plugin) return null;
+  // Running the exam client at all means at least an `exam_started` event exists.
+  const examClient = s.exam_state != null || s.focus_alerts > 0;
+  const terminalAlerts = s.terminal_alerts ?? 0;
+  const usesTerminal = (s.terminal_count ?? 0) > 0 || terminalAlerts > 0;
+  const alerts = alertTotal(s);
+  const submissions = s.submission_count ?? 0;
+  return (
+    <div className="vc-students-tools">
+      <Button variant="quiet" size="sm" icon={<FileUp />} title={t("openSubmissionsTitle")}
+              onClick={() => handlers.onViewSubmissions(s)}>
+        {submissions > 0 ? t("submissionsN", { n: submissions }) : t("submissions")}
+      </Button>
+      {examClient && (
+        <Button variant={alerts > 0 ? "danger-soft" : "quiet"} size="sm" icon={<Video />}
+                title={t("openProctorLogTitle")} onClick={() => handlers.onProctorLog(s)}>
+          {alerts > 0 ? t("alerts", { n: alerts }) : t("proctorLog")}
+        </Button>
+      )}
+      {usesTerminal && (
+        <Button variant={terminalAlerts > 0 ? "danger-soft" : "quiet"} size="sm" icon={<SquareTerminal />}
+                title={t("openTerminalLogTitle")} onClick={() => handlers.onTerminalLog(s)}>
+          {t("terminalN", { n: s.terminal_count ?? 0 })}
+        </Button>
+      )}
+    </div>
   );
 }
 

@@ -1,12 +1,14 @@
 import "../styles/pacing.css";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle, Check, CheckCircle2, ChevronDown, FastForward, Gauge, HelpCircle, Hourglass, Info, Lock, LockOpen,
-  PenLine, Undo2, User, Users,
+  PenLine, Search, Undo2, User, Users,
 } from "lucide-react";
 import { api } from "../api";
-import type { PacingAnswer, PacingCourse, PacingOverview, PacingQuizItem, PacingStep, PacingStudent } from "../types";
+import type {
+  PacingAnswer, PacingCourse, PacingOverview, PacingQuizItem, PacingStep, PacingStudent, ParamLabel, Student,
+} from "../types";
 import { useLang, type Translate } from "../i18n";
 import { describeError } from "../lib/errors";
 import {
@@ -14,6 +16,11 @@ import {
   type ConfirmOptions,
 } from "./ui";
 import { textDir } from "../lib/textDir";
+import { useFeatures } from "../app/features";
+import {
+  attentionTone, ExamStatePill, StudentActions, StudentSignals, StudentTools, TutorMode, type StudentHandlers,
+} from "./StudentGrid";
+import { needsAttention } from "../proctor";
 
 /** A step's name as the lecturer reads it: its label (A1, B2…), else its number. */
 function stepLabel(steps: PacingStep[], n: number): string {
@@ -38,10 +45,16 @@ function busiest(courses: PacingCourse[]): PacingCourse {
 /** Class-paced labs (pacing: class): how far the class got, the button that
  *  opens the next step for everyone, and what waits for the lecturer: outputs
  *  that didn't match, quiz answers graded too low, questions to approve. */
-export function PacingPanel({ exerciseId, quizSlot }: {
+export function PacingPanel({ exerciseId, quizSlot, live = [], handlers, paramLabels }: {
   exerciseId: string;
   /** Where the questions after steps are drawn: the bottom of the page (App.tsx). Without it, here. */
   quizSlot?: HTMLElement | null;
+  /** The exercise's students signed in in the last 30 minutes (GET /api/students): their
+   *  tutor mode, questions asked and the IDE plugin's signals join their row in the list. */
+  live?: Student[];
+  /** The buttons of a student's row: chat, "ask them", tutor mode, the plugin's records. */
+  handlers?: StudentHandlers;
+  paramLabels?: ParamLabel[];
 }) {
   const { t, dir } = useLang();
   const toast = useToast();
@@ -345,7 +358,8 @@ export function PacingPanel({ exerciseId, quizSlot }: {
         <AnswerReview exerciseId={exerciseId} courses={view.courses} items={view.quiz} steps={view.steps} onChange={load} />
       )}
       <Review exerciseId={exerciseId} course={course} steps={view.steps} onChange={load} />
-      <Students course={course} total={total} steps={view.steps} onChange={load} />
+      <Students exerciseId={exerciseId} course={course} courses={view.courses} total={total} steps={view.steps}
+                onChange={load} live={live} handlers={handlers} paramLabels={paramLabels} />
       {quizSlot === undefined && quiz}
       {quizSlot && createPortal(
         <section className="vc-card vc-pacing vc-pacing--quiz" aria-label={t("pacingQuiz")}>{quiz}</section>, quizSlot,
@@ -588,21 +602,55 @@ function AnswerReview({ exerciseId, courses, items, steps, onChange }: {
   );
 }
 
-/** Each student's step, the furthest behind first, with the steps the lecturer
- *  let them past although their output didn't match; "Move to step…" per student. */
-function Students({ course, total, steps, onChange }: {
-  course: PacingCourse; total: number; steps: PacingStep[]; onChange: () => void;
+/** A student who has a row in the class's progress but hasn't been active in the
+ *  last 30 minutes: what the row's buttons need to open their chat and dialogs. */
+function idleStudent(p: PacingStudent, exerciseId: string): Student {
+  return {
+    session_id: p.session_id, username: p.username, exercise: exerciseId, variant: "", mode: "mentor",
+    started_at: p.last_active_at, last_active_at: p.last_active_at, probe_count: 0,
+    focus_alerts: 0, last_focus_kind: null, last_focus_at: null, away: false,
+  };
+}
+
+/** The class's one student list: each student's step (the furthest behind first),
+ *  "Move to step…", the steps the lecturer let them past although their output
+ *  didn't match, and everything the student cards had: chat, "ask them", the
+ *  tutor's mode, questions asked, and the IDE plugin's records. Students signed
+ *  in to the lab who have no row in its progress (an earlier session, a lecturer
+ *  trying the lab) come last, so nobody signed in is missing from the page. */
+function Students({ exerciseId, course, courses, total, steps, onChange, live, handlers, paramLabels }: {
+  exerciseId: string; course: PacingCourse; courses: PacingCourse[]; total: number; steps: PacingStep[];
+  onChange: () => void; live: Student[]; handlers?: StudentHandlers; paramLabels?: ParamLabel[];
 }) {
   const { t } = useLang();
   const toast = useToast();
   const confirm = useConfirm();
+  const { plugin } = useFeatures();
+  const [query, setQuery] = useState("");
   const rows = [...course.students].sort((a, b) => a.current - b.current || a.username.localeCompare(b.username));
   const quizzing = rows.filter((s) => s.quiz_pending > 0).length;
   const held = rows.filter((s) => s.quiz_review > 0).length;
+  const liveById = useMemo(() => new Map(live.map((s) => [s.session_id, s])), [live]);
+  // Signed in now but in no course's progress (pacing lists each student's latest session only).
+  const extra = useMemo(() => {
+    const listed = new Set(courses.flatMap((c) => c.students.map((s) => s.session_id)));
+    return live.filter((s) => !listed.has(s.session_id));
+  }, [courses, live]);
+  // A version tells students apart only when they don't all have the same one.
+  const showVersion = useMemo(() => new Set(live.map((s) => s.variant)).size > 1, [live]);
+  const attention = plugin ? live.filter((s) => needsAttention(s)).length : 0;
+  const count = rows.length + extra.length;
   // Open or closed is the lecturer's choice; at first, open unless the class is large.
-  const [open, setOpen] = useState(rows.length <= 40);
+  const [open, setOpen] = useState(count <= 40);
   const [moving, setMoving] = useState<string | null>(null);
   const label = (n: number) => stepLabel(steps, n);
+
+  // With more than 8 students a search box appears (and stays while it holds text).
+  const searching = count > 8 || query !== "";
+  const q = query.trim().toLocaleLowerCase();
+  const match = (name: string) => !q || name.toLocaleLowerCase().includes(q);
+  const shownRows = rows.filter((s) => match(s.username));
+  const shownExtra = extra.filter((s) => match(s.username));
 
   // Back (their work from there on no longer counts), ahead (the steps between
   // are skipped and opened for them), or the step they are on (start it over).
@@ -641,47 +689,66 @@ function Students({ course, total, steps, onChange }: {
       <summary>
         <ChevronDown className="vc-pacing-chev" aria-hidden="true" />
         <span>{t("pacingStudents")}</span>
-        <span className="vc-badge vc-badge--count">{rows.length}</span>
+        <span className="vc-badge vc-badge--count">{count}</span>
         {quizzing > 0 && <span className="vc-badge vc-badge--info">{t("pacingQuizWaiting", { n: quizzing })}</span>}
         {held > 0 && <span className="vc-badge vc-badge--danger">{t("pacingAnswerWaiting", { n: held })}</span>}
+        {attention > 0 && <span className="vc-badge vc-badge--solid-danger">{t("pcStudentsAttention", { n: attention })}</span>}
       </summary>
-      {rows.length === 0 ? (
+      {searching && (
+        <div className="vc-pacing-students__tools">
+          <label className="vc-students-toolbar__search">
+            <span className="u-sr">{t("sgSearch")}</span>
+            <Search aria-hidden="true" />
+            <Input type="search" small value={query} placeholder={t("sgSearch")}
+                   onChange={(e) => setQuery(e.target.value)} />
+          </label>
+        </div>
+      )}
+      {count === 0 ? (
         <EmptyState icon={<Users />} title={t("pacingNoStudents")}>{t("pcNoStudentsText")}</EmptyState>
+      ) : shownRows.length + shownExtra.length === 0 ? (
+        <EmptyState icon={<Search />} title={t("sgNoMatch", { q: query.trim() })}
+                    actions={<Button size="sm" onClick={() => setQuery("")}>{t("sgClearSearch")}</Button>} />
       ) : (
         <ul className="vc-pacing-students">
-          {rows.map((s) => {
+          {shownRows.map((s) => {
             const finished = s.current > total;
             const back = steps.filter((st) => st.n < s.current);
             const ahead = steps.filter((st) => st.n > s.current);
             const here = steps.find((st) => st.n === s.current);
+            const now = liveById.get(s.session_id);
             return (
-              <li key={s.session_id} className="vc-pacing-student">
-                <div className="vc-pacing-student__row">
-                  <span className="vc-pacing-student__name">{s.username}</span>
+              <StudentRow
+                key={s.session_id} student={now ?? idleStudent(s, exerciseId)} signedIn={!!now} plugin={plugin}
+                showVersion={showVersion} paramLabels={paramLabels} handlers={handlers}
+                step={
                   <span className={`vc-badge ${finished ? "vc-badge--success" : "vc-badge--info"}`}>
                     {finished ? t("pacingDone") : t("pacingOnStep", { label: s.current_label ?? "" })}
                   </span>
-                  {(s.waiting.length > 0 || s.quiz_pending > 0 || s.quiz_review > 0) && (
-                    <span className="vc-pacing-student__marks">
-                      {s.waiting.length > 0 && (
-                        <span className="u-warning" title={t("pcRowOutput")}>
-                          <Hourglass aria-hidden="true" /><span className="u-sr">{t("pcRowOutput")}</span>
-                        </span>
-                      )}
-                      {s.quiz_pending > 0 && (
-                        <span className="u-brand" title={t("pcRowAnswering")}>
-                          <HelpCircle aria-hidden="true" /><span className="u-sr">{t("pcRowAnswering")}</span>
-                        </span>
-                      )}
-                      {s.quiz_review > 0 && (
-                        <span className="u-danger" title={t("pcRowAnswer")}>
-                          <PenLine aria-hidden="true" /><span className="u-sr">{t("pcRowAnswer")}</span>
-                        </span>
-                      )}
-                    </span>
-                  )}
+                }
+                marks={(s.waiting.length > 0 || s.quiz_pending > 0 || s.quiz_review > 0) && (
+                  <span className="vc-pacing-student__marks">
+                    {s.waiting.length > 0 && (
+                      <span className="u-warning" title={t("pcRowOutput")}>
+                        <Hourglass aria-hidden="true" /><span className="u-sr">{t("pcRowOutput")}</span>
+                      </span>
+                    )}
+                    {s.quiz_pending > 0 && (
+                      <span className="u-brand" title={t("pcRowAnswering")}>
+                        <HelpCircle aria-hidden="true" /><span className="u-sr">{t("pcRowAnswering")}</span>
+                      </span>
+                    )}
+                    {s.quiz_review > 0 && (
+                      <span className="u-danger" title={t("pcRowAnswer")}>
+                        <PenLine aria-hidden="true" /><span className="u-sr">{t("pcRowAnswer")}</span>
+                      </span>
+                    )}
+                  </span>
+                )}
+                move={
                   <Select
-                    small value="" disabled={moving === s.session_id} aria-label={t("pcMoveAria", { who: s.username })}
+                    small className="vc-pacing-student__move" value="" disabled={moving === s.session_id}
+                    aria-label={t("pcMoveAria", { who: s.username })}
                     onChange={(e) => { if (e.target.value !== "") move(s, Number(e.target.value)); }}
                   >
                     <option value="">{t("pacingMove")}</option>
@@ -689,7 +756,8 @@ function Students({ course, total, steps, onChange }: {
                     {here && <optgroup label={t("pcMoveAgain")}>{option(here)}</optgroup>}
                     {ahead.length > 0 && <optgroup label={t("pcMoveAhead")}>{ahead.map(option)}</optgroup>}
                   </Select>
-                </div>
+                }
+              >
                 {(s.skipped.length > 0 || s.released_to) && (
                   <div className="vc-pacing-student__more">
                     {s.skipped.length > 0 && (
@@ -708,12 +776,70 @@ function Students({ course, total, steps, onChange }: {
                     <pre dir="ltr" className="vc-pre vc-pre--light vc-pacing-pre">{f.output}</pre>
                   </details>
                 ))}
-              </li>
+              </StudentRow>
             );
           })}
+          {shownExtra.map((s) => (
+            <StudentRow
+              key={s.session_id} student={s} signedIn plugin={plugin} showVersion={showVersion}
+              paramLabels={paramLabels} handlers={handlers}
+              step={<span className="vc-badge" title={t("pcNotInProgressTitle")}>{t("pcNotInProgress")}</span>}
+            />
+          ))}
         </ul>
       )}
     </details>
+  );
+}
+
+/** One student in the class list: name, when they were last active, their step,
+ *  then what they did and the buttons that act on them. */
+function StudentRow({ student: s, signedIn, plugin, showVersion, paramLabels, handlers, step, marks, move, children }: {
+  student: Student;
+  /** Active in the last 30 minutes: the live data (tutor mode, exam signals) is real. */
+  signedIn: boolean;
+  plugin: boolean;
+  showVersion: boolean;
+  paramLabels?: ParamLabel[];
+  handlers?: StudentHandlers;
+  step: ReactNode;
+  marks?: ReactNode;
+  move?: ReactNode;
+  children?: ReactNode;
+}) {
+  const { t } = useLang();
+  const tone = signedIn ? attentionTone(s, plugin) : null;
+  const state = signedIn && plugin ? s.exam_state ?? null : null;
+  return (
+    <li className={`vc-pacing-student${tone ? " proctor-pulse" : ""}`} data-tone={tone ?? undefined}>
+      <div className="vc-pacing-student__row">
+        <div className="vc-pacing-student__who">
+          <span className="vc-pacing-student__name" dir={textDir(s.username)}>{s.username}</span>
+          <span className="vc-pacing-student__meta">{t("lastActive")} <Time value={s.last_active_at} /></span>
+        </div>
+        {step}
+        {marks}
+        {state && <ExamStatePill state={state} detail={s.exam_state_detail} flash={tone != null} className="vc-students-pill" />}
+      </div>
+      {signedIn && <StudentSignals s={s} plugin={plugin} showVersion={showVersion} paramLabels={paramLabels} />}
+      {children}
+      {(handlers || move) && (
+        <div className="vc-pacing-student__foot">
+          {(move || (handlers && signedIn)) && (
+            <div className="vc-pacing-student__controls">
+              {handlers && signedIn && <TutorMode s={s} onModeChange={handlers.onModeChange} />}
+              {move}
+            </div>
+          )}
+          {handlers && (
+            <div className="vc-pacing-student__buttons">
+              <StudentActions s={s} handlers={handlers} />
+              <StudentTools s={s} plugin={plugin} handlers={handlers} />
+            </div>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 
