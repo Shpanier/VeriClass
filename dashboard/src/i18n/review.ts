@@ -76,6 +76,7 @@ export const reviewStrings = defineStrings(
     reviewKindNote: "Lecturer's note",
     reviewKindReturned: "Sent back",
     reviewKindReset: "Reset",
+    reviewKindRestart: "Started over",
     reviewKindCancelled: "Question withdrawn",
     reviewKindTutor: "Tutor",
 
@@ -246,6 +247,7 @@ export const reviewStrings = defineStrings(
     reviewKindNote: "הערת המרצה",
     reviewKindReturned: "הוחזר",
     reviewKindReset: "איפוס",
+    reviewKindRestart: "התחלה מחדש",
     reviewKindCancelled: "שאלה בוטלה",
     reviewKindTutor: "העוזר",
 

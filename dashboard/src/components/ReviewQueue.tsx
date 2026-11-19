@@ -101,6 +101,7 @@ export function entryLabel(e: Pick<ReviewChatEntry, "author" | "kind">): StringK
     case "note": return "reviewKindNote";
     case "returned": return "reviewKindReturned";
     case "reset": return "reviewKindReset";
+    case "restart": return "reviewKindRestart";
     case "cancelled": return "reviewKindCancelled";
     default: return "reviewKindTutor";
   }

@@ -155,14 +155,19 @@ async def ask(req: AskRequest, request: Request, user: dict = Depends(deps.curre
 
 
 def _history(session_id: str, before_id: int | None = None) -> list[dict]:
-    """The last 20 non-empty turns, oldest first (only those before [before_id])."""
+    """The last 20 non-empty turns, oldest first (only those before [before_id]),
+    since the session last started over (backend/transcript.py restarted_at)."""
+    since = transcript.restarted_at(session_id)
+    args: list = [session_id]
+    sql = "SELECT role, body FROM messages WHERE session_id = ? AND trim(body) != '' "
+    if before_id is not None:
+        sql += "AND id < ? "
+        args.append(before_id)
+    if since:
+        sql += "AND created_at >= ? "
+        args.append(since)
     with db.conn() as c:
-        rows = c.execute(
-            "SELECT role, body FROM messages WHERE session_id = ? AND trim(body) != '' "
-            + ("AND id < ? " if before_id is not None else "")
-            + "ORDER BY created_at DESC, id DESC LIMIT 20",
-            (session_id, before_id) if before_id is not None else (session_id,),
-        ).fetchall()
+        rows = c.execute(sql + "ORDER BY created_at DESC, id DESC LIMIT 20", args).fetchall()
     return [{"role": r["role"], "content": r["body"]} for r in reversed(rows)]
 
 

@@ -5,7 +5,7 @@ per-session transcript and prior probes straight from SQLite and hand them to
 the agent task. Everything that leaves for Gemini is PII-scrubbed first via the
 existing `sanitize`.
 """
-from backend import db
+from backend import db, transcript
 from backend.sanitize import sanitize
 
 
@@ -15,11 +15,14 @@ def session_transcript(session_id: str, limit: int = 40) -> str:
     Mirrors the history query in routes/ask.py; returns sanitized text so it is
     safe to send to the cloud model.
     """
+    # Since the session last started over (the teacher sent it back to the first step).
+    since = transcript.restarted_at(session_id)
     with db.conn() as c:
         rows = c.execute(
             "SELECT role, body FROM messages WHERE session_id = ? "
-            "ORDER BY created_at DESC LIMIT ?",
-            (session_id, limit),
+            + ("AND created_at >= ? " if since else "")
+            + "ORDER BY created_at DESC LIMIT ?",
+            (session_id, since, limit) if since else (session_id, limit),
         ).fetchall()
     if not rows:
         return "(no conversation yet)"

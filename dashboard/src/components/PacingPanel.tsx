@@ -163,11 +163,12 @@ export function PacingPanel({ exerciseId, quizSlot }: {
   };
 
   // Everyone back to step n: students past it go back; the others stay.
+  // Students on step n start it over too; back to the first step: a fresh chat for each.
   const resetAll = async (n: number) => {
-    const k = course.students.filter((s) => s.current > n).length;
+    const k = course.students.filter((s) => s.current >= n).length;
     if (!(await confirm({
       title: t("pcResetAllTitle", { who, label: label(n) }),
-      body: t("pcResetAllBody", { k, label: label(n) }),
+      body: n === 1 ? t("pcResetAllFirstBody", { k }) : t("pcResetAllBody", { k, label: label(n) }),
       confirmLabel: t("pcResetAllBtn", { label: label(n) }),
       danger: true,
     }))) return;
@@ -608,7 +609,11 @@ function Students({ course, total, steps, onChange }: {
   const move = async (s: PacingStudent, n: number) => {
     const name = s.username;
     const lbl = label(n);
-    const ask: ConfirmOptions = n < s.current
+    // Back to the first step: the lab starts over in a fresh chat (the earlier one is kept).
+    const ask: ConfirmOptions = n === 1
+      ? { title: t("pcRestartTitle", { who: name }), body: t("pcRestartBody"),
+          confirmLabel: t("pcMoveAgainBtn"), danger: true }
+      : n < s.current
       ? { title: t("pcMoveBackTitle", { who: name, label: lbl }), body: t("pcMoveBackBody", { label: lbl }),
           confirmLabel: t("pcMoveBackBtn"), danger: true }
       : n > s.current

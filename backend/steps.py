@@ -346,7 +346,9 @@ def reset_to(session_id: str, n: int, note: Optional[str] = None, again: bool = 
     quiz questions about those steps, which are asked again when the student
     does the steps again; questions still open about them are withdrawn.
     `note`, when given, goes into the session's transcript, so the student's
-    chat shows it (and stops whatever the student was doing there). `again`:
+    chat shows it (and stops whatever the student was doing there); back to
+    the first step it is a fresh start (kind 'restart': a new login shows the
+    chat from there, backend/transcript.py). `again`:
     also when n is the step the student is on (start that step over); without
     it a student already at or before n is left alone. Returns the step the
     session was on (`from`) and the step it is on now (`to`)."""
@@ -386,8 +388,9 @@ def reset_to(session_id: str, n: int, note: Optional[str] = None, again: bool = 
     if moved:
         _wake(waiting)
         if note:
-            transcript.record(session_id, "system", note, kind="reset", step=n, origin="server")
-    return {"session_id": session_id, "from": before, "to": current_step(session_id)}
+            transcript.record(session_id, "system", note, kind="restart" if n == 1 else "reset", step=n,
+                              origin="server")
+    return {"session_id": session_id, "from": before, "to": current_step(session_id), "reset": moved}
 
 
 def skip_to(session_id: str, n: int, note: Optional[str] = None) -> dict[str, Any]:

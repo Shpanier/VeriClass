@@ -757,11 +757,15 @@ def delete_stale(req: DeleteStaleRequest, teacher: dict = Depends(deps.require_t
 
 @router.get("/reviews/open/{session_id}")
 def open_questions(session_id: str, user: dict = Depends(deps.current_user)):
-    """The session's questions still with the teacher (for a chat that comes back)."""
+    """The session's questions still with the teacher (for a chat that comes back);
+    after a fresh start (backend/transcript.py) only the ones asked since: the
+    earlier ones belong to the earlier chat (the teacher still has them)."""
     deps.require_owns_session(session_id, user)
+    since = transcript.restarted_at(session_id)
     with db.conn() as c:
         rows = c.execute("SELECT id, question, created_at FROM pending_reviews WHERE session_id = ? "
-                         "AND status = 'pending' ORDER BY id", (session_id,)).fetchall()
+                         "AND status = 'pending' " + ("AND created_at >= ? " if since else "") + "ORDER BY id",
+                         (session_id, since) if since else (session_id,)).fetchall()
     return [{"id": r["id"], "question": r["question"], "created_at": r["created_at"],
              "waiting": is_waiting(r["id"])} for r in rows]
 

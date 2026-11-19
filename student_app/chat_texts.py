@@ -45,6 +45,15 @@ TEXTS: dict[str, tuple[str, str]] = {
 
     # --- coming back to a lab ---
     "older_hidden": ("_…הודעות ישנות יותר לא מוצגות._", "_…older messages aren't shown._"),
+    # --- a fresh start: the lecturer sent the student back to the first step ---
+    "earlier_button": ("📂 הצ'אט הקודם", "📂 Earlier chat"),
+    "earlier_head": ("📂 **הצ'אט הקודם שלכם בתרגיל הזה** (לפני שהתחלתם מחדש):",
+                     "📂 **Your earlier chat in this exercise** (before you started over):"),
+    "earlier_end": ("📂 _סוף הצ'אט הקודם. ממשיכים מהשלב שאתם בו עכשיו._",
+                    "📂 _End of the earlier chat. Carry on from the step you are on now._"),
+    "earlier_none": ("אין צ'אט קודם להציג.", "There is no earlier chat to show."),
+    "restart_reload": ("_ההודעות הקודמות נשארות למעלה עד שתרעננו את הדף._",
+                       "_The earlier messages stay above until you reload the page._"),
     "resumed": ("↩️ **חזרתם לתרגיל {title}.** כל מה שהיה בו עד עכשיו מופיע למעלה, וממשיכים מאותו מקום.",
                 "↩️ **Welcome back to {title}.** Everything you did in it is shown above, and you continue "
                 "from the same place."),

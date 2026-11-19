@@ -20,15 +20,23 @@ def _exercise(session: dict) -> Optional[dict]:
 
 @router.get("/transcript/{session_id}")
 def read(session_id: str, after: int = 0, origin: Optional[Literal["client", "server"]] = None,
-         exclude_client: Optional[str] = None, user: dict = Depends(deps.current_user)):
+         exclude_client: Optional[str] = None, from_restart: bool = False, before: Optional[int] = None,
+         user: dict = Depends(deps.current_user)):
     """Entries after id `after` (0 = from the start, the latest CHAT_HISTORY_REPLAY_MAX
     of them); origin 'server' = only the server's own notes; exclude_client =
-    leave out what this chat wrote itself."""
+    leave out what this chat wrote itself. from_restart: only what came after
+    the latest fresh start (the teacher sent the student back to the first
+    step); `restart` is that note and `earlier` how many entries came before
+    it. before: only the entries before that id (the earlier chat)."""
     s = deps.require_owns_session(session_id, user)
     if not transcript.enabled(_exercise(s)):
-        return {"enabled": False, "entries": [], "truncated": False, "last_id": 0}
-    out = transcript.entries(session_id, after=after, origin=origin, exclude_client=exclude_client)
-    return {"enabled": True, **out, "last_id": transcript.last_id(session_id)}
+        return {"enabled": False, "entries": [], "truncated": False, "last_id": 0, "restart": None, "earlier": 0}
+    restart = transcript.last_restart(session_id) if from_restart else None
+    if restart and after < restart["id"]:
+        after = restart["id"]
+    out = transcript.entries(session_id, after=after, origin=origin, exclude_client=exclude_client, before=before)
+    return {"enabled": True, **out, "last_id": transcript.last_id(session_id), "restart": restart,
+            "earlier": transcript.count_before(session_id, restart["id"]) if restart else 0}
 
 
 class Entry(BaseModel):

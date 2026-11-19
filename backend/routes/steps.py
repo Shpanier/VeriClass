@@ -141,7 +141,8 @@ class CourseResetRequest(BaseModel):
 @router.post("/exercises/{exercise_id}/reset")
 def reset_course(exercise_id: str, req: CourseResetRequest, teacher: dict = Depends(deps.require_teacher)):
     """Send every student of a course (each one's latest session in this
-    exercise) back to step `step`. Students already at or before it stay."""
+    exercise) back to step `step`: the ones past it go back, the ones on it
+    start it over (back to the first step: a fresh chat). Students before it stay."""
     ex = _step_lab(exercise_id)
     with db.conn() as c:
         rows = c.execute(
@@ -152,7 +153,13 @@ def reset_course(exercise_id: str, req: CourseResetRequest, teacher: dict = Depe
     ids = list(latest.values())
     if req.session_ids is not None:
         ids = [i for i in ids if i in set(req.session_ids)]
-    note = _reset_note(ex, max(1, req.step))
-    results = [steps.reset_to(sid, req.step, note) for sid in ids]
-    return {"sessions": len(results), "moved": sum(1 for r in results if r["to"] < r["from"]),
-            "results": results}
+    target = max(1, req.step)
+    note = _reset_note(ex, target)
+    results = []
+    for sid in ids:
+        cur = steps.current_step(sid)
+        if cur < target:
+            results.append({"session_id": sid, "from": cur, "to": cur, "reset": False})
+        else:
+            results.append(steps.reset_to(sid, target, note, again=True))
+    return {"sessions": len(results), "moved": sum(1 for r in results if r["reset"]), "results": results}

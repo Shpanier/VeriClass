@@ -609,6 +609,14 @@ def move_note(ex: dict[str, Any], n: int, how: str) -> str:
     """The note the student's chat shows when the teacher moves them to step n.
     how: back, forward, or again (the step they are on, from its start)."""
     lbl = label(ex, n)
+    if n == 1 and how != "forward":
+        # Back to the beginning: a fresh start (backend/transcript.py, kind 'restart').
+        if hebrew(ex):
+            return ("⏮️ **המרצה החזיר אתכם להתחלה.** מתחילים את התרגיל מחדש, בצ'אט נקי: מה שעשיתם עד עכשיו "
+                    "כבר לא נחשב. הצ'אט הקודם שמור, ואפשר לפתוח אותו בכפתור «📂 הצ'אט הקודם».")
+        return ("⏮️ **Your teacher started you over from the beginning.** The lab starts again in a clean "
+                "chat, and your work so far no longer counts. Your earlier chat is kept: open it with "
+                "“📂 Earlier chat”.")
     if hebrew(ex):
         head = "⏸️ **המרצה עצר אתכם.**"
         if how == "forward":

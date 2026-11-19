@@ -487,7 +487,7 @@ def test_chat_history_can_be_switched_off(client):
     try:
         assert _log(client, h, sid, {"author": "tutor", "content": "x"}) == []
         t = client.get(f"/api/transcript/{sid}", headers=h).json()
-        assert t == {"enabled": False, "entries": [], "truncated": False, "last_id": 0}
+        assert t == {"enabled": False, "entries": [], "truncated": False, "last_id": 0, "restart": None, "earlier": 0}
     finally:
         ex.pop("chat_history")
     assert client.get(f"/api/transcript/{sid}", headers=h).json()["entries"] == []  # nothing was kept
@@ -512,7 +512,7 @@ def test_teacher_sends_a_student_back_and_the_chat_hears_it(client, teacher, mon
 
     # Back to A2: step 2 and later no longer count, the waiting output is gone.
     r = client.post(f"/api/sessions/{sid}/reset", headers=teacher, json={"step": 2})
-    assert r.status_code == 200 and r.json() == {"session_id": sid, "from": 3, "to": 2}
+    assert r.status_code == 200 and r.json() == {"session_id": sid, "from": 3, "to": 2, "reset": True}
     st = _state(client, h, sid)
     assert st["current"] == 2 and st["open"] and not st["waiting_review"]
     notes = client.get(f"/api/transcript/{sid}", headers=h, params={"origin": "server"}).json()["entries"]
@@ -1115,7 +1115,8 @@ def test_moving_a_student_back_drops_their_answers_and_asks_again(client, teache
         assert _checks(sid) == [(1, "reset"), (2, "reset")]
         rows = _pacing_student(client, teacher, "PCE-MV3")["quiz"]
         assert [(q["status"], q["answer"]) for q in rows] == [("reset", "6.8")]  # kept, no longer counts
-        assert "stopped" in _server_notes(client, h, sid)[-1]["content"]
+        note = _server_notes(client, h, sid)[-1]  # back to the first step: a fresh start
+        assert note["kind"] == "restart" and "over from the beginning" in note["content"]
         # Done again: the question is asked again.
         assert _finish(client, h, sid, 1, GOOD)["quiz"] == 1
         assert len(client.get(f"/api/probes/pending/{sid}", headers=h).json()) == 1
@@ -1431,3 +1432,92 @@ def test_skipped_steps_are_no_submissions_in_the_report_or_the_attendance(client
         assert (row["step_submissions"], row["steps_approved"]) == (1, 1)
     finally:
         courses.delete_meeting(meeting["id"])
+
+
+def test_back_to_the_first_step_is_a_fresh_start(client, teacher):
+    """The teacher sends a student back to the first step: the note is a
+    'restart', a new login replays only what came after it, the earlier chat
+    is there on demand, and the tutor's memory starts there too."""
+    from backend.routes import ask as ask_mod
+    from backend.agents import memory
+
+    h, sid = _student(client, "PCE-FR1")
+    _log(client, h, sid, {"author": "tutor", "kind": "brief", "content": "Welcome"},
+         {"author": "tutor", "kind": "step", "step": 1, "content": "Step A1"},
+         {"author": "student", "kind": "output", "step": 1, "content": "not right"})
+    with db.conn() as c:
+        c.execute("INSERT INTO messages (session_id, role, body, mode_at_time) VALUES (?, 'user', 'old question', 'mentor')",
+                  (sid,))
+        c.execute("UPDATE messages SET created_at = datetime('now', '-1 minute') WHERE session_id = ?", (sid,))
+    assert [m["content"] for m in ask_mod._history(sid)] == ["old question"]
+    with db.conn() as c:
+        c.execute("INSERT INTO pending_reviews (session_id, question, status, created_at, variant_nudge, variant_normal, "
+                  "variant_more) VALUES (?, 'old question', 'pending', datetime('now', '-1 minute'), '', '', '')", (sid,))
+    assert len(client.get(f"/api/reviews/open/{sid}", headers=h).json()) == 1
+
+    # On the first step, with nothing to undo: "start it over" is still a fresh start.
+    r = _move(client, teacher, sid, 1)
+    assert (r["from"], r["to"], r["how"], r["reset"]) == (1, 1, "again", True)
+    note = _server_notes(client, h, sid)[-1]
+    assert (note["kind"], note["step"]) == ("restart", 1) and "beginning" in note["content"]
+
+    t = client.get(f"/api/transcript/{sid}", headers=h, params={"from_restart": "true"}).json()
+    assert t["entries"] == [] and t["restart"]["id"] == note["id"] and t["earlier"] == 3
+    earlier = client.get(f"/api/transcript/{sid}", headers=h, params={"before": note["id"]}).json()["entries"]
+    assert [e["content"] for e in earlier] == ["Welcome", "Step A1", "not right"]
+    # Without from_restart (the teacher's view, other clients): everything, as before.
+    assert len(client.get(f"/api/transcript/{sid}", headers=h).json()["entries"]) == 4
+
+    # A question asked before the restart is no longer listed to the student (the teacher still has it).
+    assert client.get(f"/api/reviews/open/{sid}", headers=h).json() == []
+
+    # What comes after the restart is replayed; the tutor forgets the old conversation.
+    _log(client, h, sid, {"author": "tutor", "kind": "brief", "content": "Welcome again"})
+    t = client.get(f"/api/transcript/{sid}", headers=h, params={"from_restart": "true"}).json()
+    assert [e["content"] for e in t["entries"]] == ["Welcome again"]
+    assert ask_mod._history(sid) == []
+    assert "old question" not in memory.session_transcript(sid)
+    with db.conn() as c:
+        c.execute("INSERT INTO messages (session_id, role, body, mode_at_time) VALUES (?, 'user', 'new question', 'mentor')",
+                  (sid,))
+    assert [m["content"] for m in ask_mod._history(sid)] == ["new question"]
+
+    # Back to a later step: a plain reset, the whole chat stays.
+    _finish(client, h, sid, 1, GOOD)
+    _finish(client, h, sid, 2)
+    _move(client, teacher, sid, 2)
+    assert _server_notes(client, h, sid)[-1]["kind"] == "reset"
+    t = client.get(f"/api/transcript/{sid}", headers=h, params={"from_restart": "true"}).json()
+    assert t["restart"]["id"] == note["id"]  # still the same fresh start
+
+
+def test_the_class_reset_restarts_the_students_on_that_step(client, teacher):
+    """"Everyone back to step X" also sends back the students who are on X (an
+    output the teacher returned there no longer counts); students before X stay."""
+    _release(client, teacher, 4)
+    try:
+        h1, sid1 = _course_student(client, "PCE-CR1", "course-cr")
+        h2, sid2 = _course_student(client, "PCE-CR2", "course-cr")
+        h3, sid3 = _course_student(client, "PCE-CR3", "course-cr")
+        # 1: on A1 with an output the teacher sent back; 2: on B1; 3: on A1, nothing done.
+        assert _finish(client, h1, sid1, 1, "wrong")["status"] == "missing"
+        with db.conn() as c:
+            c.execute("UPDATE step_checks SET status = 'returned' WHERE session_id = ?", (sid1,))
+        _finish(client, h2, sid2, 1, GOOD)
+        _finish(client, h2, sid2, 2)
+
+        r = client.post(f"/api/exercises/{LAB}/reset", headers=teacher, json={"course_id": "course-cr", "step": 1})
+        assert r.status_code == 200 and r.json()["moved"] == 3
+        assert _checks(sid1) == [(1, "reset")]
+        for h, sid in ((h1, sid1), (h2, sid2), (h3, sid3)):
+            assert _state(client, h, sid)["current"] == 1
+            assert _server_notes(client, h, sid)[-1]["kind"] == "restart"
+
+        # Back to A2: only the student at A2 or later moves (none now but 2 after finishing A1).
+        _finish(client, h2, sid2, 1, GOOD)
+        r = client.post(f"/api/exercises/{LAB}/reset", headers=teacher, json={"course_id": "course-cr", "step": 2})
+        assert r.json()["moved"] == 1
+        assert [_state(client, h, sid)["current"] for h, sid in ((h1, sid1), (h2, sid2), (h3, sid3))] == [1, 2, 1]
+        assert _server_notes(client, h2, sid2)[-1]["kind"] == "reset"
+    finally:
+        _release(client, teacher, 2)

@@ -299,7 +299,13 @@ is a class-paced lab.
   target are opened for that student even beyond what the class has open), or
   to the step they are on (it starts over). Their chat is interrupted: it stops
   waiting for a paste or a button answer, says "Your lecturer paused you" and why, and shows the step. *Everyone back to step…* does the same
-  backwards for the whole course. The API is `POST /api/sessions/{id}/move`
+  backwards for the whole course: students past the step go back to it, and
+  students on it start it over (students before it stay).
+  Back to the **first step** is a fresh start: the student's chat starts clean
+  (the welcome and the first step, as for a new student), the earlier chat is
+  kept and opens with a *📂 Earlier chat* button, questions from before it are
+  no longer listed to the student, and the tutor's memory starts there too.
+  You still see the whole conversation in the dashboard. The API is `POST /api/sessions/{id}/move`
   (`{"step": n}`), and `POST /api/sessions/{id}/reset` / `POST
   /api/exercises/{id}/reset` (`{"step": n, "course_id": ...}`) for going back;
   they work for any step-by-step lab.
@@ -320,8 +326,9 @@ session back, sees the whole conversation replayed, and carries on from the
 same step (a step already on screen only gets its *Done* button again). The
 server's own notes to a student, such as a reset, reach an open chat through
 the same transcript. Any client can use it: `GET /api/transcript/{session_id}`
-(`?after=<id>`, `?origin=server`) and `POST` to append; teachers can read any
-session's transcript.
+(`?after=<id>`, `?origin=server`, `?from_restart=true` for what came after the
+latest fresh start, `?before=<id>` for the earlier chat) and `POST` to append;
+teachers can read any session's transcript.
 
 | Setting | Where | Default |
 |---|---|---|

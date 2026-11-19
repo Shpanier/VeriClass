@@ -240,10 +240,16 @@ def _client_id() -> str:
     return cid
 
 
-async def _transcript(after: int = 0, others_only: bool = False):
+async def _transcript(after: int = 0, others_only: bool = False, from_restart: bool = False,
+                      before: int = None):
     """GET the transcript (entries after id `after`; others_only: not what this
-    chat wrote). None when it can't be read."""
+    chat wrote; from_restart: only since the latest fresh start; before: only
+    the entries before that id). None when it can't be read."""
     params = {"after": after, **({"exclude_client": _client_id()} if others_only else {})}
+    if from_restart:
+        params["from_restart"] = "true"
+    if before is not None:
+        params["before"] = before
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(f"{BACKEND}/api/transcript/{cl.user_session.get('session_id')}",
@@ -256,15 +262,27 @@ async def _transcript(after: int = 0, others_only: bool = False):
     return None
 
 
+def _earlier_button(restart_id: int) -> cl.Action:
+    """Opens the conversation from before a fresh start."""
+    return cl.Action(name="earlier_chat", payload={"before": restart_id}, label=_t("earlier_button"))
+
+
 async def _replay() -> list[dict]:
-    """Show the session's earlier conversation. Returns its entries ([] = a new session)."""
-    t = await _transcript()
+    """Show the session's earlier conversation. Returns its entries ([] = a new
+    session, or a fresh start with nothing after it yet). After a fresh start
+    (the lecturer sent the student back to the first step) only what came after
+    it, under the lecturer's note and a button that opens the earlier chat."""
+    t = await _transcript(from_restart=True)
     if not t or not t.get("enabled"):
         cl.user_session.set("history", bool(t and t.get("enabled")))
         return []
     cl.user_session.set("history", True)
     cl.user_session.set("seen", t.get("last_id") or 0)
     entries = t.get("entries") or []
+    restart = t.get("restart")
+    if restart:
+        actions = [_earlier_button(restart["id"])] if t.get("earlier") else []
+        await cl.Message(content=restart["content"], actions=actions).send()
     if not entries:
         return []
     if t.get("truncated"):
@@ -286,7 +304,7 @@ async def _sync_others() -> None:
     t = await _transcript(after=cl.user_session.get("seen") or 0, others_only=True)
     for e in (t or {}).get("entries") or []:
         cl.user_session.set("seen", e["id"])
-        if e["author"] != "student" and e["kind"] == "reset":
+        if e["author"] != "student" and e["kind"] in ("reset", "restart"):
             # The teacher moved the student (back, forward, or the same step over):
             # stop whatever the chat was waiting for. The note says so.
             cl.user_session.set("awaiting_output", None)
@@ -300,11 +318,19 @@ async def _sync_others() -> None:
             # The teacher sent the step's output back: paste again from here.
             cl.user_session.set("in_review", None)
             await cl.Message(content=e["content"], actions=[_paste_again(e["step"])]).send()
+        elif e["kind"] == "restart":
+            # Back to the first step: the lab starts over, as for a new student.
+            await cl.Message(content=e["content"] + "\n\n" + _t("restart_reload"),
+                             actions=[_earlier_button(e["id"])]).send()
         else:
             await cl.Message(content=e["content"]).send()
-        if e["kind"] == "reset":
+        if e["kind"] in ("reset", "restart"):
             _forget_shown()
             cl.user_session.set("reset_shown", True)
+        if e["kind"] == "restart" and cl.user_session.get("exercise"):
+            # (Recorded as this chat's own entry: the next poll leaves it out.)
+            await _send_briefing(cl.user_session.get("exercise"), cl.user_session.get("variant"),
+                                 cl.user_session.get("mode"), bool(cl.user_session.get("paced")))
 
 
 async def _open_questions() -> None:
@@ -326,7 +352,7 @@ def _since_reset(entries: list[dict]) -> list[dict]:
     """The entries after the last time the teacher moved the student."""
     since = entries
     for i, e in enumerate(entries):
-        if e["kind"] == "reset":
+        if e["kind"] in ("reset", "restart"):
             since = entries[i + 1:]
     return since
 
@@ -533,6 +559,9 @@ async def on_chat_start():
     paced = exercise.get("pacing") == "class"
     cl.user_session.set("token", token)
     cl.user_session.set("session_id", sess["session_id"])
+    # For a fresh start while the chat is open (the briefing is shown again).
+    cl.user_session.set("exercise", exercise)
+    cl.user_session.set("variant", sess["variant"])
     cl.user_session.set("mode", sess["mode"])
     cl.user_session.set("paced", paced)
     # One thing at a time: the poller and the "done" button both ask questions.
@@ -629,6 +658,25 @@ async def _send_briefing(exercise: dict, variant_id: str, mode: str, paced: bool
         for s in exercise.get("welcome_suggestions", [])
     ]
     await _say("\n\n".join(parts), kind="brief", actions=actions)
+
+
+@cl.action_callback("earlier_chat")
+async def on_earlier_chat(action: cl.Action):
+    """The conversation from before a fresh start, shown on demand (not recorded)."""
+    t = await _transcript(before=int(action.payload.get("before") or 0))
+    entries = (t or {}).get("entries") or []
+    if not entries:
+        await cl.Message(content=_t("earlier_none")).send()
+        return
+    await cl.Message(content=_t("earlier_head")).send()
+    if t.get("truncated"):
+        await cl.Message(content=_t("older_hidden")).send()
+    for e in entries:
+        if e["author"] == "student":
+            await cl.Message(content=e["content"], author="student", type="user_message").send()
+        else:
+            await cl.Message(content=e["content"]).send()
+    await cl.Message(content=_t("earlier_end")).send()
 
 
 @cl.action_callback("suggest")
