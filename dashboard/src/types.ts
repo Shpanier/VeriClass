@@ -732,3 +732,43 @@ export interface TranscriptResponse {
   truncated: boolean;
   last_id: number;
 }
+
+// ---- the lecturer's notifications (GET /api/notifications) ----
+
+export type NotificationKind = "question" | "step" | "answer" | "reply" | "submission" | "chat";
+
+export interface NotificationItem {
+  /** "<kind>:<row id>", unique across kinds. */
+  key: string;
+  kind: NotificationKind;
+  id: number;
+  session_id: string;
+  username: string;
+  exercise_id: string;
+  course_id: string | null;
+  text: string;
+  step: number | null;
+  step_label: string | null;
+  created_at: string;
+  /** Still waits for the lecturer (a question, a step, a quiz answer). */
+  waiting: boolean;
+}
+
+export interface NotificationFeed {
+  /** The server's clock: the next call's `since`. */
+  now: string;
+  seen_at: string | null;
+  kinds: NotificationKind[];
+  sound: boolean;
+  items: NotificationItem[];
+  /** Keys of every item in the window that still waits for the lecturer. */
+  waiting: string[];
+}
+
+export interface NotificationConfig {
+  kinds: NotificationKind[];
+  all_kinds: NotificationKind[];
+  default_kinds: NotificationKind[];
+  sound: boolean;
+  hours: number;
+}

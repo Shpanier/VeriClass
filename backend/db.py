@@ -386,6 +386,20 @@ CREATE INDEX IF NOT EXISTS idx_review_answers_review ON review_answers(review_id
 CREATE INDEX IF NOT EXISTS idx_proctor_session ON proctor_events(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_terminal_session ON terminal_commands(session_id, id);
 CREATE INDEX IF NOT EXISTS idx_pastes_session ON pastes(session_id, id);
+
+-- The lecturer's notifications (backend/notifications.py) read these by time.
+CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_pending_reviews_created ON pending_reviews(created_at);
+CREATE INDEX IF NOT EXISTS idx_step_checks_created ON step_checks(created_at);
+CREATE INDEX IF NOT EXISTS idx_probes_answered ON probes(answered_at);
+CREATE INDEX IF NOT EXISTS idx_submissions_created ON submissions(created_at);
+
+-- Each lecturer's "seen up to" for the dashboard's bell (backend/notifications.py).
+-- No foreign key: deleting an account must not depend on it.
+CREATE TABLE IF NOT EXISTS notification_seen (
+    user_id  INTEGER PRIMARY KEY,
+    seen_at  TEXT NOT NULL
+);
 """
 
 

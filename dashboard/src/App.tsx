@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, auth, setUnauthorizedHandler, setupStatus, type Settings } from "./api";
-import type { ExerciseSummary, FullExercise, PendingReview, Student } from "./types";
+import type { ExerciseSummary, FullExercise, NotificationItem, PendingReview, Student } from "./types";
 import { ExerciseHeader } from "./components/ExerciseHeader";
 import { StudentGrid, type StudentHandlers } from "./components/StudentGrid";
 import { AskThemModal } from "./components/AskThemModal";
@@ -27,6 +27,9 @@ import { markShared, Onboarding } from "./app/Onboarding";
 import { SettingsModal } from "./app/SettingsModal";
 import { ShareModal } from "./app/ShareModal";
 import { ConnectionBanner, Topbar, type Tab } from "./app/Topbar";
+import { useNotifications } from "./app/useNotifications";
+import { NotificationBell, NotificationPopups } from "./app/Notifications";
+import { exerciseTitle } from "./lib/exerciseOrder";
 
 // The exercise the live view follows, remembered across reloads.
 const LIVE_KEY = "vericlass.liveExercise";
@@ -76,11 +79,11 @@ export function App() {
 }
 
 function Dashboard({ onSignOut }: { onSignOut: () => void }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const toast = useToast();
   const [tab, setTab] = useState<Tab>("monitor");
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState<false | true | "notifications">(false);
   const [showShare, setShowShare] = useState(false);
   const [exerciseList, setExerciseList] = useState<ExerciseSummary[]>([]);
   const [exercisesLoaded, setExercisesLoaded] = useState(false);
@@ -163,10 +166,9 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
     [students, liveId],
   );
 
-  // Browsers block audio until a user gesture; unlock the alert tone on the
-  // teacher's first interaction with the page. (Exam alerts: IDE plugin only.)
+  // Browsers block audio until a user gesture; unlock the notification chime
+  // and the exam alert tone on the teacher's first interaction with the page.
   useEffect(() => {
-    if (!plugin) return;
     const prime = () => primeAudio();
     window.addEventListener("pointerdown", prime, { once: true });
     window.addEventListener("keydown", prime, { once: true });
@@ -174,7 +176,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       window.removeEventListener("pointerdown", prime);
       window.removeEventListener("keydown", prime);
     };
-  }, [plugin]);
+  }, []);
 
   // Sound the alarm when any student's alert count (leaving the IDE, a refused
   // terminal command, another panel/window, a paste from outside) rises between
@@ -244,6 +246,52 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   };
   const classPaced = !!liveId && liveExercise?.exercise_id === liveId && liveExercise.pacing === "class";
 
+  // What students send the lecturer: pop-ups and the bell (backend/notifications.py).
+  const notify = useNotifications();
+  const titleOf = (id: string) => {
+    const ex = exerciseList.find((e) => e.exercise_id === id);
+    return ex ? exerciseTitle(ex, lang) : id;
+  };
+  // A notification about something waiting is opened where it waits (the review
+  // queue, the steps to check, the answers to decide), on its exercise's page;
+  // anything else, or something already handled, opens the student's chat.
+  const [focus, setFocus] = useState<{ n: NotificationItem; at: number } | null>(null);
+  const openNotification = (n: NotificationItem) => {
+    const who: Student = {
+      session_id: n.session_id, username: n.username, exercise: n.exercise_id, variant: "", mode: "mentor",
+      started_at: n.created_at, last_active_at: n.created_at, probe_count: 0,
+      focus_alerts: 0, last_focus_kind: null, last_focus_at: null, away: false,
+    };
+    if (n.kind === "submission" && plugin) { handlers.onViewSubmissions(who); return; }
+    if (!notify.isWaiting(n)) { handlers.onViewChat(who); return; }
+    setTab("monitor");
+    if (liveId !== n.exercise_id) { setLiveExercise(null); setLiveId(n.exercise_id); }
+    setFocus({ n, at: Date.now() });
+  };
+
+  // Bring what a notification points at into view, once its exercise's page has drawn it.
+  useEffect(() => {
+    if (!focus) return;
+    const { n } = focus;
+    const exact = [`[data-notify-key="${n.key}"]`,
+      `[data-notify-section="${n.kind}"] [data-notify-session="${n.session_id}"]`];
+    const section = `[data-notify-section="${n.kind}"]`;
+    let tries = 0;
+    let flashOff = 0;
+    const id = window.setInterval(() => {
+      tries += 1;
+      const el = exact.map((s) => document.querySelector<HTMLElement>(s)).find(Boolean)
+        ?? (tries > 15 ? document.querySelector<HTMLElement>(section) : null);
+      if (!el && tries < 40) return;
+      window.clearInterval(id);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("vc-notify-flash");
+      flashOff = window.setTimeout(() => el.classList.remove("vc-notify-flash"), 2400);
+    }, 200);
+    return () => { window.clearInterval(id); window.clearTimeout(flashOff); };
+  }, [focus]);
+
   const proctorTarget = find(proctorSessionId);
   const submissionsTarget = find(submissionsSessionId);
   const terminalTarget = find(terminalSessionId);
@@ -256,6 +304,8 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         <ConnectionBanner />
         <Topbar
           tab={tab} onTab={setTab} settings={settings} plugin={plugin}
+          bell={<NotificationBell feed={notify} exerciseTitle={titleOf} onOpen={openNotification}
+                                  onSettings={() => setShowSettings("notifications")} />}
           onShare={() => setShowShare(true)} onSettings={() => setShowSettings(true)}
           onVerify={() => setVerifying(true)} onSignOut={onSignOut}
         />
@@ -334,8 +384,11 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         )}
         {plugin && verifying && <VerifyTraceModal onClose={() => setVerifying(false)} />}
         {showSettings && settings && (
-          <SettingsModal settings={settings} onChanged={setSettings} onClose={() => setShowSettings(false)} />
+          <SettingsModal settings={settings} onChanged={setSettings} onClose={() => setShowSettings(false)}
+                         focus={showSettings === "notifications" ? "notifications" : undefined}
+                         onNotifyChanged={notify.refresh} />
         )}
+        <NotificationPopups feed={notify} exerciseTitle={titleOf} onOpen={openNotification} />
         {showShare && <ShareModal onClose={() => setShowShare(false)} onShared={markShared} />}
       </div>
     </FeaturesProvider>

@@ -16,6 +16,7 @@ import {
   type ConfirmOptions,
 } from "./ui";
 import { textDir } from "../lib/textDir";
+import { setTitleBadge } from "../lib/titleBadge";
 import { useFeatures } from "../app/features";
 import {
   attentionTone, ExamStatePill, StudentActions, StudentSignals, StudentTools, TutorMode, type StudentHandlers,
@@ -81,9 +82,8 @@ export function PacingPanel({ exerciseId, quizSlot, live = [], handlers, paramLa
 
   // "(2 ✍️) VeriClass": answers waiting for the lecturer show in the tab, on any tab of the browser.
   useEffect(() => {
-    const base = document.title.replace(/^\(\d+ ✍️\) /, "");
-    document.title = heldNow > 0 ? `(${heldNow} ✍️) ${base}` : base;
-    return () => { document.title = document.title.replace(/^\(\d+ ✍️\) /, ""); };
+    setTitleBadge("answers", heldNow > 0 ? `(${heldNow} ✍️)` : null);
+    return () => setTitleBadge("answers", null);
   }, [heldNow]);
 
   useEffect(() => {
@@ -397,7 +397,7 @@ function Review({ exerciseId, course, steps, onChange }: {
   };
 
   return (
-    <section className="vc-pacing-wait" aria-labelledby={headId}>
+    <section className="vc-pacing-wait" data-notify-section="step" aria-labelledby={headId}>
       <div className="vc-pacing-wait__head">
         <h3 id={headId} className="vc-pacing-wait__title"><Hourglass aria-hidden="true" />{t("pacingReview")}</h3>
         <span className="vc-badge vc-badge--solid-warning vc-badge--count">{items.length}</span>
@@ -407,7 +407,7 @@ function Review({ exerciseId, course, steps, onChange }: {
         const step = steps[w.step - 1];
         const working = busy === s.session_id;
         return (
-          <article key={s.session_id} className="vc-pacing-item">
+          <article key={s.session_id} className="vc-pacing-item" data-notify-session={s.session_id}>
             <div className="vc-pacing-item__head">
               <span className="vc-pacing-item__who">{s.username}</span>
               <span className="vc-pacing-item__step">{w.label}{step ? ` · ${step.title}` : ""}</span>
@@ -508,7 +508,7 @@ function AnswerReview({ exerciseId, courses, items, steps, onChange }: {
   };
 
   return (
-    <section className="vc-pacing-wait vc-pacing-wait--urgent" aria-labelledby={headId}>
+    <section className="vc-pacing-wait vc-pacing-wait--urgent" data-notify-section="answer" aria-labelledby={headId}>
       <div className="vc-pacing-wait__head">
         <h3 id={headId} className="vc-pacing-wait__title"><PenLine aria-hidden="true" />{t("pacingAnswerReview")}</h3>
         <span className="vc-badge vc-badge--solid-danger vc-badge--count">{held.length}</span>
@@ -524,7 +524,7 @@ function AnswerReview({ exerciseId, courses, items, steps, onChange }: {
         const working = busy === a.id;
         const source = sources[a.id] ?? "";
         return (
-          <article key={a.id} className="vc-pacing-item">
+          <article key={a.id} className="vc-pacing-item" data-notify-key={`answer:${a.id}`}>
             <div className="vc-pacing-item__head">
               <span className="vc-pacing-item__who">{s.username}</span>
               {many && <span className="vc-badge">{courseName(c, t)}</span>}

@@ -25,6 +25,7 @@ from backend.routes import (
     grade,
     login,
     mode,
+    notifications as notification_routes,
     pacing as pacing_routes,
     plugin,
     probes,
@@ -137,6 +138,7 @@ app.include_router(course_routes.router, prefix="/api")
 app.include_router(report_routes.router, prefix="/api")
 app.include_router(broadcast_routes.router, prefix="/api")
 app.include_router(setup_routes.router, prefix="/api")
+app.include_router(notification_routes.router, prefix="/api")
 
 
 @app.get("/healthz")

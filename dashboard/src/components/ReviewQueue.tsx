@@ -439,7 +439,7 @@ export function ReviewQueue({ exerciseId, onViewChat }: {
     const status = r.step ? STEP_STATUS[r.step.status] : null;
 
     return (
-      <article key={r.id} className="vc-review-card" aria-label={`${r.username}: ${plain(r.question).slice(0, 80)}`}>
+      <article key={r.id} className="vc-review-card" data-notify-key={`question:${r.id}`} aria-label={`${r.username}: ${plain(r.question).slice(0, 80)}`}>
         {/* Who asked, when, and whether they are still waiting; deleting the question. */}
         <header className="vc-review-card__head">
           <div className="vc-review-card__who">
@@ -644,7 +644,7 @@ export function ReviewQueue({ exerciseId, onViewChat }: {
   const best = cfg?.best_answer;
 
   return (
-    <section className="vc-card vc-review" data-on={enabled === true} aria-labelledby={titleId}>
+    <section className="vc-card vc-review" data-on={enabled === true} data-notify-section="question" aria-labelledby={titleId}>
       <div className="vc-review__head">
         <div className="vc-review__titles">
           <h2 className="vc-review__title" id={titleId}>

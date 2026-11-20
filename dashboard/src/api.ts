@@ -12,6 +12,9 @@ import type {
   GradeRecommendation,
   Lang,
   NewExercise,
+  NotificationConfig,
+  NotificationFeed,
+  NotificationKind,
   PackageResult,
   PacingOverview,
   PacingQuizItem,
@@ -467,6 +470,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ chosen, lang, ...(text === undefined ? {} : { text }), ...(options ?? {}) }),
     }),
+  // the lecturer's notifications: pop-ups and the bell (backend/notifications.py)
+  notifications: (since?: string) =>
+    j<NotificationFeed>(`/api/notifications${since ? `?since=${encodeURIComponent(since)}` : ""}`),
+  notificationsSeen: (at?: string) =>
+    j<{ seen_at: string }>("/api/notifications/seen", { method: "POST", body: JSON.stringify(at ? { at } : {}) }),
+  notificationConfig: () => j<NotificationConfig>("/api/notifications/config"),
+  setNotificationConfig: (change: { kinds?: NotificationKind[]; sound?: boolean }) =>
+    j<NotificationConfig>("/api/notifications/config", { method: "POST", body: JSON.stringify(change) }),
   // first run, settings, the students' link
   settings: () => j<Settings>("/api/settings"),
   testLlm: (provider: string, api_key?: string) =>

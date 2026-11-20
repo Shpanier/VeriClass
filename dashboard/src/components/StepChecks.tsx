@@ -62,7 +62,8 @@ export function StepChecks({ exerciseId }: { exerciseId: string | null }) {
   if (!loaded || (!hasSteps && allItems.length === 0)) return null;
 
   return (
-    <section className={`vc-card vc-pacing${items.length ? " vc-card--info" : ""}`} aria-labelledby={headId}>
+    <section className={`vc-card vc-pacing${items.length ? " vc-card--info" : ""}`} data-notify-section="step"
+             aria-labelledby={headId}>
       <div className="vc-pacing__head">
         <h2 id={headId} className="vc-pacing__title"><ListChecks aria-hidden="true" />{t("stepChecks")}</h2>
         {items.length > 0 && <span className="vc-badge vc-badge--solid-brand vc-badge--count">{items.length}</span>}
@@ -77,7 +78,7 @@ export function StepChecks({ exerciseId }: { exerciseId: string | null }) {
         const busy = busyId === c.id;
         const complete = c.questions != null && c.answered != null && c.answered >= c.questions;
         return (
-          <article key={c.id} className="vc-pacing-item">
+          <article key={c.id} className="vc-pacing-item" data-notify-key={`step:${c.id}`}>
             <div className="vc-pacing-item__head">
               <span className="vc-pacing-item__who">{c.username}</span>
               <span className="vc-pacing-item__step">{t("stepOf", { n: c.step, total: c.total })}: {c.title}</span>

@@ -1,0 +1,94 @@
+/* The lecturer's notifications: the bell in the top bar and its list, the
+   pop-ups in the corner of the page, and the settings' list of kinds
+   (app/Notifications.tsx). Built from tokens.css. */
+
+/* ---------- the bell ---------- */
+.vc-notify-bell__btn {
+  position: relative; display: inline-grid; place-items: center; width: 36px; height: 36px;
+  border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--c-text-2); cursor: pointer;
+}
+.vc-notify-bell__btn:hover { background: var(--c-surface-2); color: var(--c-text); }
+.vc-notify-bell__btn > svg { width: 20px; height: 20px; }
+.vc-notify-bell__btn[data-unread] { color: var(--c-brand); }
+.vc-notify-bell__btn[data-unread] > svg { animation: vc-notify-ring 1.2s ease-in-out 2; transform-origin: 50% 10%; }
+@keyframes vc-notify-ring {
+  0%, 100% { transform: rotate(0); } 15% { transform: rotate(14deg); } 30% { transform: rotate(-12deg); }
+  45% { transform: rotate(8deg); } 60% { transform: rotate(-6deg); } 75% { transform: rotate(2deg); }
+}
+.vc-notify-bell__count {
+  position: absolute; inset-block-start: 1px; inset-inline-end: 0; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 9px; background: var(--c-danger); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px;
+  text-align: center; box-shadow: 0 0 0 2px var(--c-surface);
+}
+
+.vc-notify-panel { width: min(420px, calc(100vw - 24px)); padding: 0; }
+.vc-notify-panel__head {
+  display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--c-border);
+}
+.vc-notify-panel__list { max-height: min(70vh, 560px); margin: 0; padding: 4px; overflow: auto; list-style: none; }
+.vc-notify-panel__empty { margin: 0; padding: 16px 14px; color: var(--c-text-3); font-size: var(--fs-sm); }
+
+/* ---------- one notification (a row of the list, or a pop-up) ---------- */
+.vc-notify { display: flex; align-items: flex-start; gap: 10px; min-width: 0; text-align: start; color: var(--c-text); }
+.vc-notify--row {
+  width: 100%; padding: 8px; border: 0; border-radius: var(--radius-sm); background: none; font: inherit; cursor: pointer;
+}
+.vc-notify--row:hover { background: var(--c-surface-2); }
+.vc-notify--row[data-waiting] { background: var(--c-warning-soft); }
+.vc-notify--row[data-waiting]:hover { filter: brightness(0.97); }
+.vc-notify__icon {
+  display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--c-brand-soft); color: var(--c-brand);
+}
+.vc-notify__icon > svg { width: 16px; height: 16px; }
+.vc-notify__icon[data-kind="step"], .vc-notify__icon[data-kind="answer"] { background: var(--c-warning-soft); color: var(--c-warning); }
+.vc-notify__icon[data-kind="submission"] { background: var(--c-success-soft); color: var(--c-success); }
+.vc-notify__body { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.vc-notify__title { font-size: var(--fs-sm); font-weight: 650; overflow-wrap: anywhere; }
+.vc-notify__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; font-size: var(--fs-xs); color: var(--c-text-3); }
+.vc-notify__waits { padding-block: 0; }
+.vc-notify__text {
+  font-size: var(--fs-sm); color: var(--c-text-2); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* ---------- the pop-ups (the corner opposite the page's own messages) ---------- */
+.vc-notify-popups {
+  position: fixed; z-index: 150; inset-block-end: 20px; inset-inline-start: 20px;
+  display: grid; gap: 8px; width: min(400px, calc(100vw - 32px));
+}
+.vc-notify--popup {
+  padding: 12px; border: 1px solid var(--c-border); border-inline-start: 4px solid var(--c-brand);
+  border-radius: var(--radius); background: var(--c-surface); box-shadow: var(--shadow-lg);
+  animation: vc-notify-in 0.22s ease-out;
+}
+.vc-notify--popup[data-waiting] { border-inline-start-color: var(--c-warning); }
+@keyframes vc-notify-in { from { opacity: 0; transform: translateY(10px) scale(0.98); } }
+.vc-notify__actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.vc-notify__close {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-sm);
+  background: none; color: var(--c-text-3); cursor: pointer;
+}
+.vc-notify__close:hover { background: var(--c-surface-2); color: var(--c-text); }
+.vc-notify__close > svg { width: 16px; height: 16px; }
+.vc-notify-popups__foot {
+  display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--radius);
+  background: var(--c-surface); box-shadow: var(--shadow-lg); font-size: var(--fs-xs); color: var(--c-text-2);
+}
+@media (max-width: 560px) {
+  .vc-notify-popups { inset-inline: 16px; inset-block-end: 16px; width: auto; }
+  .vc-notify--popup { flex-wrap: wrap; }
+  .vc-notify--popup .vc-notify__actions { width: 100%; justify-content: flex-end; }
+}
+
+/* What a notification opened: a short glow. */
+.vc-notify-flash { animation: vc-notify-flash 2.2s ease-out; }
+@keyframes vc-notify-flash {
+  0%, 30% { box-shadow: 0 0 0 3px var(--c-brand), 0 0 0 8px var(--c-brand-soft); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* ---------- the settings ---------- */
+.vc-notify-kinds { display: grid; gap: 6px; }
+.vc-notify-kinds__icon { display: inline-grid; vertical-align: -3px; margin-inline-end: 6px; color: var(--c-text-3); }
+.vc-notify-kinds__icon > svg { width: 16px; height: 16px; }

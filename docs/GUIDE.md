@@ -194,6 +194,39 @@ in the tutor agent (`backend/agents/tutor.py`). The drafts are grounded in the
 student's actual conversation (threaded in as memory), so they answer *this*
 student rather than repeating boilerplate.
 
+## Notifications: nothing a student sends is missed
+
+When a student sends you something, a notification pops up inside the dashboard
+(not a browser or system notification), on whatever tab or exercise you are
+looking at, with a short chime. The bell in the top bar counts the new ones and
+lists the last 12 hours; opening it marks them seen, and the browser tab's title
+shows the count too ("(3 🔔) VeriClass").
+
+| Kind | When | Open takes you to |
+|---|---|---|
+| Question | a question waits in the review queue (review mode) | the question in *Checking the tutor's answers*, on its exercise |
+| Step | a step answer or a pasted output waits for your check | the step to check, on its exercise |
+| Quiz answer | an answer to a question after a step waits for your decision | the answer under *Class pacing* |
+| Reply | a student answered your own question (*Ask them*) | the student's chat |
+| Submission | *Send to teacher* in the IDE plugin | the student's submissions |
+| Chat (off by default) | every message a student writes in the chat | the student's chat |
+
+A pop-up for something that waits for you (a question, a step, a quiz answer)
+stays until you handle it, wherever you handle it, or close it; when the
+dashboard is opened again, what still waits and wasn't seen pops up again. The
+others stay until you close them. Something already handled opens the
+student's chat instead.
+
+Settings (*Settings → Notifications*, or the bell's *Settings*): which kinds
+notify, and the sound. Stored in `system_settings` as `notify_kinds` (comma
+separated) and `notify_sound` (`on`/`off`); `GET/POST /api/notifications/config`.
+The feed is `GET /api/notifications?since=<the previous call's now>`
+(`backend/notifications.py`): it reads the rows VeriClass already keeps
+(`pending_reviews`, `step_checks`, `probes`, `submissions`, `messages`), so every
+client and every exercise is covered. Each lecturer's "seen up to" is in
+`notification_seen` (`POST /api/notifications/seen`). Browsers play the chime
+only after you clicked somewhere on the page.
+
 ## Courses, students and meetings
 
 Everything here is in the dashboard's **Courses & students** tab.

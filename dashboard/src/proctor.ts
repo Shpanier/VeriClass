@@ -50,6 +50,27 @@ export function alertBeep(): void {
   });
 }
 
+/** A soft rising two-note chime = "a student sent you something". Best-effort. */
+export function notifyChime(): void {
+  const ctx = ctxOrNull();
+  if (!ctx) return;
+  if (ctx.state === "suspended") void ctx.resume();
+  const now = ctx.currentTime;
+  [660, 990].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    const t = now + i * 0.14;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.36);
+  });
+}
+
 const LEAVE_KINDS = new Set(["focus_lost", "minimized", "fullscreen_exited", "other_app_in_front", "window_unmaximized", "ide_closed"]);
 
 export function isLeaveKind(kind: string | null): boolean {

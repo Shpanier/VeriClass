@@ -72,11 +72,13 @@ function AccountMenu({ settings, plugin, onSettings, onVerify, onSignOut }: {
   );
 }
 
-export function Topbar({ tab, onTab, settings, plugin, onShare, onSettings, onVerify, onSignOut }: {
+export function Topbar({ tab, onTab, settings, plugin, bell, onShare, onSettings, onVerify, onSignOut }: {
   tab: Tab;
   onTab: (t: Tab) => void;
   settings: Settings | null;
   plugin: boolean;
+  /** The notifications' bell (app/Notifications.tsx). */
+  bell?: React.ReactNode;
   onShare: () => void;
   onSettings: () => void;
   onVerify: () => void;
@@ -101,6 +103,7 @@ export function Topbar({ tab, onTab, settings, plugin, onShare, onSettings, onVe
           ))}
         </nav>
         <div className="vc-topbar__actions">
+          {bell}
           <TutorStatus settings={settings} onClick={onSettings} />
           <Button variant="primary" size="sm" icon={<Share2 />} onClick={onShare}>{t("shareBtn")}</Button>
           <LanguageToggle />

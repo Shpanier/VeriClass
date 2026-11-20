@@ -1,17 +1,27 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type ChatLanguage, type Settings } from "../api";
 import { useLang } from "../i18n";
 import { Button, FormField, Modal, Notice, Select, useToast } from "../components/ui";
 import { TutorForm } from "./TutorForm";
+import { NotificationSettings } from "./Notifications";
 
 /** The AI tutor's key, the student chat's language, and where this
  *  installation keeps its files. */
-export function SettingsModal({ settings, onChanged, onClose }: {
+export function SettingsModal({ settings, onChanged, onClose, focus, onNotifyChanged }: {
   settings: Settings;
   onChanged: (s: Settings) => void;
   onClose: () => void;
+  /** Open on this section (from the bell's "Settings"). */
+  focus?: "notifications";
+  onNotifyChanged?: () => void;
 }) {
   const { t } = useLang();
+  const notifyBox = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (focus !== "notifications") return;
+    const id = window.requestAnimationFrame(() => notifyBox.current?.scrollIntoView({ block: "start" }));
+    return () => window.cancelAnimationFrame(id);
+  }, [focus]);
   const toast = useToast();
   const [lang, setLang] = useState<ChatLanguage>(settings.chat_language);
   const { llm } = settings;
@@ -62,6 +72,11 @@ export function SettingsModal({ settings, onChanged, onClose }: {
             <option value="en">{t("setLangEn")}</option>
           </Select>
         </FormField>
+      </section>
+
+      <hr className="vc-divider" />
+      <section className="vc-section" ref={notifyBox}>
+        <NotificationSettings onChanged={() => onNotifyChanged?.()} />
       </section>
 
       <hr className="vc-divider" />
